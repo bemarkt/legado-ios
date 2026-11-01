@@ -489,23 +489,45 @@ private struct RSSPhotoToolbar: ViewModifier {
     let close: () -> Void
 
     func body(content: Content) -> some View {
+        // `sharedBackgroundVisibility` 是 iOS 26 / Xcode 26 SDK 才提供的 API。
+        // 只用 `if #available(iOS 26.0, *)` 保护不够：`#available` 只是运行时判定，
+        // 编译器仍会对该分支做类型检查，而旧 SDK（CI 的 Xcode 16.4 / iOS 18.5）里
+        // 这个符号根本不存在，于是报
+        //   value of type 'ToolbarItem<(), some View>' has no member 'sharedBackgroundVisibility'
+        // 以及连带的 cannot infer contextual base in reference to member 'hidden'。
+        // 因此再套一层编译期条件（Xcode 26 起是 Swift 6.2）：旧工具链走不带该 API 的分支，
+        // 新工具链保留 iOS 26 上的原有外观，两套 SDK 都能编译。
+        #if compiler(>=6.2)
         if #available(iOS 26.0, *) {
             content.toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button("保存到照片", systemImage: "square.and.arrow.down", action: save).disabled(!canSave)
-                }.sharedBackgroundVisibility(.hidden)
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("完成", action: close).buttonStyle(.plain)
-                }.sharedBackgroundVisibility(.hidden)
+                ToolbarItem(placement: .primaryAction) { saveButton }
+                    .sharedBackgroundVisibility(.hidden)
+                ToolbarItem(placement: .confirmationAction) { closeButton.buttonStyle(.plain) }
+                    .sharedBackgroundVisibility(.hidden)
             }
         } else {
-            content.toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button("保存到照片", systemImage: "square.and.arrow.down", action: save).disabled(!canSave)
-                }
-                ToolbarItem(placement: .confirmationAction) { Button("完成", action: close) }
-            }
+            legacyToolbar(content)
         }
+        #else
+        legacyToolbar(content)
+        #endif
+    }
+
+    /// iOS 26 之前的工具栏：没有 `sharedBackgroundVisibility`，按钮也不走 `.plain` 样式。
+    private func legacyToolbar(_ content: Content) -> some View {
+        content.toolbar {
+            ToolbarItem(placement: .primaryAction) { saveButton }
+            ToolbarItem(placement: .confirmationAction) { closeButton }
+        }
+    }
+
+    private var saveButton: some View {
+        Button("保存到照片", systemImage: "square.and.arrow.down", action: save)
+            .disabled(!canSave)
+    }
+
+    private var closeButton: some View {
+        Button("完成", action: close)
     }
 }
 

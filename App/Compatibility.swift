@@ -321,6 +321,16 @@ extension View {
             scrollContentBackground(.hidden)
         } else {
             background(ReadingUIKitConfiguration { controller in
+                // 嵌套函数不继承外层闭包的 actor 隔离：外层的 configure 闭包是在 View body
+                // （@MainActor）里形成的，所以闭包体本身可以访问 UIKit；但声明在闭包体内的
+                // clearTables 默认是 nonisolated，于是它碰 UIView 的 MainActor 属性即报错。
+                // Xcode 16.4 / Swift 6 实测（CI）：
+                //   main actor-isolated property 'backgroundColor' can not be mutated from a nonisolated context
+                //   main actor-isolated property 'subviews' can not be referenced from a nonisolated context
+                //   note: add '@MainActor' to make local function 'clearTables(in:)' part of global actor 'MainActor'
+                // 所以只给这个嵌套函数标注隔离，不动闭包类型与 init 签名——
+                // 同文件其余几处同样的 configure 闭包都能编译，说明闭包体隔离本身是对的。
+                @MainActor
                 func clearTables(in view: UIView) {
                     if let table = view as? UITableView { table.backgroundColor = .clear }
                     for child in view.subviews { clearTables(in: child) }

@@ -173,6 +173,17 @@ public struct BookSourceDebugger: Sendable {
         diagnostics: [RuleDiagnostic],
         started: TimeInterval
     ) -> SourceDebugStep {
+        // 失败阶段必须至少带一条诊断：否则 UI 只能显示「该阶段没有规则诊断」，
+        // 用户无法判断是网络被拦、规则没命中，还是服务没返回内容。
+        var diagnostics = diagnostics
+        if !hasOutput, diagnostics.isEmpty {
+            diagnostics.append(.init(
+                severity: .error,
+                code: "debug.no_output",
+                message: "\(stage.title)阶段没有产出任何内容：\(summary)",
+                rule: ""
+            ))
+        }
         let containsError = diagnostics.contains { $0.severity == .error }
         let status: SourceDebugStatus = if !hasOutput {
             .failed

@@ -203,6 +203,18 @@ public struct NetworkBookService: Sendable {
                 pageContext.baseURL = document.baseURL
                 let list = await evaluate(listRule, in: document, listMode: true, context: pageContext)
                 diagnostics += list.diagnostics
+                // 与搜索阶段一致：列表命中为空时把页面里真实存在的 class 列出来。
+                // 目录最常见的故障不是「规则写错」，而是「页面换了」——比如详情
+                // URL 从桌面站变成 m 站后，`#allCatalog>.catalog-volume` 这类桌面
+                // 结构在新页面里根本不存在，只报 toc.empty 无法区分这两种原因。
+                if list.listItems(rule: listRule).isEmpty,
+                   let hints = BookSearchService.cssClassHints(in: document.value.stringValue) {
+                    diagnostics.append(diagnostic(
+                        code: "toc.empty_hint",
+                        message: "页面里真实存在的 class（前 24 个）：\(hints)（目录页：\(canonicalURL)）",
+                        rule: listRule
+                    ))
+                }
                 pageContext.variables = list.variables
                 for item in list.listItems(rule: listRule) {
                     try Task.checkCancellation()

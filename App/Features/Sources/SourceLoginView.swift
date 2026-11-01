@@ -22,6 +22,7 @@ struct SourceLoginView: View {
             if let request = loginRequest {
                 SourceLoginWebView(
                     request: request,
+                    source: source,
                     sourceURL: source.bookSourceUrl,
                     sourceID: source.id,
                     loginCheckJavaScript: source.loginCheckJs,
@@ -62,6 +63,8 @@ struct SourceLoginView: View {
 
 private struct SourceLoginWebView: UIViewRepresentable {
     let request: URLRequest
+    /// 登录检测脚本要在书源 JS 环境里执行（需要 source 上下文），因此整个书源一并传入。
+    let source: BookSource
     let sourceURL: String
     let sourceID: String
     let loginCheckJavaScript: String?
@@ -111,16 +114,57 @@ private struct SourceLoginWebView: UIViewRepresentable {
                 return
             }
             parent.isChecking = true
-            webView.evaluateJavaScript(script) { [weak self] value, error in
+            // 关键修正：`loginCheckJs` 不能直接丢进网页的 JS 环境。
+            // 书源的检测脚本按 Legado 语义写成 `String(result.body())`，并会调用
+            // `java.toast(...)`；直接 evaluateJavaScript 时那里既没有 `result`
+            // 也没有 `java`，于是只报出 WKWebView 的通用文案
+            // "A JavaScript exception occurred"，看不出真正原因。
+            // 正确做法是取回页面 HTML，交给书源 JS 引擎执行，
+            // 并把 `result` 绑定成带 body() 的响应对象。
+            webView.evaluateJavaScript("document.documentElement.outerHTML") { [weak self] value, error in
                 guard let self else { return }
+                let html = (value as? String) ?? ""
+                if let error {
+                    DispatchQueue.main.async {
+                        self.parent.isChecking = false
+                        self.parent.status = "登录页内容读取失败：\(error.localizedDescription)"
+                    }
+                    return
+                }
+                // 同步执行：登录检测脚本只是几条正则 + toast，耗时极短；
+                // 放到后台队列会引入跨线程访问 @Binding 的并发问题，得不偿失。
+                let outcome = Self.runLoginCheck(script: script, html: html, source: self.parent.source)
                 DispatchQueue.main.async {
                     self.parent.isChecking = false
-                    if let error {
+                    switch outcome {
+                    case .success(let passed):
+                        self.parent.status = passed ? "书源登录检测已通过" : "页面已载入，尚未检测到登录状态"
+                    case .failure(let error):
                         self.parent.status = "登录检测脚本失败：\(error.localizedDescription)"
-                    } else {
-                        self.parent.status = Self.truthy(value) ? "书源登录检测已通过" : "页面已载入，尚未检测到登录状态"
                     }
                 }
+            }
+        }
+
+        private static func runLoginCheck(
+            script: String,
+            html: String,
+            source: BookSource
+        ) -> Result<Bool, Error> {
+            do {
+                let context = RuleExecutionContext(
+                    baseURL: source.bookSourceUrl,
+                    source: source,
+                    responseBody: html
+                )
+                let evaluated = try JavaScriptRuleEvaluator().evaluate(
+                    script: script,
+                    result: .string(html),
+                    executionContext: context
+                )
+                return .success(truthy(evaluated.value))
+            } catch {
+                return .failure(error)
             }
         }
 
@@ -166,11 +210,23 @@ private struct SourceLoginWebView: UIViewRepresentable {
             }
         }
 
-        private static func truthy(_ value: Any?) -> Bool {
-            if let value = value as? Bool { return value }
-            if let value = value as? NSNumber { return value.boolValue }
-            guard let text = value.map(String.init(describing:))?.lowercased() else { return false }
-            return !text.isEmpty && !["false", "0", "null", "undefined"].contains(text)
+        /// 与 Legado 的判定保持一致：只有明确的假值才算未登录。
+        /// 这条书源的检测脚本最后一句就是 `result;`（返回响应对象本身），
+        /// 若把对象当成假值会永远报「未检测到登录状态」，与真实行为相反。
+        private static func truthy(_ value: JSONValue) -> Bool {
+            switch value {
+            case .bool(let flag):
+                return flag
+            case .number(let number):
+                return number != 0
+            case .string(let text):
+                let lower = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                return !lower.isEmpty && !["false", "0", "null", "undefined"].contains(lower)
+            case .null:
+                return false
+            case .object, .array:
+                return true
+            }
         }
     }
 }

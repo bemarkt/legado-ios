@@ -662,16 +662,29 @@ public actor SourceNetworkPolicy {
             }
         }
         if prepared.useWebView || prepared.webJavaScript != nil {
-            guard let executor = webViewExecutor ?? SourceWebViewExecutorRegistry.shared.executor() else {
-                throw RuleEngineError.unsupportedRule(rule: prepared.ruleURL, feature: "后台 WKWebView 请求")
+            // 书源生态里 `webView:true` 是常态写法（反爬页、前端渲染页），书源是给
+            // Android 版阅读写的——那边永远有 WebView。iOS 端缺执行器时直接抛
+            // `unsupportedRule` 等于把整条书源判死，而多数站点的原始 HTML 仍带
+            // 服务端渲染的数据，退回普通 HTTP 的收益远大于直接失败。
+            // 真需要渲染的站点会以「规则命中为空 + search.empty_list / toc.empty」
+            // 的形式暴露，比一条看不出原因的 rule.unsupported 更容易定位。
+            if let executor = webViewExecutor ?? SourceWebViewExecutorRegistry.shared.executor() {
+                return try await executeWebView(
+                    prepared,
+                    source: source,
+                    executor: executor,
+                    timeout: timeout,
+                    snapshotRecorder: snapshotRecorder,
+                    snapshotStage: snapshotStage
+                )
             }
-            return try await executeWebView(
-                prepared,
-                source: source,
-                executor: executor,
-                timeout: timeout,
-                snapshotRecorder: snapshotRecorder,
-                snapshotStage: snapshotStage
+            DiagnosticLog.shared.network(
+                prepared.urlRequest(timeout: timeout, handleCookies: false),
+                error: RuleEngineError.unsupportedRule(
+                    rule: prepared.ruleURL,
+                    feature: "后台 WKWebView 执行器未注册，已降级为普通 HTTP 请求"
+                ),
+                startedAt: Date()
             )
         }
         var request = prepared.urlRequest(timeout: timeout, handleCookies: false)

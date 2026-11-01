@@ -263,6 +263,30 @@ public struct BookSearchService: Sendable {
             }
             let root = response.decodedJSON
             let body = response.decodedText
+            // webView / webJs 只作为「解析为空」时的上下文，不单独产生诊断。
+            //
+            // 搜索成功时书源调试必须保持零诊断（BookSearchServiceTests 对此有断言）：
+            // 无条件挂 warning 会把 306 条正常用例里的一条打成回归。而这条信息只在
+            // 失败时才有诊断价值——「返回 200 但解析为空」十次有八次就是这里被
+            // webView 选项换掉了执行路径，所以拼进 search.empty_list 的 message。
+            //
+            // 执行器是否真的可用必须单独判一次：SourceNetworkPolicy 在缺执行器时
+            // 已降级为普通 HTTP，此时 prepared.useWebView 仍为 true，直接写
+            // 「经 WKWebView 渲染后解析」就是一条假日志——用户会据此去查渲染问题，
+            // 而真正的原因是「本端没有执行器，拿的是原始 HTML」。
+            let webViewAvailable = webViewExecutor != nil
+                || SourceWebViewExecutorRegistry.shared.executor() != nil
+            var executionNotes: [String] = []
+            if prepared.useWebView {
+                executionNotes.append(webViewAvailable
+                    ? "请求经 WKWebView 渲染后解析"
+                    : "书源声明 webView，但本端未注册执行器，已降级为普通 HTTP（拿到的是原始 HTML）")
+            }
+            if let webJs = prepared.webJavaScript, !webJs.isEmpty {
+                executionNotes.append("webJs 注入 \(webJs.count) 字符"
+                    + (webViewAvailable ? "" : "，未执行"))
+            }
+            var diagnostics: [RuleDiagnostic] = []
             let listEvaluation = if let root {
                 await engine.evaluate(
                     listRule.trimmingListPrefix,
@@ -279,9 +303,30 @@ public struct BookSearchService: Sendable {
                     context: .init(variables: response.requestVariables, key: keyword, page: page, source: source)
                 )
             }
-            var diagnostics = listEvaluation.diagnostics
+            diagnostics += listEvaluation.diagnostics
+            let listItems = listEvaluation.listItems(rule: listRule.trimmingListPrefix)
+            if listItems.isEmpty, !diagnostics.contains(where: { $0.severity == .error }) {
+                diagnostics.append(.init(
+                    severity: .error,
+                    code: "search.empty_list",
+                    message: "列表规则未命中任何节点：\(prepared.method.rawValue) \(response.finalURL.absoluteString) → HTTP \(response.statusCode)，正文 \(body.count) 字符，开头：\(String(body.prefix(120)).replacingOccurrences(of: "\n", with: " "))…，列表规则 \(listRule)\(executionNotes.isEmpty ? "" : "；执行路径：" + executionNotes.joined(separator: "，"))",
+                    rule: listRule
+                ))
+                // 空列表最常见的原因是选择器写错：少个前导点、少一个下划线、
+                // class 名被前端改名。只报「没命中」，用户无法区分「页面结构变了」
+                // 和「自己少打一个字符」。这里把页面里真实存在的 class 列出来，
+                // 把「猜选择器」变成「对照选择器」。
+                if let hints = Self.cssClassHints(in: body) {
+                    diagnostics.append(.init(
+                        severity: .warning,
+                        code: "search.empty_list_hint",
+                        message: "页面里真实存在的 class（前 24 个）：\(hints)",
+                        rule: listRule
+                    ))
+                }
+            }
             var books: [SearchBook] = []
-            for item in listEvaluation.listItems(rule: listRule.trimmingListPrefix) {
+            for item in listItems {
                 try Task.checkCancellation()
                 let fields = await evaluateFields(
                     rules,
@@ -313,6 +358,14 @@ public struct BookSearchService: Sendable {
                 book.originOrder = source.customOrder
                 book.variables = fields.variables
                 books.append(book)
+            }
+            if books.isEmpty, !listItems.isEmpty, !diagnostics.contains(where: { $0.severity == .error }) {
+                diagnostics.append(.init(
+                    severity: .error,
+                    code: "search.empty_name",
+                    message: "列表命中 \(listItems.count) 个节点，但书名规则没有取到值：\(rules.name ?? "未配置")",
+                    rule: rules.name ?? listRule
+                ))
             }
             if listRule.hasPrefix("-") { books.reverse() }
             var seenURLs = Set<String>()
@@ -390,6 +443,30 @@ public struct BookSearchService: Sendable {
 
     private func resolve(_ value: String, against baseURL: URL) -> String {
         LegadoURLBuilder.resolve(value, against: baseURL)
+    }
+
+    /// 从响应正文里抽取真实存在的 class 名，用于对照列表规则。
+    ///
+    /// CSS 选择器没命中时，引擎侧只能知道「0 节点」；但用户真正需要的是
+    /// 「页面里到底有什么」。把 class 值原样列出来（含 CSS Modules 的 hash 名），
+    /// 一眼就能看出是拼错还是站点改版。
+    static func cssClassHints(in html: String, limit: Int = 24) -> String? {
+        guard let expression = try? NSRegularExpression(pattern: #"class\s*=\s*"([^"]{1,400})""#) else {
+            return nil
+        }
+        let matches = expression.matches(in: html, range: NSRange(html.startIndex..., in: html))
+        var seen = Set<String>()
+        var names: [String] = []
+        for match in matches {
+            guard let range = Range(match.range(at: 1), in: html) else { continue }
+            for token in html[range].split(whereSeparator: { $0.isWhitespace }) {
+                let name = String(token)
+                guard !name.isEmpty, name.count <= 60, seen.insert(name).inserted else { continue }
+                names.append(name)
+                if names.count >= limit { return names.joined(separator: " ") }
+            }
+        }
+        return names.isEmpty ? nil : names.joined(separator: " ")
     }
 
     private func failure(_ source: BookSource, code: String, message: String) -> SourceSearchOutcome {

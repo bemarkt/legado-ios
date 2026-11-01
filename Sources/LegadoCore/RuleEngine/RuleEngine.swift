@@ -376,8 +376,14 @@ public struct RuleEngine: Sendable {
         }
         do {
             let rendered = try await renderDynamicRule(pipeline.script, result: scriptInput, context: execution)
+            // 列表模式 + CSS 前缀：Legado 的 result 是 Element 数组，书源会直接写
+            // `$[i].select('li')` / `.attr('href')` / `.text()`。这里把 HTML 片段提升成
+            // org.jsoup 元素对象；脚本只用字符串方法时不注入，原语义不变。
+            let script = listMode && !pipeline.prefix.isEmpty && Self.mentionsElementAPI(rendered.rule)
+                ? Self.htmlListPrologue + rendered.rule
+                : rendered.rule
             let result = try await javaScript.evaluateAsync(
-                script: rendered.rule, result: scriptInput, executionContext: rendered.context
+                script: script, result: scriptInput, executionContext: rendered.context
             )
             execution.variables = result.variables
             guard !pipeline.suffix.isEmpty else {
@@ -522,6 +528,25 @@ public struct RuleEngine: Sendable {
             )) ?? value
         }
         return .init(values: [.string(value)], variables: context.variables)
+    }
+
+    /// 列表模式 @js 前缀：把 CSS 片段数组提升成 org.jsoup 元素数组。
+    /// 宿主未注入 jsoup 桥时保持原值，脚本退回字符串语义而不是直接抛错。
+    private static let htmlListPrologue =
+        "if (typeof __legadoWrapHtmlNodes === 'function') { result = __legadoWrapHtmlNodes(result); $ = result; }\n"
+
+    /// 只在这些调用出现时才元素化：纯字符串脚本（replace / split / 正则）不该被改语义。
+    /// 只在这些调用出现时才元素化：纯字符串脚本（replace / split / 正则）不该被改语义。
+    ///
+    /// 名单必须与 jsoup 包装层暴露的方法同步：新增了方法却忘了加进来，书源写
+    /// `result.map(x => x.selectFirst('a').absUrl('href'))` 时 `result` 仍是字符串数组，
+    /// 报的是 `x.selectFirst is not a function`，看不出是这里是漏登记。
+    private static func mentionsElementAPI(_ script: String) -> Bool {
+        [".select(", ".selectFirst(", ".attr(", ".absUrl(", ".hasAttr(", ".ownText(", ".val(",
+         ".each(", ".size()", ".hasClass(", ".html()", ".text()", ".outerHtml()",
+         ".children(", ".parent(", ".next()", ".prev()", ".tagName(", ".className(",
+         ".get(", ".first()", ".last()", ".eq("]
+            .contains { script.contains($0) }
     }
 
     private struct JavaScriptPipeline {

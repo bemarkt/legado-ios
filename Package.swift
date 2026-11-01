@@ -13,7 +13,8 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/scinfu/SwiftSoup.git", exact: "2.13.5"),
         .package(url: "https://github.com/tid-kijyun/Kanna.git", exact: "6.1.0"),
-        .package(url: "https://github.com/weichsel/ZIPFoundation.git", exact: "0.9.20")
+        .package(url: "https://github.com/weichsel/ZIPFoundation.git", exact: "0.9.20"),
+        .package(path: "Vendor/QuickJS")
     ],
     targets: [
         .target(
@@ -21,10 +22,10 @@ let package = Package(
             dependencies: [
                 .product(name: "SwiftSoup", package: "SwiftSoup"),
                 .product(name: "Kanna", package: "Kanna"),
-                .product(name: "ZIPFoundation", package: "ZIPFoundation")
+                .product(name: "ZIPFoundation", package: "ZIPFoundation"),
+                .product(name: "CQuickJS", package: "QuickJS")
             ],
             linkerSettings: [
-                .linkedFramework("JavaScriptCore"),
                 .linkedFramework("CryptoKit"),
                 .linkedLibrary("sqlite3")
             ]

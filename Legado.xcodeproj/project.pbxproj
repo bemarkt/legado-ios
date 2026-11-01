@@ -134,6 +134,22 @@
         ED1000000000000000000001 /* EPUBReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED2000000000000000000001; };
         ED1000000000000000000002 /* Readium-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = ED2000000000000000000002; };
         ED1000000000000000000003 /* EPUBReaderIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED2000000000000000000003; };
+		EE1000000000000000000001 /* AppearanceInteractionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE2000000000000000000001 /* AppearanceInteractionView.swift */; };
+		D91000000000000000000001 /* JavaScriptRuntimeError.swift in Sources */ = {isa = PBXBuildFile; fileRef = D92000000000000000000001 /* JavaScriptRuntimeError.swift */; };
+		D91000000000000000000002 /* QuickJSRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = D92000000000000000000002 /* QuickJSRuntime.swift */; };
+		D91000000000000000000003 /* QuickJSContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = D92000000000000000000003 /* QuickJSContext.swift */; };
+		D91000000000000000000004 /* QuickJSValueConverter.swift in Sources */ = {isa = PBXBuildFile; fileRef = D92000000000000000000004 /* QuickJSValueConverter.swift */; };
+		DB1000000000000000000001 /* JavaScriptVariableStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB2000000000000000000001 /* JavaScriptVariableStore.swift */; };
+		DB1000000000000000000002 /* JavaScriptCryptoBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB2000000000000000000002 /* JavaScriptCryptoBridge.swift */; };
+		DC1000000000000000000001 /* RhinoCompatibilityScripts.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC2000000000000000000001 /* RhinoCompatibilityScripts.swift */; };
+		DC1000000000000000000002 /* JavaScriptPrimitiveHosts.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC2000000000000000000002 /* JavaScriptPrimitiveHosts.swift */; };
+		DD1000000000000000000001 /* JavaScriptCookieHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD2000000000000000000001 /* JavaScriptCookieHost.swift */; };
+		DD1000000000000000000002 /* JavaScriptNetworkHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD2000000000000000000002 /* JavaScriptNetworkHost.swift */; };
+		DD1000000000000000000003 /* JavaScriptEntityHosts.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD2000000000000000000003 /* JavaScriptEntityHosts.swift */; };
+		DE1000000000000000000001 /* JavaScriptJavaHosts.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE2000000000000000000001 /* JavaScriptJavaHosts.swift */; };
+		DE1000000000000000000002 /* JavaScriptHostInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE2000000000000000000002 /* JavaScriptHostInstaller.swift */; };
+		DF1000000000000000000001 /* BookSourceRuntimeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF2000000000000000000001 /* BookSourceRuntimeStore.swift */; };
+		EA1000000000000000000001 /* JavaScriptJsoupHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA2000000000000000000001 /* JavaScriptJsoupHost.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -263,6 +279,22 @@
         ED2000000000000000000001 /* EPUBReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBReaderView.swift; sourceTree = "<group>"; };
         ED2000000000000000000002 /* Readium-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "Readium-LICENSE.txt"; sourceTree = "<group>"; };
         ED2000000000000000000003 /* EPUBReaderIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tests/LegadoReaderTests/EPUBReaderIntegrationTests.swift; sourceTree = SOURCE_ROOT; };
+		EE2000000000000000000001 /* AppearanceInteractionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppearanceInteractionView.swift; sourceTree = "<group>"; };
+		D92000000000000000000001 /* JavaScriptRuntimeError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/LegadoCore/JavaScript/Core/JavaScriptRuntimeError.swift; sourceTree = SOURCE_ROOT; };
+		D92000000000000000000002 /* QuickJSRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/LegadoCore/JavaScript/QuickJS/QuickJSRuntime.swift; sourceTree = SOURCE_ROOT; };
+		D92000000000000000000003 /* QuickJSContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/LegadoCore/JavaScript/QuickJS/QuickJSContext.swift; sourceTree = SOURCE_ROOT; };
+		D92000000000000000000004 /* QuickJSValueConverter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/LegadoCore/JavaScript/QuickJS/QuickJSValueConverter.swift; sourceTree = SOURCE_ROOT; };
+		DB2000000000000000000001 /* JavaScriptVariableStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/LegadoCore/JavaScript/Host/JavaScriptVariableStore.swift; sourceTree = SOURCE_ROOT; };
+		DB2000000000000000000002 /* JavaScriptCryptoBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/LegadoCore/JavaScript/Host/JavaScriptCryptoBridge.swift; sourceTree = SOURCE_ROOT; };
+		DC2000000000000000000001 /* RhinoCompatibilityScripts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/LegadoCore/JavaScript/Compatibility/RhinoCompatibilityScripts.swift; sourceTree = SOURCE_ROOT; };
+		DC2000000000000000000002 /* JavaScriptPrimitiveHosts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/LegadoCore/JavaScript/Host/JavaScriptPrimitiveHosts.swift; sourceTree = SOURCE_ROOT; };
+		DD2000000000000000000001 /* JavaScriptCookieHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/LegadoCore/JavaScript/Host/JavaScriptCookieHost.swift; sourceTree = SOURCE_ROOT; };
+		DD2000000000000000000002 /* JavaScriptNetworkHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/LegadoCore/JavaScript/Host/JavaScriptNetworkHost.swift; sourceTree = SOURCE_ROOT; };
+		DD2000000000000000000003 /* JavaScriptEntityHosts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/LegadoCore/JavaScript/Host/JavaScriptEntityHosts.swift; sourceTree = SOURCE_ROOT; };
+		DE2000000000000000000001 /* JavaScriptJavaHosts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/LegadoCore/JavaScript/Host/JavaScriptJavaHosts.swift; sourceTree = SOURCE_ROOT; };
+		DE2000000000000000000002 /* JavaScriptHostInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/LegadoCore/JavaScript/Core/JavaScriptHostInstaller.swift; sourceTree = SOURCE_ROOT; };
+		DF2000000000000000000001 /* BookSourceRuntimeStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/LegadoCore/JavaScript/Host/BookSourceRuntimeStore.swift; sourceTree = SOURCE_ROOT; };
+		EA2000000000000000000001 /* JavaScriptJsoupHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/LegadoCore/JavaScript/Host/JavaScriptJsoupHost.swift; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -491,6 +523,21 @@
 				C2000000000000000000000D /* RuleEngine.swift */,
 				C20000000000000000000011 /* HTMLRuleEvaluator.swift */,
 				C20000000000000000000014 /* JavaScriptRuleEvaluator.swift */,
+				D92000000000000000000001 /* JavaScriptRuntimeError.swift */,
+				D92000000000000000000002 /* QuickJSRuntime.swift */,
+				D92000000000000000000003 /* QuickJSContext.swift */,
+				D92000000000000000000004 /* QuickJSValueConverter.swift */,
+				DB2000000000000000000001 /* JavaScriptVariableStore.swift */,
+				DB2000000000000000000002 /* JavaScriptCryptoBridge.swift */,
+				DC2000000000000000000001 /* RhinoCompatibilityScripts.swift */,
+				DC2000000000000000000002 /* JavaScriptPrimitiveHosts.swift */,
+				DD2000000000000000000001 /* JavaScriptCookieHost.swift */,
+				DD2000000000000000000002 /* JavaScriptNetworkHost.swift */,
+				DD2000000000000000000003 /* JavaScriptEntityHosts.swift */,
+				DE2000000000000000000001 /* JavaScriptJavaHosts.swift */,
+				DE2000000000000000000002 /* JavaScriptHostInstaller.swift */,
+				DF2000000000000000000001 /* BookSourceRuntimeStore.swift */,
+				EA2000000000000000000001 /* JavaScriptJsoupHost.swift */,
 			);
 			path = RuleEngine;
 			sourceTree = "<group>";
@@ -602,6 +649,7 @@
 			isa = PBXGroup;
 			children = (
 				E20000000000000000000004 /* OtherSettingsView.swift */,
+				EE2000000000000000000001 /* AppearanceInteractionView.swift */,
 				E20000000000000000000005 /* DiagnosticLogView.swift */,
 				E20000000000000000000006 /* AboutView.swift */,
 				E20000000000000000000007 /* AppDiagnostics.swift */,
@@ -654,6 +702,7 @@
                 F20000000000000000000006 /* ReadiumNavigator */,
                 F20000000000000000000005 /* ReadiumStreamer */,
                 F20000000000000000000004 /* ReadiumShared */,
+                F20000000000000000000007 /* CQuickJS */,
 			);
 			productName = Legado;
 			productReference = D20000000000000000000001 /* Legado.app */;
@@ -693,6 +742,7 @@
 				F30000000000000000000002 /* XCRemoteSwiftPackageReference "Kanna" */,
 				F30000000000000000000003 /* ZIPFoundation */,
                 F30000000000000000000004 /* Readium */,
+				F30000000000000000000005 /* QuickJS */,
 			);
 			productRefGroup = D40000000000000000000002 /* Products */;
 			projectDirPath = "";
@@ -736,6 +786,7 @@
 				910000000000000000000006 /* AboutView.swift in Sources */,
 				910000000000000000000005 /* DiagnosticLogView.swift in Sources */,
 				910000000000000000000004 /* OtherSettingsView.swift in Sources */,
+				EE1000000000000000000001 /* AppearanceInteractionView.swift in Sources */,
 				910000000000000000000003 /* DiagnosticLog.swift in Sources */,
 				910000000000000000000002 /* HostsHTTPTransport.swift in Sources */,
 				910000000000000000000001 /* ApplicationSettings.swift in Sources */,
@@ -804,6 +855,21 @@
 				C10000000000000000000012 /* NetworkBookService.swift in Sources */,
 				C10000000000000000000013 /* BookRepository.swift in Sources */,
 				C10000000000000000000014 /* JavaScriptRuleEvaluator.swift in Sources */,
+				D91000000000000000000001 /* JavaScriptRuntimeError.swift in Sources */,
+				D91000000000000000000002 /* QuickJSRuntime.swift in Sources */,
+				D91000000000000000000003 /* QuickJSContext.swift in Sources */,
+				D91000000000000000000004 /* QuickJSValueConverter.swift in Sources */,
+				DB1000000000000000000001 /* JavaScriptVariableStore.swift in Sources */,
+				DB1000000000000000000002 /* JavaScriptCryptoBridge.swift in Sources */,
+				DC1000000000000000000001 /* RhinoCompatibilityScripts.swift in Sources */,
+				DC1000000000000000000002 /* JavaScriptPrimitiveHosts.swift in Sources */,
+				DD1000000000000000000001 /* JavaScriptCookieHost.swift in Sources */,
+				DD1000000000000000000002 /* JavaScriptNetworkHost.swift in Sources */,
+				DD1000000000000000000003 /* JavaScriptEntityHosts.swift in Sources */,
+				DE1000000000000000000001 /* JavaScriptJavaHosts.swift in Sources */,
+				DE1000000000000000000002 /* JavaScriptHostInstaller.swift in Sources */,
+				DF1000000000000000000001 /* BookSourceRuntimeStore.swift in Sources */,
+				EA1000000000000000000001 /* JavaScriptJsoupHost.swift in Sources */,
 				C10000000000000000000015 /* ExploreKind.swift in Sources */,
 				C10000000000000000000016 /* BookExploreService.swift in Sources */,
 				C10000000000000000000017 /* BookSourceDebugger.swift in Sources */,
@@ -964,6 +1030,10 @@
             isa = XCLocalSwiftPackageReference;
             relativePath = Vendor/LegadoZIPFoundation;
         };
+        F30000000000000000000005 /* QuickJS */ = {
+            isa = XCLocalSwiftPackageReference;
+            relativePath = Vendor/QuickJS;
+        };
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
@@ -1015,6 +1085,11 @@
             isa = XCSwiftPackageProductDependency;
             package = F30000000000000000000004 /* Readium */;
             productName = ReadiumNavigator;
+        };
+        F20000000000000000000007 /* CQuickJS */ = {
+            isa = XCSwiftPackageProductDependency;
+            package = F30000000000000000000005 /* QuickJS */;
+            productName = CQuickJS;
         };
 /* End XCSwiftPackageProductDependency section */
 	};

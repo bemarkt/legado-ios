@@ -492,7 +492,10 @@ struct JavaScriptRuleEvaluatorTests {
     }
 
     @Test func rejectsObviousUnboundedScripts() async {
-        let result = await RuleEngine().evaluate("@js:while(true){}", in: .null)
+        // 死循环现在由 QuickJS 中断回调在真实截止时间处打断，不再靠字符串黑名单预检。
+        // 这里显式给一个短超时，否则这条断言要等满默认 5 秒。
+        let engine = RuleEngine(javaScript: JavaScriptRuleEvaluator(timeoutMilliseconds: 300))
+        let result = await engine.evaluate("@js:while(true){}", in: .null)
 
         #expect(result.values.isEmpty)
         #expect(result.diagnostics.contains { $0.code == "rule.resource_limit" })

@@ -146,7 +146,19 @@ public struct BookSourceImporter: Sendable {
             if let existingIndex = index[source.id] {
                 switch duplicatePolicy {
                 case .replace:
-                    merged[existingIndex] = source
+                    // 更新书源时保留本地已有的 Cookie 开关。
+                    //
+                    // `enabledCookieJar` 是设备侧的行为设置，不是站点规则；但它写在
+                    // 书源 JSON 里，不少源直接写 `"enabledCookieJar": false`。整体替换
+                    // 就会把用户本地打开的开关压回关闭，Cookie 其实还在库里，
+                    // 只是不再读也不再发——用户抓包看到的就是「更新一次书源，登录态没了」。
+                    //
+                    // 只保留这一个字段：分组与启用状态由导入预览页的
+                    // `keepOriginalGroup` / `keepOriginalEnabled` 决定，
+                    // 在这里顺手覆盖会越权改掉用户刚做的选择。
+                    var updated = source
+                    updated.enabledCookieJar = merged[existingIndex].enabledCookieJar
+                    merged[existingIndex] = updated
                     replaced += 1
                 case .skip:
                     skipped += 1

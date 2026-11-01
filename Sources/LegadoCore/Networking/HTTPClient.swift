@@ -611,7 +611,12 @@ public struct SourceRateWindow: Sendable, Equatable {
 public actor SourceNetworkPolicy {
     public static let shared = SourceNetworkPolicy()
 
-    private struct StoredCookie: Sendable {
+    /// `Codable` 不是可选装饰：这套 Cookie 必须落盘。
+    ///
+    /// `SourceNetworkPolicy` 是 actor，`cookies` 原先只是内存字典，
+    /// 进程重建（更新书源、杀进程、切源重建服务）后直接归零，
+    /// 用户看到的就是「登录态没了」——但站点会话其实还在有效期内。
+    private struct StoredCookie: Sendable, Codable {
         var name: String
         var value: String
         var domain: String
@@ -622,9 +627,21 @@ public actor SourceNetworkPolicy {
 
     private var windows: [String: SourceRateWindow] = [:]
     private var cookies: [String: [StoredCookie]] = [:]
+    /// 已从磁盘恢复过 Cookie 的书源。首次访问才读盘，
+    /// 避免每个请求都去 SQLite 查一次会话。
+    private var restoredSources: Set<String> = []
+    private let persistent: PersistentRuntimeCache
     private let javaScript: JavaScriptRuleEvaluator
 
-    public init(javaScript: JavaScriptRuleEvaluator = .init()) { self.javaScript = javaScript }
+    /// `persistent` 可注入：测试要用临时库验证「重建实例后 Cookie 仍在」，
+    /// 打到真实 `PersistentRuntimeCache.shared` 会污染用户数据。
+    public init(
+        javaScript: JavaScriptRuleEvaluator = .init(),
+        persistent: PersistentRuntimeCache = .shared
+    ) {
+        self.javaScript = javaScript
+        self.persistent = persistent
+    }
 
     public func execute(
         _ prepared: PreparedRequest,
@@ -688,7 +705,7 @@ public actor SourceNetworkPolicy {
             )
         }
         var request = prepared.urlRequest(timeout: timeout, handleCookies: false)
-        if source.enabledCookieJar == true {
+        if source.enabledCookieJar != false {
             let stored = cookieHeader(sourceID: source.id, url: prepared.url)
             let explicit = request.value(forHTTPHeaderField: "Cookie") ?? ""
             let merged = mergeCookieHeaders(stored, explicit)
@@ -714,7 +731,7 @@ public actor SourceNetworkPolicy {
                 guard (200...299).contains(response.statusCode) else {
                     throw HTTPClientError.statusResponse(response)
                 }
-                if source.enabledCookieJar == true { captureCookies(response: response, sourceID: source.id) }
+                if source.enabledCookieJar != false { captureCookies(response: response, sourceID: source.id) }
                 let transformed = try await transformBodyIfNeeded(response, prepared: prepared, source: source)
                 await snapshotRecorder?.record(stage: snapshotStage, sourceID: source.id, prepared: prepared, rawResponse: response, response: transformed, timeout: timeout)
                 return transformed
@@ -723,7 +740,7 @@ public actor SourceNetworkPolicy {
             } catch {
                 lastError = error
                 if case HTTPClientError.statusResponse(let response) = error,
-                   source.enabledCookieJar == true {
+                   source.enabledCookieJar != false {
                     captureCookies(response: response, sourceID: source.id)
                 }
                 guard case HTTPClientError.statusResponse = error, attempt + 1 < attempts else { break }
@@ -752,14 +769,14 @@ public actor SourceNetworkPolicy {
         }
         try await acquire(source: source)
         var request = prepared.urlRequest(timeout: timeout, handleCookies: false)
-        if source.enabledCookieJar == true {
+        if source.enabledCookieJar != false {
             let stored = cookieHeader(sourceID: source.id, url: prepared.url)
             let explicit = request.value(forHTTPHeaderField: "Cookie") ?? ""
             let merged = mergeCookieHeaders(stored, explicit)
             if !merged.isEmpty { request.setValue(merged, forHTTPHeaderField: "Cookie") }
         }
         let response = try await transport.stream(for: request)
-        if source.enabledCookieJar == true {
+        if source.enabledCookieJar != false {
             captureCookies(
                 response: .init(
                     data: Data(),
@@ -784,7 +801,7 @@ public actor SourceNetworkPolicy {
         let started = Date()
         var webPrepared = prepared
         var request = prepared.urlRequest(timeout: timeout, handleCookies: false)
-        if source.enabledCookieJar == true {
+        if source.enabledCookieJar != false {
             let stored = cookieHeader(sourceID: source.id, url: prepared.url)
             let explicit = request.value(forHTTPHeaderField: "Cookie") ?? ""
             let merged = mergeCookieHeaders(stored, explicit)
@@ -803,7 +820,7 @@ public actor SourceNetworkPolicy {
                 guard (200...299).contains(response.statusCode) else {
                     throw HTTPClientError.statusResponse(response)
                 }
-                if source.enabledCookieJar == true { captureCookies(response: response, sourceID: source.id) }
+                if source.enabledCookieJar != false { captureCookies(response: response, sourceID: source.id) }
                 let transformed = try await transformBodyIfNeeded(response, prepared: prepared, source: source)
                 await snapshotRecorder?.record(stage: snapshotStage, sourceID: source.id, prepared: prepared, rawResponse: response, response: transformed, timeout: timeout)
                 DiagnosticLog.shared.network(request, status: response.statusCode, startedAt: started)
@@ -813,7 +830,7 @@ public actor SourceNetworkPolicy {
             } catch {
                 lastError = error
                 if case HTTPClientError.statusResponse(let response) = error,
-                   source.enabledCookieJar == true {
+                   source.enabledCookieJar != false {
                     captureCookies(response: response, sourceID: source.id)
                 }
                 guard case HTTPClientError.statusResponse = error, attempt + 1 < attempts else { break }
@@ -858,6 +875,7 @@ public actor SourceNetworkPolicy {
     }
 
     public func cookieHeader(sourceID: String, url: URL) -> String {
+        restoreCookiesIfNeeded(sourceID: sourceID)
         let now = Date()
         let host = url.host?.lowercased() ?? ""
         let path = url.path.isEmpty ? "/" : url.path
@@ -878,7 +896,14 @@ public actor SourceNetworkPolicy {
         }
     }
 
-    public func removeCookies(sourceID: String) { cookies[sourceID] = nil }
+    /// 清空某书源的全部 Cookie。内存与磁盘必须一起清：
+    /// 只清内存的话，下一次 `restoreCookiesIfNeeded` 会把刚删掉的会话原样读回来，
+    /// 用户点了「清空 Cookie」却仍然带着登录态发请求。
+    public func removeCookies(sourceID: String) {
+        cookies[sourceID] = nil
+        restoredSources.insert(sourceID)
+        persistCookies(sourceID: sourceID)
+    }
 
     private func acquire(source: BookSource) async throws {
         guard let limit = SourceRateLimit(rawValue: source.concurrentRate) else { return }
@@ -924,10 +949,44 @@ public actor SourceNetworkPolicy {
     }
 
     private func upsert(_ cookie: StoredCookie, sourceID: String) {
+        // 必须先恢复磁盘历史值再合并：直接写内存列表会把上次启动保存的
+        // Cookie 整片覆盖掉。这就是「操作一次、登录态就丢」的真实机制。
+        restoreCookiesIfNeeded(sourceID: sourceID)
         var values = cookies[sourceID] ?? []
         values.removeAll { $0.name == cookie.name && $0.domain == cookie.domain && $0.path == cookie.path }
         values.append(cookie)
         cookies[sourceID] = values
+        persistCookies(sourceID: sourceID)
+    }
+
+    // MARK: - Cookie 持久化
+
+    private func cookieStorageKey(_ sourceID: String) -> String {
+        // 键名带前缀：`caches` 表里还有书源变量（`v_<id>_<key>`）与
+        // 登录头（`loginHeader_<id>`），混用会让三类数据互相覆盖。
+        "sourceCookies_\(sourceID)"
+    }
+
+    private func restoreCookiesIfNeeded(sourceID: String) {
+        guard !restoredSources.contains(sourceID) else { return }
+        restoredSources.insert(sourceID)
+        guard let text = persistent.get(cookieStorageKey(sourceID)),
+              let data = text.data(using: .utf8),
+              let decoded = try? JSONDecoder().decode([StoredCookie].self, from: data),
+              !decoded.isEmpty else { return }
+        var values = cookies[sourceID] ?? []
+        for cookie in decoded where !values.contains(where: {
+            $0.name == cookie.name && $0.domain == cookie.domain && $0.path == cookie.path
+        }) {
+            values.append(cookie)
+        }
+        cookies[sourceID] = values
+    }
+
+    private func persistCookies(sourceID: String) {
+        guard let data = try? JSONEncoder().encode(cookies[sourceID] ?? []),
+              let text = String(data: data, encoding: .utf8) else { return }
+        persistent.put(cookieStorageKey(sourceID), value: text)
     }
 
     private func domainMatches(host: String, domain: String) -> Bool {

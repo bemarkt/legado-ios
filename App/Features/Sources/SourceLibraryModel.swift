@@ -337,6 +337,17 @@ final class SourceLibraryModel: ObservableObject {
         await persist(updated, successTitle: nil)
     }
 
+    /// 「启用 Cookie」开关。
+    ///
+    /// 走与 `setEnabled` / `setExploreEnabled` 完全相同的 `persist` 路径：
+    /// 另开一套保存会让书源列表与持久层分叉，重启后开关状态回弹。
+    func setCookieJarEnabled(_ enabled: Bool, for sourceID: String) async {
+        var updated = sources
+        guard let index = updated.firstIndex(where: { $0.id == sourceID }) else { return }
+        updated[index].enabledCookieJar = enabled
+        await persist(updated, successTitle: nil)
+    }
+
     func saveSource(_ source: BookSource, replacing oldSourceID: String? = nil) async -> Bool {
         let errors = BookSourceValidator.validate(source).filter { $0.severity == .error }
         guard errors.isEmpty else {

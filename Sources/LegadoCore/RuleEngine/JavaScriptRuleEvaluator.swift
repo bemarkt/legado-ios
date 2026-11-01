@@ -519,7 +519,7 @@ public struct JavaScriptRuleEvaluator: Sendable {
         let milliseconds = timeoutMilliseconds ?? 30_000
         var request = URLRequest(url: url, timeoutInterval: min(max(milliseconds / 1_000, 1), 180))
         request.httpMethod = method.uppercased()
-        request.httpShouldHandleCookies = executionContext.source?.enabledCookieJar == true
+        request.httpShouldHandleCookies = executionContext.source?.enabledCookieJar != false
         var requestHeaders = try executionContext.source.map { try BookSourceHeaderResolver().resolve($0) } ?? [:]
         requestHeaders.merge(headers) { _, explicit in explicit }
         if !requestHeaders.keys.contains(where: { $0.caseInsensitiveCompare("User-Agent") == .orderedSame }) {
@@ -529,7 +529,7 @@ public struct JavaScriptRuleEvaluator: Sendable {
         if method.caseInsensitiveCompare("POST") == .orderedSame {
             request.httpBody = Data((body ?? "").utf8)
         }
-        if executionContext.source?.enabledCookieJar == true {
+        if executionContext.source?.enabledCookieJar != false {
             let stored = LegadoCookieStore.shared.cookieHeader(for: rawURL)
             let explicit = request.value(forHTTPHeaderField: "Cookie") ?? ""
             let merged = Self.mergeCookieHeaders(stored, explicit)
@@ -566,8 +566,8 @@ public struct JavaScriptRuleEvaluator: Sendable {
         }
         let timeout = timeoutMilliseconds.map { min(max($0 / 1_000, 1), 180) }
             ?? min(max(Double(source?.respondTime ?? 30_000) / 1_000, 5), 180)
-        var request = prepared.urlRequest(timeout: timeout, handleCookies: source?.enabledCookieJar == true)
-        if source?.enabledCookieJar == true {
+        var request = prepared.urlRequest(timeout: timeout, handleCookies: source?.enabledCookieJar != false)
+        if source?.enabledCookieJar != false {
             let stored = LegadoCookieStore.shared.cookieHeader(for: prepared.url.absoluteString)
             let explicit = request.value(forHTTPHeaderField: "Cookie") ?? ""
             let merged = Self.mergeCookieHeaders(stored, explicit)

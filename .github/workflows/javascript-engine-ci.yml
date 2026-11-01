@@ -39,7 +39,7 @@ concurrency:
 jobs:
   swiftpm:
     name: SwiftPM build + LegadoCore tests
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 60
     steps:
       - name: Checkout source
@@ -98,7 +98,7 @@ jobs:
 
   xcode-app:
     name: Xcode app build (iOS simulator)
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 90
     steps:
       - name: Checkout source

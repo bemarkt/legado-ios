@@ -3,7 +3,7 @@
 ## 环境
 
 - macOS；支持 Swift 6 的 Xcode，当前开发环境为 Xcode 26.1。
-- App 最低 iOS 15.0；核心包也可在 macOS 14+ 测试。
+- App 最低 iOS 26.0（`glassEffect` 一类 Liquid Glass API 属于 iOS 26 SDK，不设回落分支）；核心包也可在 macOS 14+ 测试。
 - Swift Package Manager 依赖由 `Package.resolved` 锁定，初次解析需要网络。
 - 运行脚本需 Python 3 和 `rg`（ripgrep）。
 
@@ -64,7 +64,7 @@ RSS 界面回归还验证正文的手动刷新确实重新请求网络。核心�
 
 ## 兼容性验证
 
-最低部署版本为 iOS 15.0。`App/Compatibility.swift` 为导航、分享、照片选择和弹窗提供兼容实现；新增系统 API 时需保留最低版本路径。调试构建可用 `-uiLegacyCompatibility` 启动参数在新系统上执行旧版界面分支，对应回归位于 `Tests/LegadoReaderUITests/`。这些测试不能替代 iOS 15 真机或模拟器实测。
+最低部署版本为 iOS 26.0。项目已放弃 iOS 15–25 的兼容分支：`glassEffect` 这类 API 直接在编译期解析，部署目标低于 26 会报「找不到符号」，`#available` 挡不住。因此仓库里既有的 `#available(iOS 16.0/*)`、`#available(iOS 17.0/*)` 守卫现在是恒真分支，Swift 会给出 unnecessary-availability 警告——这属于已知待清理项，清理时连同其后的旧系统回落分支一起删，作为独立提交而非混在界面改动里。`App/Compatibility.swift` 仍保留导航、分享、照片选择与弹窗的兼容实现，供 `-uiLegacyCompatibility` 调试分支使用，对应回归位于 `Tests/LegadoReaderUITests/`。这些测试不能替代 iOS 26 真机或模拟器实测。
 
 搜索调度与缓存回归见 `Tests/LegadoCoreTests/SearchPerformanceTests.swift`，包括复杂书源限流和普通书源的及时执行；这些测试验证行为，不提供真实网络速度排名。
 

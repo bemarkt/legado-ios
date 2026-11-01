@@ -1,4 +1,5 @@
 @preconcurrency import WebKit
+import Combine
 import SwiftUI
 import UIKit
 
@@ -6,7 +7,9 @@ struct SourceLoginView: View {
     let source: BookSource
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
+    @StateObject private var chrome = LoginWebChromeModel()
     @State private var reloadID = UUID()
+    @State private var command: LoginWebCommand?
     @State private var status = "打开登录页后，Cookie 会自动同步给搜索与阅读请求。"
     @State private var isChecking = false
     /// 只读详情（登录头 / Cookie / 日志）。用 bottom sheet 承载，不用居中弹窗。
@@ -15,26 +18,14 @@ struct SourceLoginView: View {
     @State private var pendingAction: DestructiveAction?
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            statusBar
-            if let request = loginRequest {
-                SourceLoginWebView(
-                    request: request,
-                    userAgent: webViewUserAgent,
-                    source: source,
-                    sourceURL: source.bookSourceUrl,
-                    sourceID: source.id,
-                    loginCheckJavaScript: source.loginCheckJs,
-                    reloadID: reloadID,
-                    status: $status,
-                    isChecking: $isChecking
-                )
-            } else {
-                ReadingUnavailableView("登录地址无效", systemImage: "link.badge.plus", description: Text(source.loginUrl ?? "书源没有配置登录地址"))
-            }
+        // 内容铺满整屏、控件浮在上面（Nagram BrowserUI 的形态）：
+        // 不再用 VStack 把头部、状态条、网页依次排开——那样既占两行高度，
+        // 观感也像表单而不是浏览器。
+        ZStack(alignment: .top) {
+            ReadingTheme.canvas.ignoresSafeArea()
+            webContent
+            chromeOverlay
         }
-        .background(ReadingTheme.canvas)
         // full 态 bottom sheet：原生 sheet 自带背景滚动隔离与 Home Indicator 安全区，
         // 不需要手写 body 滚动锁死，也不该再挂导航栏。
         .readingPresentationDetents([.large])
@@ -56,59 +47,206 @@ struct SourceLoginView: View {
         }
     }
 
-    // MARK: - 头部
+    // MARK: - 内容层
 
-    /// 自带头部取代导航栏。
+    /// 内容层：铺满整屏（含安全区），由 `contentInsets` 把首尾让给玻璃控件。
     ///
-    /// 登录页是 full 态 bottom sheet，sheet 里没有 navigationBar，
-    /// `navigationTitle` / `toolbar` 都不再渲染。三个动作按「退出 → 确认 → 更多」排布，
-    /// 每个都撑满 44pt 热区（skill 的触控红线），相邻间距 8pt 防连带误触。
-    private var header: some View {
-        ZStack {
-            // 标题走 ZStack 居中：放进 HStack 会被左右按钮的宽度挤偏。
-            Text("登录 · \(source.bookSourceName)")
-                .font(.headline)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .padding(.horizontal, 96)
-                .accessibilityAddTraits(.isHeader)
-            HStack(spacing: 8) {
-                Button { dismiss() } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 16, weight: .semibold))
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
-                }
-                .accessibilityLabel("关闭")
-                Spacer(minLength: 0)
-                Button("确认") { confirmLogin() }
-                    .font(.subheadline.weight(.semibold))
-                    .frame(minWidth: 44, minHeight: 44)
-                    .contentShape(Rectangle())
-                    .accessibilityHint("同步已登录的 Cookie 并关闭")
-                Menu { menuContent } label: {
-                    Image(systemName: "ellipsis.circle")
-                        .font(.system(size: 18))
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
-                }
-                .accessibilityLabel("更多")
-            }
+    /// 这正是 Nagram 的做法——`contentContainerView` 占满 `layout.size`，
+    /// WebView 只按 `insets` 收，控件是叠加层而不是布局的一部分。
+    @ViewBuilder private var webContent: some View {
+        if let request = loginRequest {
+            SourceLoginWebView(
+                request: request,
+                userAgent: webViewUserAgent,
+                source: source,
+                sourceURL: source.bookSourceUrl,
+                sourceID: source.id,
+                loginCheckJavaScript: source.loginCheckJs,
+                reloadID: reloadID,
+                command: command,
+                // 顶部要多留 30 而不是 20：`.large` sheet 的拖拽指示条画在
+                // 内容区之上约 20pt 处，只按胶囊高度留白会让关闭/确认键与它重叠。
+                contentInsets: UIEdgeInsets(
+                    top: LoginChrome.headerHeight + 30,
+                    left: 0,
+                    bottom: LoginChrome.toolbarHeight + 26,
+                    right: 0
+                ),
+                model: chrome,
+                status: $status,
+                isChecking: $isChecking
+            )
+            .ignoresSafeArea()
+        } else {
+            ReadingUnavailableView("登录地址无效", systemImage: "link.badge.plus", description: Text(source.loginUrl ?? "书源没有配置登录地址"))
         }
-        .padding(.horizontal, 8)
-        .padding(.top, 6)
-        .padding(.bottom, 2)
     }
 
-    private var statusBar: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "lock.shield.fill").foregroundStyle(ReadingTheme.accent)
-            Text(status).font(.caption).foregroundStyle(.secondary).lineLimit(2)
-            Spacer()
-            if isChecking { ProgressView().controlSize(.small) }
+    // MARK: - 悬浮玻璃控件层
+
+    /// 控件层：全屏内容之上只留两颗玻璃胶囊。
+    ///
+    /// 旧版是「自绘头部 + 系统色状态条」上下叠两行，既占高度又像表单；
+    /// 现在照 Nagram BrowserUI，把标题与状态收进同一颗胶囊
+    /// （等价于 `AddressBarContentComponent`），底部再加一颗工具条胶囊，
+    /// 中间整块让给网页。滚动时底部工具条按 collapseFraction 下滑退出，
+    /// 与 `BrowserScreen.Node.onContentScrollingUpdate` 的 0.5 阈值吸附一致。
+    private var chromeOverlay: some View {
+        VStack(spacing: 8) {
+            glassHeader
+            progressHairline.padding(.horizontal, 26)
+            Spacer(minLength: 0)
+            if let message = chrome.errorMessage {
+                errorCard(message)
+                Spacer(minLength: 0)
+            }
+            glassToolbar
+                .opacity(Double(1 - chrome.collapseFraction))
+                .offset(y: 72 * chrome.collapseFraction)
+                .allowsHitTesting(chrome.collapseFraction < 0.5)
         }
-        .padding(.horizontal, 14).padding(.vertical, 10)
-        .background(Color(uiColor: .secondarySystemBackground))
+        .padding(.horizontal, LoginChrome.sideInset)
+        // 18 而不是 6：`.large` sheet 的拖拽指示条占据顶部约 20pt，
+        // 留 6 会让头部胶囊与它压在一起。
+        .padding(.top, 18)
+        .padding(.bottom, 12)
+        // 显式撑满：ZStack 里 Spacer 能拿到完整高度提案，但这是隐式行为——
+        // 后续改动 VStack 内部任何一项都可能静默退回顶部，
+        // 表现为「底部工具条贴着头部」。写死 frame 的成本为零。
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .animation(.easeOut(duration: 0.18), value: chrome.collapseFraction)
+    }
+
+    /// 头部胶囊：关闭 / 站点标题与状态 / 确认 / 更多。
+    ///
+    /// 标题与状态收进同一颗胶囊，等于浏览器的地址栏——滚动态只折叠这一层，
+    /// 不会出现「一条 bar 加一条状态条」两层叠着的旧观感。
+    private var glassHeader: some View {
+        HStack(spacing: LoginChrome.itemSpacing) {
+            glassBarButton("xmark", label: "关闭") { dismiss() }
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 4) {
+                    Image(systemName: hostIsSecure ? "lock.fill" : "lock.open.fill")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    Text(hostTitle)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                Text(status)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Button("确认") { confirmLogin() }
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(ReadingTheme.accent)
+                .frame(minWidth: LoginChrome.minTouch, minHeight: LoginChrome.minTouch)
+                .contentShape(Rectangle())
+                .accessibilityHint("同步已登录的 Cookie 并关闭")
+            Menu { menuContent } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 15, weight: .semibold))
+                    .frame(width: LoginChrome.minTouch, height: LoginChrome.minTouch)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("更多")
+        }
+        .padding(.horizontal, 4)
+        .frame(height: LoginChrome.headerHeight)
+        .modifier(GlassPill())
+        .scaleEffect(1 - 0.03 * chrome.collapseFraction, anchor: .top)
+    }
+
+    private func glassBarButton(_ systemName: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 15, weight: .semibold))
+                .frame(width: LoginChrome.minTouch, height: LoginChrome.minTouch)
+                .contentShape(Rectangle())
+        }
+        .accessibilityLabel(label)
+    }
+
+    /// 加载进度：只在 1%–99% 之间显示，完成即刻消失。
+    /// 与 Nagram `LoadingProgressComponent` 的显隐规则一致
+    /// （`value < 0.01 || value > 0.99` 时 alpha 归零），
+    /// 只是把线宽压到 2pt 收在胶囊下方，避免在登录这种短页面上抢注意力。
+    @ViewBuilder private var progressHairline: some View {
+        if chrome.progress > 0.01, chrome.progress < 0.99 {
+            Capsule(style: .continuous)
+                .fill(ReadingTheme.accent.opacity(0.55))
+                .frame(height: 2)
+                .scaleEffect(x: max(0.04, chrome.progress), anchor: .leading)
+                .animation(.easeOut(duration: 0.25), value: chrome.progress)
+        }
+    }
+
+    /// 底部工具条胶囊：后退 / 前进 / 刷新 / 在浏览器中打开。
+    /// 不可用时降色并 disabled，但仍保留 44pt 热区——避免可点区域随状态跳动。
+    private var glassToolbar: some View {
+        HStack(spacing: LoginChrome.toolbarSpacing) {
+            toolbarButton("chevron.backward", label: "后退", enabled: chrome.canGoBack) {
+                command = LoginWebCommand(.back)
+            }
+            toolbarButton("chevron.forward", label: "前进", enabled: chrome.canGoForward) {
+                command = LoginWebCommand(.forward)
+            }
+            toolbarButton("arrow.clockwise", label: "刷新", enabled: true) { reloadID = UUID() }
+            toolbarButton("safari", label: "在浏览器中打开", enabled: source.loginUrl?.isEmpty == false) {
+                openInBrowser()
+            }
+        }
+        .frame(height: LoginChrome.toolbarHeight)
+        .padding(.horizontal, 8)
+        .modifier(GlassPill(cornerRadius: LoginChrome.toolbarHeight / 2))
+    }
+
+    private func toolbarButton(_ systemName: String, label: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 16, weight: .semibold))
+                .frame(width: LoginChrome.minTouch, height: LoginChrome.minTouch)
+                .contentShape(Rectangle())
+        }
+        .foregroundStyle(enabled ? ReadingTheme.accent : ReadingTheme.separator)
+        .disabled(!enabled)
+        .accessibilityLabel(label)
+    }
+
+    /// 失败态：居中一张玻璃卡加重试，而不是留一片白屏。
+    private func errorCard(_ message: String) -> some View {
+        VStack(spacing: 10) {
+            Image(systemName: "wifi.exclamationmark")
+                .font(.title2)
+                .foregroundStyle(.secondary)
+            Text("登录页打不开")
+                .font(.subheadline.weight(.semibold))
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            Button("重试") { reloadID = UUID() }
+                .font(.subheadline.weight(.semibold))
+                .frame(minWidth: LoginChrome.minTouch, minHeight: LoginChrome.minTouch)
+                .contentShape(Rectangle())
+        }
+        .padding(20)
+        .frame(maxWidth: 300)
+        .modifier(GlassPill(cornerRadius: 22))
+    }
+
+    private var hostTitle: String {
+        if !chrome.title.isEmpty { return chrome.title }
+        if let host = URL(string: source.loginUrl ?? "")?.host { return host }
+        return source.bookSourceName
+    }
+
+    private var hostIsSecure: Bool {
+        URL(string: source.loginUrl ?? "")?.scheme?.lowercased() == "https"
     }
 
     /// 更多菜单按「读 → 操作 → 危险」三段。
@@ -233,6 +371,94 @@ struct SourceLoginView: View {
     }
 }
 
+/// 玻璃控件层的度量。
+///
+/// 数值对齐 Nagram `BrowserNavigationBarComponent`（`panelHeight = 44`、
+/// `collapsedHeight = 54`、侧边距 16）与 `BrowserToolbarComponent`
+/// （`contentHeight = 56`、胶囊高 48），再向 iOS HIG 的 44pt 最小热区取整。
+private enum LoginChrome {
+    static let sideInset: CGFloat = 12
+    static let itemSpacing: CGFloat = 6
+    static let minTouch: CGFloat = 44
+    static let headerHeight: CGFloat = 52
+    static let toolbarHeight: CGFloat = 48
+    static let toolbarSpacing: CGFloat = 18
+}
+
+/// 「液态玻璃」底：交给系统的 Liquid Glass。
+///
+/// 项目整体已提到 iOS 26，`glassEffect` 就是系统原生材质：折射、高光、
+/// 随内容变化的透明度都由系统给，并且会自动跟随外观、
+/// 「降低透明度」「增强对比度」等可访问性设置退化。
+/// 手绘 material + 渐变 + 描边的版本只能模仿到静态观感，
+/// 既不会随内容变形，也拿不到系统那层折射。
+///
+/// 这里只保留一个圆角参数，让头部胶囊、工具条胶囊、错误卡
+/// 共用同一份材质语言——玻璃的「厚度」由系统统一决定，
+/// 各处只区分形状，不各自调浓度。
+private struct GlassPill: ViewModifier {
+    var cornerRadius: CGFloat = 26
+
+    func body(content: Content) -> some View {
+        content.glassEffect(
+            .regular,
+            in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        )
+    }
+}
+
+/// 从控件层下发给 WebView 的一次性指令。
+///
+/// 用「带 id 的值」而不是闭包：`updateUIView` 每次状态变化都会跑，
+/// 闭包无法自证是否已执行，会把一次点击变成连续 `goBack()`。
+struct LoginWebCommand: Equatable {
+    enum Kind: Equatable {
+        case back
+        case forward
+    }
+
+    let id = UUID()
+    let kind: Kind
+
+    init(_ kind: Kind) { self.kind = kind }
+}
+
+/// 网页控件层需要的全部事实：进度、前进/后退可用性、标题、失败原因、折叠比例。
+///
+/// 参照 Nagram `BrowserScreen.Node`：WebView 只管内容，这些量通过 KVO 与 delegate
+/// 汇总到模型里，SwiftUI 只订阅。否则视图要反向持有 UIKit 对象，
+/// 折叠动画与进度线都得跨层读 `WKWebView`，状态一多就互相打架。
+final class LoginWebChromeModel: ObservableObject {
+    @Published var title = ""
+    @Published var progress: Double = 0
+    @Published var canGoBack = false
+    @Published var canGoForward = false
+    @Published var errorMessage: String?
+    /// 0 = 完全展开，1 = 完全收起（Nagram 的 `panelCollapseFraction`）。
+    @Published var collapseFraction: CGFloat = 0
+
+    private var offsetToTopEdge: CGFloat = 0
+
+    /// 与 `BrowserScreen.Node.onContentScrollingUpdate` 同一套算法：
+    /// 用「到顶部偏移的增量 ÷ 顶部面板高度」累加比例，停下时按 0.5 吸附，
+    /// 回到顶端直接归零。这样上下滑动手感一致，比例也不会漂到端点回不来。
+    func updateCollapse(offsetToTopEdge offset: CGFloat, isInteracting: Bool, isReset: Bool) {
+        let delta = offset - offsetToTopEdge
+        offsetToTopEdge = offset
+        var fraction = collapseFraction
+        if isReset || offset <= 0 {
+            fraction = 0
+        } else {
+            fraction = min(1, max(0, fraction - (-delta) / LoginChrome.headerHeight))
+            if !isInteracting { fraction = fraction < 0.5 ? 0 : 1 }
+        }
+        if abs(fraction - collapseFraction) > 0.01 { collapseFraction = fraction }
+    }
+
+    func fail(_ message: String) { errorMessage = message }
+    func clearError() { errorMessage = nil }
+}
+
 /// 只读详情的内容载体。
 private struct LoginDetail: Identifiable {
     let id = UUID()
@@ -311,6 +537,13 @@ private struct SourceLoginWebView: UIViewRepresentable {
     let sourceID: String
     let loginCheckJavaScript: String?
     let reloadID: UUID
+    /// 控件层下发的导航指令（后退 / 前进）。刷新仍走 `reloadID`，
+    /// 因为它还要顺带刷新 `customUserAgent`。
+    let command: LoginWebCommand?
+    /// 让给玻璃控件层的内容内边距。WebView 铺满整屏（含安全区），
+    /// 靠这个值把首尾留出来——正是 Nagram `WebView.customBottomInset` 的思路。
+    let contentInsets: UIEdgeInsets
+    let model: LoginWebChromeModel
     @Binding var status: String
     @Binding var isChecking: Bool
 
@@ -331,12 +564,30 @@ private struct SourceLoginWebView: UIViewRepresentable {
             message: "登录页 WebView UA：\(userAgent ?? "系统默认")"
         )
         webView.navigationDelegate = context.coordinator
+        // 内容铺满整屏后，安全区与控件避让都由我们自己给（Nagram 同做法）：
+        // 关掉系统的自动内边距，再由 `contentInsets` 精确留出头部与工具条高度。
+        webView.scrollView.contentInsetAdjustmentBehavior = .never
+        webView.scrollView.contentInset = contentInsets
+        webView.scrollView.verticalScrollIndicatorInsets = contentInsets
+        webView.scrollView.delegate = context.coordinator
+        context.coordinator.observe(webView)
         context.coordinator.installExistingCookies(in: webView) { webView.load(request) }
         return webView
     }
 
     func updateUIView(_ webView: WKWebView, context: Context) {
         context.coordinator.parent = self
+        webView.scrollView.contentInset = contentInsets
+        webView.scrollView.verticalScrollIndicatorInsets = contentInsets
+        // 指令按 id 只执行一次：`updateUIView` 在每次状态变化时都会跑，
+        // 直接调用会让一次「后退」点击变成连点。
+        if let command, context.coordinator.lastCommandID != command.id {
+            context.coordinator.lastCommandID = command.id
+            switch command.kind {
+            case .back: webView.goBack()
+            case .forward: webView.goForward()
+            }
+        }
         guard context.coordinator.lastReloadID != reloadID else { return }
         context.coordinator.lastReloadID = reloadID
         // 重新载入时按当前设置刷新 UA：否则用户改完 UA 点「重新载入」，
@@ -345,17 +596,100 @@ private struct SourceLoginWebView: UIViewRepresentable {
         webView.reload()
     }
 
-    final class Coordinator: NSObject, WKNavigationDelegate {
+    final class Coordinator: NSObject, WKNavigationDelegate, UIScrollViewDelegate {
         var parent: SourceLoginWebView
         var lastReloadID: UUID
+        var lastCommandID: UUID?
+        private weak var observedWebView: WKWebView?
 
         init(parent: SourceLoginWebView) {
             self.parent = parent
             lastReloadID = parent.reloadID
+            lastCommandID = parent.command?.id
+        }
+
+        deinit {
+            if let observedWebView { unobserve(observedWebView) }
+        }
+
+        // MARK: 状态汇总
+
+        private static let observedKeyPaths = [
+            #keyPath(WKWebView.title),
+            #keyPath(WKWebView.estimatedProgress),
+            #keyPath(WKWebView.canGoBack),
+            #keyPath(WKWebView.canGoForward)
+        ]
+
+        func observe(_ webView: WKWebView) {
+            guard observedWebView !== webView else { return }
+            if let previous = observedWebView { unobserve(previous) }
+            observedWebView = webView
+            for keyPath in Self.observedKeyPaths {
+                webView.addObserver(self, forKeyPath: keyPath, options: [.new], context: nil)
+            }
+        }
+
+        private func unobserve(_ webView: WKWebView) {
+            for keyPath in Self.observedKeyPaths {
+                webView.removeObserver(self, forKeyPath: keyPath)
+            }
+        }
+
+        override func observeValue(
+            forKeyPath keyPath: String?,
+            of object: Any?,
+            change: [NSKeyValueChangeKey: Any]?,
+            context: UnsafeMutableRawPointer?
+        ) {
+            guard let webView = observedWebView else { return }
+            switch keyPath {
+            case #keyPath(WKWebView.title):
+                parent.model.title = webView.title ?? ""
+            case #keyPath(WKWebView.estimatedProgress):
+                parent.model.progress = webView.estimatedProgress
+            case #keyPath(WKWebView.canGoBack):
+                parent.model.canGoBack = webView.canGoBack
+            case #keyPath(WKWebView.canGoForward):
+                parent.model.canGoForward = webView.canGoForward
+            default:
+                super.observeValue(forKeyPath: keyPath, of: object, change: change, context: context)
+            }
+        }
+
+        // MARK: 滚动折叠
+
+        func scrollViewDidScroll(_ scrollView: UIScrollView) {
+            updateCollapse(scrollView, isInteracting: scrollView.isDragging || scrollView.isDecelerating)
+        }
+
+        func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+            guard !decelerate else { return }
+            updateCollapse(scrollView, isInteracting: false)
+        }
+
+        func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+            updateCollapse(scrollView, isInteracting: false)
+        }
+
+        func scrollViewDidScrollToTop(_ scrollView: UIScrollView) {
+            parent.model.updateCollapse(offsetToTopEdge: 0, isInteracting: false, isReset: true)
+        }
+
+        /// 距顶部偏移与 Nagram `BrowserWebContent.updateScrollingOffset` 一致：
+        /// 取 `bounds.minY`，负值（橡皮筋下拉）按 0 处理。
+        private func updateCollapse(_ scrollView: UIScrollView, isInteracting: Bool) {
+            parent.model.updateCollapse(
+                offsetToTopEdge: max(0, scrollView.bounds.minY),
+                isInteracting: isInteracting,
+                isReset: false
+            )
         }
 
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation?) {
             parent.status = "正在打开登录页…"
+            parent.model.clearError()
+            parent.model.progress = 0
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation?) {
@@ -421,11 +755,20 @@ private struct SourceLoginWebView: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation?, withError error: Error) {
-            parent.status = "登录页加载失败：\(error.localizedDescription)"
+            failLogin(with: error)
         }
 
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation?, withError error: Error) {
-            parent.status = "登录页加载失败：\(error.localizedDescription)"
+            failLogin(with: error)
+        }
+
+        /// 失败同时落到状态文案与玻璃错误卡：只写状态条的话，
+        /// 内容区就是一片白屏，用户看不出是「还没加载」还是「已经失败」。
+        private func failLogin(with error: Error) {
+            let message = error.localizedDescription
+            parent.status = "登录页加载失败：\(message)"
+            parent.model.fail(message)
+            parent.model.progress = 0
         }
 
         func installExistingCookies(in webView: WKWebView, completion: @escaping () -> Void) {

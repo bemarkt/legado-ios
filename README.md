@@ -8,7 +8,7 @@
 
 一款优先兼容阅读书源的 iOS 阅读器
 
-![iOS 15+](https://img.shields.io/badge/iOS-15%2B-315C50)
+![iOS 26+](https://img.shields.io/badge/iOS-26%2B-315C50)
 ![Swift](https://img.shields.io/badge/Swift-F05138?logo=swift&logoColor=white)
 [![GPL v3](https://img.shields.io/badge/License-GPL%20v3-blue)](LICENSE)
 [![TestFlight 公测](https://img.shields.io/badge/TestFlight-Beta-0D96F6?logo=apple&logoColor=white)](https://testflight.apple.com/join/RSmhQ9Xn)
@@ -25,7 +25,7 @@
 
 ## 下载安装
 
-支持 **iOS / iPadOS 15.0 及以上**。
+支持 **iOS / iPadOS 26.0 及以上**（Liquid Glass 等 iOS 26 SDK API 直接使用，不设回落分支）。
 
 ### TestFlight 公测（推荐）
 

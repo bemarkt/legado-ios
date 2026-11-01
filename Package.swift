@@ -4,7 +4,9 @@ import PackageDescription
 let package = Package(
     name: "LegadoIOS",
     platforms: [
-        .iOS(.v15),
+        // 用字符串形式而不是 `.v26` 枚举：`swift-tools-version: 6.0` 的
+        // PackageDescription 未必带 `.v26`，字符串入口任何工具链版本都成立。
+        .iOS("26.0"),
         .macOS(.v14)
     ],
     products: [

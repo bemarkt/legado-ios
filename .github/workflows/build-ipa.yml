@@ -19,14 +19,12 @@ on:
           - Release
           - Debug
       runner:
-        description: 'macOS runner 标签'
+        description: 'macOS runner 标签（部署目标为 iOS 26，只有 macos-26 带 Xcode 26 SDK）'
         type: choice
         required: false
         default: macos-26
         options:
           - macos-26
-          - macos-15
-          - macos-14
 
 permissions:
   contents: read

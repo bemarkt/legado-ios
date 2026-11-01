@@ -1,0 +1,132 @@
+name: JavaScript Engine CI
+
+# QuickJS 迁移的验证入口。
+#
+# 迁移期间的静态核对在 Windows 上完成，无法编译 quickjs.c（2164 KB），
+# 因此本 workflow 是唯一能给出「编译通过 / 测试通过」结论的地方：
+#   1. swiftpm   —— 编译 LegadoCore 与 vendored CQuickJS，并跑 LegadoCoreTests
+#                   （含 QuickJSRuntimeTests：大脚本、近 4MB jsLib、替换多轮共享变量等）
+#   2. xcode-app —— 按 Xcode app target 的显式 fileRef 路径编译到模拟器，
+#                   验证 SwiftPM 本地包 linkage、pbxproj 登记与 import CQuickJS 可见性
+#
+# 两条 job 必须分开：swiftpm 走 Package.swift，xcode-app 走 pbxproj，
+# 只跑其中一条会漏掉另一条路径的一半问题。
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'Sources/LegadoCore/**'
+      - 'Tests/LegadoCoreTests/**'
+      - 'Vendor/QuickJS/**'
+      - 'Package.swift'
+      - 'Legado.xcodeproj/**'
+      - '.github/workflows/javascript-engine-ci.yml'
+  pull_request:
+    paths:
+      - 'Sources/LegadoCore/**'
+      - 'Tests/LegadoCoreTests/**'
+      - 'Vendor/QuickJS/**'
+      - 'Package.swift'
+      - 'Legado.xcodeproj/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: js-engine-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  swiftpm:
+    name: SwiftPM build + LegadoCore tests
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          submodules: recursive
+
+      - name: Show toolchain
+        run: |
+          swift --version
+          xcodebuild -version
+          sw_vers
+
+      - name: Cache Swift packages
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: ${{ runner.os }}-spm-${{ hashFiles('Package.resolved') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-
+
+      - name: Build (includes vendored QuickJS C target)
+        run: swift build --build-tests
+
+      # 串行 + 按 target 过滤：
+      #   * swift-testing 默认把 367 个用例一起并行拉起，每个用例都新建一个
+      #     QuickJS Runtime；日志里 367 started / 0 finished，进程随后
+      #     "Exited with unexpected signal code 11"，退出码 1 来自崩溃而不是断言。
+      #   * 原来 `swift test` 没过滤 target，LegadoAppModelsTests 也一起跑，
+      #     一条 JS 崩溃会连带把不相关的结论染红。
+      - name: Run LegadoCore tests
+        env:
+          SWIFT_BACKTRACE: enable=yes,threads=crashed
+        run: |
+          set -o pipefail
+          swift test --filter LegadoCoreTests --no-parallel 2>&1 | tee swift-test-legadocore.log
+
+      - name: Run LegadoAppModels tests
+        env:
+          SWIFT_BACKTRACE: enable=yes,threads=crashed
+        run: |
+          set -o pipefail
+          swift test --filter LegadoAppModelsTests --no-parallel 2>&1 | tee swift-test-appmodels.log
+
+      # 崩溃时把 tee 出来的日志带出来，否则 signal 11 只留一行
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SwiftPM-Test-Logs
+          path: |
+            swift-test-*.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  xcode-app:
+    name: Xcode app build (iOS simulator)
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          submodules: recursive
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          xcodebuild -showsdks
+
+      # 与 build-ipa.yml 共用同一份 xcodebuild 参数（composite action）。
+      # 本 job 保留的意义：验证 pbxproj 的 fileRef 登记与 import CQuickJS
+      # 在 App target 下可见——这是 SwiftPM job 覆盖不到的路径。
+      - name: Build app for simulator
+        uses: ./.github/actions/legado-xcode-build
+        with:
+          configuration: Debug
+          destination: generic/platform=iOS Simulator
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: JS-Engine-Build-Logs
+          path: |
+            build/DerivedData/Logs/
+          if-no-files-found: ignore
+          retention-days: 7

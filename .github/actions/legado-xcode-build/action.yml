@@ -1,0 +1,75 @@
+name: Legado Xcode build
+description: >-
+  单一来源的 xcodebuild 调用。JavaScript Engine CI（iOS 模拟器）与 Build Unsigned IPA
+  （设备 + 打包）共用同一组参数，避免两处逐字复制后悄悄漂移。
+
+inputs:
+  project:
+    description: Xcode 工程文件
+    required: false
+    default: Legado.xcodeproj
+  scheme:
+    description: scheme 名
+    required: false
+    default: Legado
+  configuration:
+    description: 构建配置
+    required: false
+    default: Debug
+  destination:
+    description: xcodebuild -destination 取值
+    required: false
+    default: generic/platform=iOS Simulator
+  derived-data-path:
+    description: -derivedDataPath
+    required: false
+    default: build/DerivedData
+  source-packages:
+    description: -clonedSourcePackagesDirPath
+    required: false
+    default: SourcePackages
+  resolved-only:
+    description: 'true 时追加 -onlyUsePackageVersionsFromResolvedFile'
+    required: false
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    - name: xcodebuild
+      shell: bash
+      env:
+        PROJECT: ${{ inputs.project }}
+        SCHEME: ${{ inputs.scheme }}
+        CONFIGURATION: ${{ inputs.configuration }}
+        DESTINATION: ${{ inputs.destination }}
+        DERIVED_DATA: ${{ inputs.derived-data-path }}
+        SOURCE_PACKAGES: ${{ inputs.source-packages }}
+        RESOLVED_ONLY: ${{ inputs.resolved-only }}
+      run: |
+        set -euo pipefail
+
+        # macOS 自带 bash 3.2：空数组展开在 set -u 下会报 unbound variable，
+        # 所以用字符串拼接，空值展开成 0 个参数。
+        RESOLVED_FLAG=""
+        if [ "$RESOLVED_ONLY" = "true" ]; then
+          RESOLVED_FLAG="-onlyUsePackageVersionsFromResolvedFile"
+        fi
+
+        xcodebuild \
+          -project "$PROJECT" \
+          -scheme "$SCHEME" \
+          -configuration "$CONFIGURATION" \
+          -destination "$DESTINATION" \
+          -derivedDataPath "$DERIVED_DATA" \
+          -clonedSourcePackagesDirPath "$SOURCE_PACKAGES" \
+          $RESOLVED_FLAG \
+          -skipPackagePluginValidation \
+          -skipMacroValidation \
+          CODE_SIGNING_ALLOWED=NO \
+          CODE_SIGNING_REQUIRED=NO \
+          CODE_SIGN_IDENTITY='' \
+          CODE_SIGN_ENTITLEMENTS='' \
+          DEVELOPMENT_TEAM='' \
+          ONLY_ACTIVE_ARCH=NO \
+          build

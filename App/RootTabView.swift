@@ -3,107 +3,46 @@ import UniformTypeIdentifiers
 
 struct RootTabView: View {
     @EnvironmentObject private var sourceLibrary: SourceLibraryModel
-    private enum Tab: Hashable { case bookshelf, explore, statistics, my }
-    @State private var selection: Tab
+    @State private var selection: AppTabItem
     @State private var showsDemoReader = false
     @State private var didOpenDemoReader = false
     @State private var sourceImportIsPresented = false
     @State private var displayedSourceNotice: SourceLibraryModel.Notice?
     @AppStorage("themeMode") private var themeMode = "0"
+    @AppStorage(TabBarSettings.orderKey) private var tabBarOrder = TabBarSettings.defaultOrderRaw
+    @AppStorage(TabBarSettings.hiddenKey) private var tabBarHidden = ""
 
     init() {
         let arguments = ProcessInfo.processInfo.arguments
         let requested = arguments.firstIndex(of: "-uiDemoTab")
             .flatMap { arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil }
-        let initial: Tab = switch requested {
-        case "explore": .explore
-        case "statistics": .statistics
-        case "settings": .my
-        default:
-            switch UserDefaults.standard.string(forKey: "defaultHomePage") {
-            case "explore": .explore
-            case "statistics": .statistics
-            case "settings": .my
-            default: .bookshelf
-            }
+        let stored = UserDefaults.standard.string(forKey: "defaultHomePage")
+        let preferred: AppTabItem
+        switch requested ?? stored ?? "bookshelf" {
+        case "explore": preferred = .explore
+        case "statistics": preferred = .statistics
+        case "settings", "my": preferred = .my
+        default: preferred = .bookshelf
         }
-        _selection = State(initialValue: initial)
+        let defaults = UserDefaults.standard
+        let visible = TabBarSettings.visibleOrder(
+            orderRaw: defaults.string(forKey: TabBarSettings.orderKey) ?? TabBarSettings.defaultOrderRaw,
+            hiddenRaw: defaults.string(forKey: TabBarSettings.hiddenKey) ?? ""
+        )
+        _selection = State(initialValue: visible.contains(preferred) ? preferred : (visible.first ?? .bookshelf))
     }
 
     var body: some View {
         TabView(selection: $selection) {
-            ReadingNavigationStack {
-                Group {
-                    if ProcessInfo.processInfo.arguments.contains("-uiDemoSourceSwitch") {
-                        SourceSwitchView(
-                            book: DemoContent.books[0],
-                            sources: DemoContent.sources,
-                            demoCandidates: DemoContent.sourceSwitchCandidates
-                        ) { _, _ in }
-                    } else if ProcessInfo.processInfo.arguments.contains("-uiDemoBookDetail") {
-                        BookDetailView(
-                            demoBook: DemoContent.books[0],
-                            source: DemoContent.sources[0],
-                            chapters: DemoContent.readerChapters
-                        )
-                    } else if requestedDemoPage == "search" {
-                        SearchView(initialKeyword: automationSearchKeyword)
-                    } else if requestedDemoPage == "sources" {
-                        SourceManagementView()
-                    } else if requestedDemoPage == "rss" {
-                        RSSHomeView()
-                    } else if requestedDemoPage == "rss-photo" {
-                        RSSPhotoView(value: "data:image/png;base64,", source: RssSource(sourceUrl: "https://appearance.invalid", sourceName: "图片外观检查"))
-                    } else {
-                        BookshelfView()
-                    }
-                }
-                .readingNavigationDestination(isPresented: $showsDemoReader) {
-                    ReaderView(
-                        demoBook: DemoContent.books[0],
-                        chapters: DemoContent.readerChapters,
-                        initialIndex: 0,
-                        content: DemoContent.readerText
-                    )
-                }
-                .task {
-                    guard !didOpenDemoReader else { return }
-                    didOpenDemoReader = true
-                    showsDemoReader = ProcessInfo.processInfo.arguments.contains("-uiDemoReader")
-                }
+            ForEach(visibleTabs) { item in
+                tabContent(for: item)
+                    .tabItem { Label(item.title, systemImage: item.systemImage) }
+                    .tag(item)
             }
-                .tabItem { Label("书架", systemImage: "book.fill") }
-                .tag(Tab.bookshelf)
-
-            ReadingNavigationStack { ExploreView() }
-                .tabItem { Label("发现", systemImage: "safari") }
-                .tag(Tab.explore)
-
-            ReadingNavigationStack { ReadingStatisticsView() }
-                .tabItem { Label("统计", systemImage: "chart.bar") }
-                .tag(Tab.statistics)
-
-            ReadingNavigationStack {
-                if ProcessInfo.processInfo.arguments.contains("-uiDemoRules") {
-                    ReplaceRuleManagementView()
-                } else if ProcessInfo.processInfo.arguments.contains("-uiDemoHistory") {
-                    ReadingHistoryView()
-                } else if ProcessInfo.processInfo.arguments.contains("-uiDemoFiles") {
-                    FileManagementView()
-                } else if ProcessInfo.processInfo.arguments.contains("-uiDemoOtherSettings") {
-                    OtherSettingsView()
-                } else if ProcessInfo.processInfo.arguments.contains("-uiDemoAbout") {
-                    AboutView()
-                } else if ProcessInfo.processInfo.arguments.contains("-uiDemoLogs") {
-                    DiagnosticLogView()
-                } else {
-                    SettingsView()
-                }
-            }
-                .tabItem { Label("我的", systemImage: "person.crop.circle") }
-                .tag(Tab.my)
         }
         .readingTabBarBackground()
+        .onChange(of: tabBarOrder) { _ in reconcileSelection() }
+        .onChange(of: tabBarHidden) { _ in reconcileSelection() }
         .preferredColorScheme(themeMode == "2" ? .dark : (themeMode == "1" || themeMode == "3" ? .light : nil))
         .transaction { transaction in
             if themeMode == "3" { transaction.animation = nil }
@@ -128,6 +67,88 @@ struct RootTabView: View {
         }
         .tint(ReadingTheme.accent)
         .toggleStyle(SwitchToggleStyle(tint: ReadingTheme.toggleTint))
+    }
+
+    @ViewBuilder private func tabContent(for item: AppTabItem) -> some View {
+        switch item {
+        case .bookshelf: bookshelfTab
+        case .explore: ReadingNavigationStack { ExploreView() }
+        case .statistics: ReadingNavigationStack { ReadingStatisticsView() }
+        case .my: myTab
+        }
+    }
+
+    private var bookshelfTab: some View {
+        ReadingNavigationStack {
+            Group {
+                if ProcessInfo.processInfo.arguments.contains("-uiDemoSourceSwitch") {
+                    SourceSwitchView(
+                        book: DemoContent.books[0],
+                        sources: DemoContent.sources,
+                        demoCandidates: DemoContent.sourceSwitchCandidates
+                    ) { _, _ in }
+                } else if ProcessInfo.processInfo.arguments.contains("-uiDemoBookDetail") {
+                    BookDetailView(
+                        demoBook: DemoContent.books[0],
+                        source: DemoContent.sources[0],
+                        chapters: DemoContent.readerChapters
+                    )
+                } else if requestedDemoPage == "search" {
+                    SearchView(initialKeyword: automationSearchKeyword)
+                } else if requestedDemoPage == "sources" {
+                    SourceManagementView()
+                } else if requestedDemoPage == "rss" {
+                    RSSHomeView()
+                } else if requestedDemoPage == "rss-photo" {
+                    RSSPhotoView(value: "data:image/png;base64,", source: RssSource(sourceUrl: "https://appearance.invalid", sourceName: "图片外观检查"))
+                } else {
+                    BookshelfView()
+                }
+            }
+            .readingNavigationDestination(isPresented: $showsDemoReader) {
+                ReaderView(
+                    demoBook: DemoContent.books[0],
+                    chapters: DemoContent.readerChapters,
+                    initialIndex: 0,
+                    content: DemoContent.readerText
+                )
+            }
+            .task {
+                guard !didOpenDemoReader else { return }
+                didOpenDemoReader = true
+                showsDemoReader = ProcessInfo.processInfo.arguments.contains("-uiDemoReader")
+            }
+        }
+    }
+
+    private var myTab: some View {
+        ReadingNavigationStack {
+            if ProcessInfo.processInfo.arguments.contains("-uiDemoRules") {
+                ReplaceRuleManagementView()
+            } else if ProcessInfo.processInfo.arguments.contains("-uiDemoHistory") {
+                ReadingHistoryView()
+            } else if ProcessInfo.processInfo.arguments.contains("-uiDemoFiles") {
+                FileManagementView()
+            } else if ProcessInfo.processInfo.arguments.contains("-uiDemoOtherSettings") {
+                OtherSettingsView()
+            } else if ProcessInfo.processInfo.arguments.contains("-uiDemoAbout") {
+                AboutView()
+            } else if ProcessInfo.processInfo.arguments.contains("-uiDemoLogs") {
+                DiagnosticLogView()
+            } else {
+                SettingsView()
+            }
+        }
+    }
+
+    private var visibleTabs: [AppTabItem] {
+        TabBarSettings.visibleOrder(orderRaw: tabBarOrder, hiddenRaw: tabBarHidden)
+    }
+
+    private func reconcileSelection() {
+        let visible = visibleTabs
+        guard !visible.isEmpty, !visible.contains(selection) else { return }
+        selection = visible[0]
     }
 
     private var requestedDemoPage: String? {
@@ -1259,6 +1280,7 @@ private struct SearchBookRow: View {
 private struct SettingsView: View {
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage("themeMode") private var themeMode = "0"
+    @AppStorage(TabBarSettings.hiddenKey) private var tabBarHidden = ""
     @ScaledMetric(relativeTo: .body) private var rowHeight = 52
 
     var body: some View {
@@ -1270,6 +1292,7 @@ private struct SettingsView: View {
                         appCard
                         readingSection
                         rulesSection
+                        hiddenTabsSection
                         settingSection("文件与存储") {
                             settingLink("文件管理", icon: "folder", showsSeparator: false) {
                                 FileManagementView()
@@ -1378,13 +1401,8 @@ private struct SettingsView: View {
     private var readingSection: some View {
         settingSection("阅读") {
             settingLink("阅读设置", icon: "textformat.size") { ReadingPreferencesView() }
-            Menu {
-                Picker("外观", selection: $themeMode) {
-                    Text("跟随系统").tag("0")
-                    Text("浅色").tag("1")
-                    Text("深色").tag("2")
-                    Text("E-Ink 模式").tag("3")
-                }
+            NavigationLink {
+                AppearanceInteractionView()
             } label: {
                 settingRow("外观", icon: "circle.lefthalf.filled", value: appearanceTitle, showsValuePill: true)
             }
@@ -1424,6 +1442,35 @@ private struct SettingsView: View {
             settingLink("其他设置", icon: "gearshape") { OtherSettingsView() }
             settingLink("关于", icon: "info.circle", showsSeparator: false) { AboutView() }
         }
+    }
+
+    @ViewBuilder private var hiddenTabsSection: some View {
+        if !hiddenTabs.isEmpty {
+            settingSection("已隐藏的标签") {
+                ForEach(Array(hiddenTabs.enumerated()), id: \.element) { index, item in
+                    NavigationLink {
+                        hiddenTabDestination(item)
+                    } label: {
+                        settingRow(item.title, icon: item.systemImage, showsSeparator: index < hiddenTabs.count - 1)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("profile.hidden.\(item.rawValue)")
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private func hiddenTabDestination(_ item: AppTabItem) -> some View {
+        switch item {
+        case .explore: ExploreView(isSecondaryPage: true)
+        case .statistics: ReadingStatisticsView(isSecondaryPage: true)
+        default: EmptyView()
+        }
+    }
+
+    private var hiddenTabs: [AppTabItem] {
+        let hidden = TabBarSettings.decodeHidden(tabBarHidden)
+        return AppTabItem.defaultOrder.filter { $0.isHideable && hidden.contains($0) }
     }
 
     private var appearanceTitle: String {
@@ -2018,17 +2065,19 @@ private struct ReadingPreferencesView: View {
                 Slider(value: $lineSpacing, in: 0...50, step: 1)
                 ReadingLabeledContent("段距", value: String(format: "%.1f", paragraphSpacing))
                 Slider(value: $paragraphSpacing, in: 0...50, step: 1)
-                Picker("字重", selection: $fontWeight) {
-                    Text("正常").tag(0)
-                    Text("粗体").tag(1)
-                    Text("细体").tag(2)
-                }
+                ReadingMenuPickerRow(
+                    title: "字重",
+                    selection: $fontWeight,
+                    options: [ReadingMenuOption(0, "正常"), ReadingMenuOption(1, "粗体"), ReadingMenuOption(2, "细体")],
+                    identifier: "preferences.fontWeight"
+                )
                 TextField("段落缩进字符", text: $paragraphIndent)
-                Picker("下划线", selection: $underlineMode) {
-                    Text("关闭").tag(0)
-                    Text("实线").tag(1)
-                    Text("虚线").tag(2)
-                }
+                ReadingMenuPickerRow(
+                    title: "下划线",
+                    selection: $underlineMode,
+                    options: [ReadingMenuOption(0, "关闭"), ReadingMenuOption(1, "实线"), ReadingMenuOption(2, "虚线")],
+                    identifier: "preferences.underline"
+                )
             }
             Section("正文边距") {
                 paddingSlider("左边距", value: $paddingLeft)
@@ -2037,11 +2086,12 @@ private struct ReadingPreferencesView: View {
                 paddingSlider("下边距", value: $paddingBottom)
             }
             Section("章节标题") {
-                Picker("标题模式", selection: $titleMode) {
-                    Text("左对齐").tag(0)
-                    Text("居中").tag(1)
-                    Text("隐藏").tag(2)
-                }
+                ReadingMenuPickerRow(
+                    title: "标题模式",
+                    selection: $titleMode,
+                    options: [ReadingMenuOption(0, "左对齐"), ReadingMenuOption(1, "居中"), ReadingMenuOption(2, "隐藏")],
+                    identifier: "preferences.titleMode"
+                )
                 ReadingLabeledContent("字号增量", value: String(format: "%+.0f", titleSize))
                 Slider(value: $titleSize, in: -10...30, step: 1)
                 ReadingLabeledContent("上间距", value: String(Int(titleTopSpacing)))
@@ -2050,13 +2100,18 @@ private struct ReadingPreferencesView: View {
                 Slider(value: $titleBottomSpacing, in: 0...100, step: 1)
             }
             Section("翻页") {
-                Picker("翻页模式", selection: $pageAnimation) {
-                    Text("覆盖").tag(0)
-                    Text("滑动").tag(1)
-                    Text("仿真").tag(2)
-                    Text("滚动").tag(3)
-                    Text("无动画").tag(4)
-                }
+                ReadingMenuPickerRow(
+                    title: "翻页模式",
+                    selection: $pageAnimation,
+                    options: [
+                        ReadingMenuOption(0, "覆盖"),
+                        ReadingMenuOption(1, "滑动"),
+                        ReadingMenuOption(2, "仿真"),
+                        ReadingMenuOption(3, "滚动"),
+                        ReadingMenuOption(4, "无动画")
+                    ],
+                    identifier: "preferences.pageAnimation"
+                )
             }
             Section("屏幕") {
                 Toggle("阅读时不自动锁屏", isOn: $keepScreenOn)

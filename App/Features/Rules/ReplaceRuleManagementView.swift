@@ -26,10 +26,15 @@ struct ReplaceRuleManagementView: View {
             } else {
                 Section {
                     ReadingLabeledContent("已启用", value: "\(library.rules.filter(\.isEnabled).count) / \(library.rules.count)")
-                    Picker("分组", selection: $group) {
-                        Text("全部").tag(String?.none)
-                        ForEach(Array(Set(library.rules.compactMap(\.group))).sorted(), id: \.self) { Text($0).tag(String?.some($0)) }
-                    }
+                    ReadingMenuPickerRow(
+                        title: "分组",
+                        selection: $group,
+                        options: [ReadingMenuOption<String?>(nil, "全部")]
+                            + Array(Set(library.rules.compactMap(\.group))).sorted().map {
+                                ReadingMenuOption<String?>(Optional($0), $0)
+                            },
+                        identifier: "rules.group"
+                    )
                 }
                 Section {
                     ForEach(filtered) { rule in

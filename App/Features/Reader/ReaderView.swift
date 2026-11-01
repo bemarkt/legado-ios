@@ -1247,11 +1247,12 @@ struct ReaderView: View {
                     valueSlider("字间距", value: $letterSpacing, range: -0.5...0.5, step: 0.01, format: { String(format: "%.2f", $0) })
                     valueSlider("行间距", value: $lineSpacing, range: 0...50, format: { "\(Int($0))" })
                     valueSlider("段距", value: $paragraphSpacing, range: 0...50, format: { String(format: "%.1f", $0) })
-                    Picker("字重", selection: $fontWeight) {
-                        Text("正常").tag(0)
-                        Text("粗体").tag(1)
-                        Text("细体").tag(2)
-                    }
+                    ReadingMenuPickerRow(
+                        title: "字重",
+                        selection: $fontWeight,
+                        options: [ReadingMenuOption(0, "正常"), ReadingMenuOption(1, "粗体"), ReadingMenuOption(2, "细体")],
+                        identifier: "reader.fontWeight"
+                    )
                     VStack(alignment: .leading, spacing: 6) {
                         Text("段落缩进")
                         TextField("请输入缩进字符", text: $paragraphIndent)
@@ -1276,11 +1277,12 @@ struct ReaderView: View {
                     if let fontError {
                         Text(fontError).font(.footnote).foregroundStyle(.red)
                     }
-                    Picker("下划线", selection: $underlineMode) {
-                        Text("关闭").tag(0)
-                        Text("实线").tag(1)
-                        Text("虚线").tag(2)
-                    }
+                    ReadingMenuPickerRow(
+                        title: "下划线",
+                        selection: $underlineMode,
+                        options: [ReadingMenuOption(0, "关闭"), ReadingMenuOption(1, "实线"), ReadingMenuOption(2, "虚线")],
+                        identifier: "reader.underline"
+                    )
                 }
 
                 Section("章节标题") {
@@ -1339,15 +1341,22 @@ struct ReaderView: View {
                 }
 
                 Section("页眉页脚") {
-                    Picker("页眉显示", selection: $headerMode) {
-                        Text("状态栏显示时隐藏").tag(0)
-                        Text("显示").tag(1)
-                        Text("隐藏").tag(2)
-                    }
-                    Picker("页脚显示", selection: $footerMode) {
-                        Text("显示").tag(0)
-                        Text("隐藏").tag(1)
-                    }
+                    ReadingMenuPickerRow(
+                        title: "页眉显示",
+                        selection: $headerMode,
+                        options: [
+                            ReadingMenuOption(0, "状态栏显示时隐藏"),
+                            ReadingMenuOption(1, "显示"),
+                            ReadingMenuOption(2, "隐藏")
+                        ],
+                        identifier: "reader.headerMode"
+                    )
+                    ReadingMenuPickerRow(
+                        title: "页脚显示",
+                        selection: $footerMode,
+                        options: [ReadingMenuOption(0, "显示"), ReadingMenuOption(1, "隐藏")],
+                        identifier: "reader.footerMode"
+                    )
                     tipPicker("页眉左", selection: $tipHeaderLeft)
                     tipPicker("页眉中", selection: $tipHeaderMiddle)
                     tipPicker("页眉右", selection: $tipHeaderRight)
@@ -1456,11 +1465,12 @@ struct ReaderView: View {
     ]
 
     private func tipPicker(_ title: String, selection: Binding<Int>) -> some View {
-        Picker(title, selection: selection) {
-            ForEach(Self.readerTipChoices, id: \.0) { value, name in
-                Text(name).tag(value)
-            }
-        }
+        ReadingMenuPickerRow(
+            title: title,
+            selection: selection,
+            options: Self.readerTipChoices.map { ReadingMenuOption($0.0, $0.1) },
+            identifier: "reader.tip.\(title)"
+        )
     }
 
 
@@ -1602,14 +1612,19 @@ struct ReaderView: View {
                 }
 
                 Section("屏幕") {
-                    Picker("屏幕方向", selection: $screenOrientation) {
-                        Text("跟随系统").tag("0")
-                        Text("竖向").tag("1")
-                        Text("横向").tag("2")
-                        Text("跟随传感器").tag("3")
-                        Text("反向竖屏").tag("4")
-                        Text("反向横屏").tag("5")
-                    }
+                    ReadingMenuPickerRow(
+                        title: "屏幕方向",
+                        selection: $screenOrientation,
+                        options: [
+                            ReadingMenuOption("0", "跟随系统"),
+                            ReadingMenuOption("1", "竖向"),
+                            ReadingMenuOption("2", "横向"),
+                            ReadingMenuOption("3", "跟随传感器"),
+                            ReadingMenuOption("4", "反向竖屏"),
+                            ReadingMenuOption("5", "反向横屏")
+                        ],
+                        identifier: "reader.screenOrientation"
+                    )
                     Toggle("阅读时不自动锁屏", isOn: $keepScreenOn)
                     if #available(iOS 16.0, *) {
                         Toggle("阅读时隐藏小横条", isOn: $hideHomeIndicator)
@@ -1625,25 +1640,27 @@ struct ReaderView: View {
                 }
 
                 Section("朗读") {
-                    Picker("全局朗读引擎", selection: $appTTSEngine) {
-                        Text("系统 TTS").tag("")
-                        ForEach(httpTTSEngines) { engine in
-                            Text(engine.name).tag(String(engine.id))
-                        }
-                    }
-                    Picker("本书朗读引擎", selection: bookTTSEngineBinding) {
-                        Text("跟随全局").tag("__global__")
-                        Text("系统 TTS").tag("")
-                        ForEach(httpTTSEngines) { engine in
-                            Text(engine.name).tag(String(engine.id))
-                        }
-                    }
-                    Picker("系统声音", selection: $systemTTSVoice) {
-                        Text("系统默认中文声音").tag("")
-                        ForEach(systemTTSVoices, id: \.identifier) { voice in
-                            Text("\(voice.name)（\(voice.language)）").tag(voice.identifier)
-                        }
-                    }
+                    ReadingMenuPickerRow(
+                        title: "全局朗读引擎",
+                        selection: $appTTSEngine,
+                        options: [ReadingMenuOption("", "系统 TTS")]
+                            + httpTTSEngines.map { ReadingMenuOption(String($0.id), $0.name) },
+                        identifier: "reader.ttsEngine"
+                    )
+                    ReadingMenuPickerRow(
+                        title: "本书朗读引擎",
+                        selection: bookTTSEngineBinding,
+                        options: [ReadingMenuOption("__global__", "跟随全局"), ReadingMenuOption("", "系统 TTS")]
+                            + httpTTSEngines.map { ReadingMenuOption(String($0.id), $0.name) },
+                        identifier: "reader.bookTTSEngine"
+                    )
+                    ReadingMenuPickerRow(
+                        title: "系统声音",
+                        selection: $systemTTSVoice,
+                        options: [ReadingMenuOption("", "系统默认中文声音")]
+                            + systemTTSVoices.map { ReadingMenuOption($0.identifier, "\($0.name)（\($0.language)）") },
+                        identifier: "reader.systemVoice"
+                    )
                     Toggle("跟随系统语速", isOn: $ttsFollowSystem)
                     Stepper("朗读语速：\(ttsSpeechRate)", value: $ttsSpeechRate, in: 0...45)
                         .disabled(ttsFollowSystem)

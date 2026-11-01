@@ -300,9 +300,12 @@ private struct HttpTTSLoginView: View {
                     SecureField(label(for: row), text: binding(for: row))
                         .onChange(of: values[row.name]) { _ in scheduleFieldAction(row.action) }
                 case "select":
-                    Picker(label(for: row), selection: binding(for: row)) {
-                        ForEach(options(for: row), id: \.self) { Text($0).tag($0) }
-                    }
+                    ReadingMenuPickerRow(
+                        title: label(for: row),
+                        selection: binding(for: row),
+                        options: options(for: row).map { ReadingMenuOption($0, $0) },
+                        identifier: "tts.login.row.\(row.name)"
+                    )
                     .onChange(of: values[row.name]) { _ in runAction(row.action) }
                 case "toggle":
                     Picker(label(for: row), selection: binding(for: row)) {

@@ -66,13 +66,15 @@ struct SourceManagementView: View {
             } else {
                 List {
                     Section {
-                        Picker("分组", selection: $selectedGroup) {
-                            Text("全部").tag(String?.none)
-                            Text("未分组").tag(String?.some(""))
-                            ForEach(library.groups, id: \.self) { group in
-                                Text(group).tag(String?.some(group))
-                            }
-                        }
+                        ReadingMenuPickerRow(
+                            title: "分组",
+                            selection: $selectedGroup,
+                            options: [ReadingMenuOption<String?>(nil, "全部"), ReadingMenuOption<String?>("", "未分组")]
+                                + library.groups.filter { !$0.isEmpty }.map {
+                                    ReadingMenuOption<String?>(Optional($0), $0)
+                                },
+                            identifier: "sources.group"
+                        )
                     }
                     Section {
                         ForEach(filteredSources) { source in

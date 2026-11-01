@@ -36,7 +36,12 @@ struct RSSSourceEditorView: View {
             Section("分类与列表规则") {
                 optionalField("分类URL（名称::URL）", \.sortUrl, axis: .vertical)
                 Toggle("单URL源", isOn: $source.singleUrl)
-                Picker("列表样式", selection: $source.articleStyle) { ForEach(0..<5, id: \.self) { Text("样式 \($0)").tag($0) } }
+                ReadingMenuPickerRow(
+                    title: "列表样式",
+                    selection: $source.articleStyle,
+                    options: (0..<5).map { ReadingMenuOption($0, "样式 \($0)") },
+                    identifier: "rss.articleStyle"
+                )
                 optionalField("列表规则", \.ruleArticles, axis: .vertical)
                 optionalField("下一页规则", \.ruleNextPage, axis: .vertical)
                 optionalField("标题规则", \.ruleTitle, axis: .vertical)
@@ -62,7 +67,12 @@ struct RSSSourceEditorView: View {
             }
             Section("其他") {
                 Stepper("自定义排序：\(source.customOrder)", value: $source.customOrder)
-                Picker("类型", selection: $source.type) { Text("网页").tag(0); Text("图片").tag(1); Text("视频").tag(2) }
+                ReadingMenuPickerRow(
+                    title: "类型",
+                    selection: $source.type,
+                    options: [ReadingMenuOption(0, "网页"), ReadingMenuOption(1, "图片"), ReadingMenuOption(2, "视频")],
+                    identifier: "rss.sourceType"
+                )
                 Toggle("启用预加载", isOn: $source.preload)
                 Toggle("优先加载缓存", isOn: $source.cacheFirst)
                 optionalField("搜索URL", \.searchUrl, axis: .vertical)

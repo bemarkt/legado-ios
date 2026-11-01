@@ -230,27 +230,42 @@ final class DarkModeUITests: XCTestCase {
         let appearance = app.buttons["profile.appearance"]
         XCTAssertTrue(appearance.waitForExistence(timeout: 10))
         appearance.tap()
+        XCTAssertTrue(app.navigationBars["外观与交互"].waitForExistence(timeout: 5))
+
+        let picker = app.buttons["appearance.modePicker"]
+        XCTAssertTrue(picker.waitForExistence(timeout: 5))
+        picker.tap()
         let system = app.buttons["跟随系统"]
         XCTAssertTrue(system.waitForExistence(timeout: 3))
         system.tap()
-        let followsSystem = expectation(for: NSPredicate(format: "value == %@", "跟随系统"), evaluatedWith: appearance)
-        wait(for: [followsSystem], timeout: 5)
+
         let initial = try luminances(app, in: app)
         let systemIsDark = initial[initial.count / 2] < 0.15
         for (choice, expectsDark) in [("深色", true), ("浅色", false), ("跟随系统", systemIsDark)] {
-            appearance.tap()
+            picker.tap()
             let option = app.buttons[choice]
-            if !option.waitForExistence(timeout: 2), app.buttons["外观"].exists { app.buttons["外观"].tap() }
             XCTAssertTrue(option.waitForExistence(timeout: 3))
             option.tap()
-            let changed = expectation(for: NSPredicate(format: "value == %@", choice), evaluatedWith: appearance)
-            wait(for: [changed], timeout: 5)
             let values = try luminances(app, in: app)
             let median = values[values.count / 2]
             if expectsDark { XCTAssertLessThan(median, 0.15) }
             else { XCTAssertGreaterThan(median, 0.6) }
             attach(app, name: "Live appearance \(choice)")
         }
+    }
+
+    func testHiddenTabPageKeepsBackNavigation() throws {
+        continueAfterFailure = false
+        // 隐藏「发现」后，应从「我的 → 已隐藏的标签」进入并保留返回按钮。
+        let app = launch(["-uiDemoTab", "settings", "-tabBarHidden", "explore"])
+        let entry = app.buttons["profile.hidden.explore"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 10))
+        scrollTo(entry, in: app)
+        entry.tap()
+        let bar = app.navigationBars["发现"]
+        XCTAssertTrue(bar.waitForExistence(timeout: 5))
+        XCTAssertTrue(bar.buttons.firstMatch.exists, "二级页需要保留返回按钮")
+        attach(app, name: "Hidden explore tab as secondary page")
     }
 
     private func scrollTo(_ element: XCUIElement, in app: XCUIApplication) {

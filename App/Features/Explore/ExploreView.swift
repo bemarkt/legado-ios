@@ -107,6 +107,12 @@ final class ExploreSourceViewModel: ObservableObject {
 
 struct ExploreView: View {
     @EnvironmentObject private var sourceLibrary: SourceLibraryModel
+    /// 作为「我的 → 已隐藏的标签」二级页打开时显示导航栏，保留返回按钮与右滑返回手势。
+    var isSecondaryPage = false
+
+    init(isSecondaryPage: Bool = false) {
+        self.isSecondaryPage = isSecondaryPage
+    }
 
     private var sources: [BookSource] {
         sourceLibrary.sources
@@ -201,7 +207,9 @@ struct ExploreView: View {
             }
         }
         .background(ReadingTheme.canvas)
-        .navigationBarHidden(true)
+        .navigationBarHidden(!isSecondaryPage)
+        .navigationTitle(isSecondaryPage ? "发现" : "")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 

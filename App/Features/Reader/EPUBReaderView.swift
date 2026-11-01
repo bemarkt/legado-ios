@@ -324,12 +324,17 @@ struct EPUBReaderView: View {
                     Text("\(Int(fontScale * 100))%")
                 }
                 Section("背景") {
-                    Picker("主题", selection: $theme) {
-                        Text("跟随系统").tag("system")
-                        Text("白色").tag("light")
-                        Text("纸色").tag("sepia")
-                        Text("夜间").tag("dark")
-                    }
+                    ReadingMenuPickerRow(
+                        title: "主题",
+                        selection: $theme,
+                        options: [
+                            ReadingMenuOption("system", "跟随系统"),
+                            ReadingMenuOption("light", "白色"),
+                            ReadingMenuOption("sepia", "纸色"),
+                            ReadingMenuOption("dark", "夜间")
+                        ],
+                        identifier: "epub.theme"
+                    )
                 }
             }
             .navigationTitle("EPUB 排版").navigationBarTitleDisplayMode(.inline)

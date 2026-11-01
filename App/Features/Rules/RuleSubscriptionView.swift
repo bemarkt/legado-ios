@@ -55,7 +55,12 @@ private struct RuleSubscriptionEditView: View {
     var body: some View {
         ReadingNavigationStack {
             Form {
-                Picker("类型", selection: $value.type) { Text("书源").tag(0); Text("净化规则").tag(2) }
+                ReadingMenuPickerRow(
+                    title: "类型",
+                    selection: $value.type,
+                    options: [ReadingMenuOption(0, "书源"), ReadingMenuOption(2, "净化规则")],
+                    identifier: "rules.subscription.type"
+                )
                 TextField("名称", text: $value.name)
                 ReadingTextField("订阅URL", text: $value.url, axis: .vertical).textInputAutocapitalization(.never).disableAutocorrection(true)
                 Toggle("自动更新", isOn: $value.autoUpdate)

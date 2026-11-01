@@ -390,6 +390,73 @@ struct BookCoverArtwork: View {
     }
 }
 
+/// iOS 设置风格的单行下拉选择项：左侧标题、右侧当前值 + 上下双箭头，点击弹出原生 Popup Menu。
+struct ReadingMenuOption<Value: Hashable>: Identifiable {
+    let value: Value
+    let title: String
+
+    var id: Value { value }
+
+    init(_ value: Value, _ title: String) {
+        self.value = value
+        self.title = title
+    }
+}
+
+struct ReadingMenuPickerRow<Value: Hashable>: View {
+    let title: String
+    @Binding var selection: Value
+    let options: [ReadingMenuOption<Value>]
+    var identifier: String?
+
+    init(
+        title: String,
+        selection: Binding<Value>,
+        options: [ReadingMenuOption<Value>],
+        identifier: String? = nil
+    ) {
+        self.title = title
+        _selection = selection
+        self.options = options
+        self.identifier = identifier
+    }
+
+    private var selectedTitle: String {
+        options.first { $0.value == selection }?.title ?? options.first?.title ?? ""
+    }
+
+    var body: some View {
+        Menu {
+            Picker(title, selection: $selection) {
+                ForEach(options) { option in
+                    Text(option.title).tag(option.value)
+                }
+            }
+            .labelsHidden()
+        } label: {
+            HStack(spacing: 8) {
+                Text(title)
+                    .foregroundStyle(ReadingTheme.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 12)
+                Text(selectedTitle)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .multilineTextAlignment(.trailing)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+                    .accessibilityHidden(true)
+            }
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .accessibilityLabel(title)
+        .accessibilityValue(selectedTitle)
+        .accessibilityIdentifier(identifier ?? "menuPicker.\(title)")
+    }
+}
+
 struct ReadingCard<Content: View>: View {
     @ViewBuilder let content: Content
 

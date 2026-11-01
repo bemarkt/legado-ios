@@ -129,10 +129,21 @@ struct SourceEditorView: View {
     private var options: some View {
         Group {
             Section("书源类型") {
-                Picker("类型", selection: Binding(get: { Int(document.value(at: "bookSourceType")?.stringValue ?? "0") ?? 0 },
-                    set: { document.set(.number(Double($0)), at: "bookSourceType") })) {
-                    Text("文本").tag(0); Text("音频").tag(1); Text("图片").tag(2); Text("文件").tag(3); Text("视频").tag(4)
-                }
+                ReadingMenuPickerRow(
+                    title: "类型",
+                    selection: Binding(
+                        get: { Int(document.value(at: "bookSourceType")?.stringValue ?? "0") ?? 0 },
+                        set: { document.set(.number(Double($0)), at: "bookSourceType") }
+                    ),
+                    options: [
+                        ReadingMenuOption(0, "文本"),
+                        ReadingMenuOption(1, "音频"),
+                        ReadingMenuOption(2, "图片"),
+                        ReadingMenuOption(3, "文件"),
+                        ReadingMenuOption(4, "视频")
+                    ],
+                    identifier: "source.type"
+                )
             }
             Section("开关") {
                 Toggle("启用书源", isOn: boolean("enabled", fallback: true))

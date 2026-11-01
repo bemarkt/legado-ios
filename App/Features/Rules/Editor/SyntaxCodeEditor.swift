@@ -46,20 +46,8 @@ struct SyntaxCodeEditor: UIViewRepresentable {
         if #available(iOS 16.0, *) { view.isFindInteractionEnabled = true }
         let bar = UIToolbar()
         bar.tintColor = UIColor(ReadingTheme.accent)
+        bar.items = SyntaxCodeEditor.makeAccessoryItems(for: view, coordinator: context.coordinator)
         bar.sizeToFit()
-        bar.items = [
-            UIBarButtonItem(image: UIImage(systemName: "magnifyingglass"), primaryAction: UIAction(title: "", subtitle: nil) { [weak view, coordinator = context.coordinator] _ in
-                guard let view else { return }
-                if #available(iOS 16.0, *) { view.findInteraction?.presentFindNavigator(showingReplace: true) }
-                else { coordinator.presentFindAndReplace(in: view) }
-            }),
-            UIBarButtonItem(image: UIImage(systemName: "arrow.uturn.backward"), primaryAction: UIAction(title: "", subtitle: nil) { [weak view] _ in view?.undoManager?.undo() }),
-            UIBarButtonItem(image: UIImage(systemName: "arrow.uturn.forward"), primaryAction: UIAction(title: "", subtitle: nil) { [weak view] _ in view?.undoManager?.redo() }),
-        ] + ["@", "$", "{}", "[]", "##", "\n", "\t"].map { symbol in
-            UIBarButtonItem(title: symbol == "\n" ? "↵" : symbol == "\t" ? "⇥" : symbol,
-                primaryAction: UIAction(title: "", subtitle: nil) { [weak view] _ in view?.insertText(symbol) })
-        } + [UIBarButtonItem(systemItem: .flexibleSpace), UIBarButtonItem(title: "完成", primaryAction: UIAction(title: "", subtitle: nil) { [weak view] _ in view?.resignFirstResponder() })]
-        bar.items?.last?.accessibilityIdentifier = "syntaxCodeEditor.done"
         if #available(iOS 26.0, *) {
             view.inputAccessoryView = CodeInputAccessory(items: bar.items ?? [])
         } else {
@@ -68,6 +56,63 @@ struct SyntaxCodeEditor: UIViewRepresentable {
         view.text = text
         context.coordinator.highlight(view)
         return view
+    }
+
+    /// 逐条构造成员，禁止写回单个巨型数组表达式：
+    /// 多个 UIAction 尾随闭包 + map + 三元 + 数组加法会让类型检查器超时
+    /// (error: the compiler is unable to type-check this expression in reasonable time)。
+    static func makeAccessoryItems(for view: UITextView, coordinator: Coordinator) -> [UIBarButtonItem] {
+        var items: [UIBarButtonItem] = []
+
+        let findAction = UIAction(title: "", subtitle: nil) { [weak view, weak coordinator] _ in
+            guard let view else { return }
+            if #available(iOS 16.0, *) {
+                view.findInteraction?.presentFindNavigator(showingReplace: true)
+            } else {
+                coordinator?.presentFindAndReplace(in: view)
+            }
+        }
+        let findItem = UIBarButtonItem(image: UIImage(systemName: "magnifyingglass"),
+                                       primaryAction: findAction)
+        findItem.accessibilityLabel = "查找与替换"
+        items.append(findItem)
+
+        let undoAction = UIAction(title: "", subtitle: nil) { [weak view] _ in
+            view?.undoManager?.undo()
+        }
+        items.append(UIBarButtonItem(image: UIImage(systemName: "arrow.uturn.backward"),
+                                     primaryAction: undoAction))
+
+        let redoAction = UIAction(title: "", subtitle: nil) { [weak view] _ in
+            view?.undoManager?.redo()
+        }
+        items.append(UIBarButtonItem(image: UIImage(systemName: "arrow.uturn.forward"),
+                                     primaryAction: redoAction))
+
+        let symbols: [String] = ["@", "$", "{}", "[]", "##", "\n", "\t"]
+        for symbol in symbols {
+            let title: String
+            switch symbol {
+            case "\n": title = "↵"
+            case "\t": title = "⇥"
+            default: title = symbol
+            }
+            let action = UIAction(title: "", subtitle: nil) { [weak view] _ in
+                view?.insertText(symbol)
+            }
+            items.append(UIBarButtonItem(title: title, primaryAction: action))
+        }
+
+        items.append(UIBarButtonItem(systemItem: .flexibleSpace))
+
+        let doneAction = UIAction(title: "", subtitle: nil) { [weak view] _ in
+            view?.resignFirstResponder()
+        }
+        let doneItem = UIBarButtonItem(title: "完成", primaryAction: doneAction)
+        doneItem.accessibilityIdentifier = "syntaxCodeEditor.done"
+        items.append(doneItem)
+
+        return items
     }
 
     func updateUIView(_ view: UITextView, context: Context) {

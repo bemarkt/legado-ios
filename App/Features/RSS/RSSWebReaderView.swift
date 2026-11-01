@@ -164,11 +164,14 @@ struct RSSWebReaderView: UIViewRepresentable {
         private func load(_ value: String, in webView: WKWebView) {
             guard let url = URL(string: value) else { return }
             var request = URLRequest(url: url, cachePolicy: source.cacheFirst ? .returnCacheDataElseLoad : .useProtocolCachePolicy, timeoutInterval: 180)
-            if let headers = try? BookSourceHeaderResolver().resolve(source.bookSourceAdapter) {
-                for (key, value) in headers { request.setValue(value, forHTTPHeaderField: key) }
-                webView.customUserAgent = headers.first { $0.key.caseInsensitiveCompare("User-Agent") == .orderedSame }?.value
+            let resolver = BookSourceHeaderResolver()
+            if let headers = try? resolver.resolve(source.bookSourceAdapter) {
+                // User-Agent 不再往 request 里塞：WebKit 会丢掉它，只留 customUserAgent 一条通路。
+                for (key, value) in headers where key.caseInsensitiveCompare("User-Agent") != .orderedSame {
+                    request.setValue(value, forHTTPHeaderField: key)
+                }
             }
-            if webView.customUserAgent == nil { webView.customUserAgent = ApplicationSettingsStore.shared.settings.effectiveUserAgent }
+            webView.customUserAgent = resolver.webViewUserAgent(for: source.bookSourceAdapter)
             request = ApplicationSettingsStore.shared.settings.configure(request)
             let cookie = LegadoCookieStore.shared.cookieHeader(for: value)
             if !cookie.isEmpty { request.setValue(cookie, forHTTPHeaderField: "Cookie") }

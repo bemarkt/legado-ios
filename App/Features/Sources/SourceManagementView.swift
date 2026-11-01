@@ -132,6 +132,9 @@ struct SourceManagementView: View {
             }
         }
         .navigationTitle("书源")
+        // 书源管理本身也是从「设置」push 进去的二级页，同样要收掉 TabBar：
+        // 这一页是列表浏览态，底部标签既挤占纵向空间，也与返回手势抢注意力。
+        .readingTabBarHidden()
         .background(ReadingTheme.groupedCanvas)
         .searchable(text: $searchText, prompt: "名称、地址或分组")
         .toolbar {
@@ -523,6 +526,7 @@ private struct SourceDetailView: View {
     @EnvironmentObject private var library: SourceLibraryModel
     let source: BookSource
     @State private var showsEditor = false
+    @State private var showsLogin = false
     @State private var editedSourceID: String?
     private var current: BookSource { library.sources.first { $0.id == (editedSourceID ?? source.id) } ?? source }
 
@@ -550,6 +554,14 @@ private struct SourceDetailView: View {
                     get: { library.sources.first(where: { $0.id == current.id })?.enabledExplore ?? current.enabledExplore },
                     set: { value in Task { await library.setExploreEnabled(value, for: current.id) } }
                 ))
+                // 与「启用书源 / 启用发现」同组：这三者都是「这个源当前怎样被使用」，
+                // 另开一组会让人误以为 Cookie 是独立能力开关。
+                Toggle("启用 Cookie", isOn: Binding(
+                    get: { library.sources.first(where: { $0.id == current.id })?.enabledCookieJar ?? current.enabledCookieJar ?? true },
+                    set: { value in Task { await library.setCookieJarEnabled(value, for: current.id) } }
+                ))
+                Text("关闭后不再读写该书源的 Cookie，已保存的会话仍保留，重新打开即可继续使用。")
+                    .font(.footnote).foregroundStyle(.secondary)
             }
             Section("兼容检查") {
                 NavigationLink {
@@ -567,10 +579,15 @@ private struct SourceDetailView: View {
             }
             if current.loginUrl?.isEmpty == false {
                 Section("账户") {
-                    NavigationLink {
-                        SourceLoginView(source: current)
+                    // 登录页是 full 态 bottom sheet，不是 push：
+                    // 登录是「打开网页 → 操作 → 确认退出」的独立任务，
+                    // 塞进导航栈会让返回手势与网页内的前进/后退互相打架。
+                    Button {
+                        showsLogin = true
                     } label: {
                         Label("登录此书源", systemImage: "person.badge.key.fill")
+                            .frame(minHeight: 44)
+                            .contentShape(Rectangle())
                     }
                     Text("登录 Cookie 与阅读请求共享；若书源提供检测脚本，会在页面载入后自动验证。")
                         .font(.footnote).foregroundStyle(.secondary)
@@ -582,6 +599,10 @@ private struct SourceDetailView: View {
         }
         .navigationTitle(current.bookSourceName)
         .navigationBarTitleDisplayMode(.inline)
+        // 二级页隐藏 TabBar：详情页是「看完就返回」的浏览态，
+        // 底部标签会挤掉纵向空间并与返回手势抢注意力。
+        // 这里仍走导航栈 push，右滑返回天然可用，不需要额外手势。
+        .readingTabBarHidden()
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button("编辑") { showsEditor = true }
@@ -589,6 +610,9 @@ private struct SourceDetailView: View {
         }
         .sheet(isPresented: $showsEditor) {
             SourceEditorView(source: current) { editedSourceID = $0.id }.environmentObject(library)
+        }
+        .sheet(isPresented: $showsLogin) {
+            SourceLoginView(source: current)
         }
     }
 }

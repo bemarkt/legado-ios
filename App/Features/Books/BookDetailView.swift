@@ -42,6 +42,10 @@ struct BookDetailView: View {
         .background(ReadingTheme.canvas)
         .navigationTitle("书籍详情")
         .navigationBarTitleDisplayMode(.inline)
+        // 二级页隐藏 TabBar：详情页是「看完就返回」的浏览态，
+        // 底部标签既挤占纵向空间，也与返回手势抢注意力。
+        // 仍走导航栈 push，右滑返回天然可用。
+        .readingTabBarHidden()
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {

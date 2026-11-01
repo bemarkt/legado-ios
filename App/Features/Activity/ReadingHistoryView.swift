@@ -59,6 +59,7 @@ struct ReadingHistoryView: View {
             }
         }
         .navigationTitle("阅读记录")
+        .readingTabBarHidden()
         .searchable(text: $searchText, prompt: "搜索")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {

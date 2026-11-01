@@ -50,6 +50,7 @@ struct DiagnosticLogView: View {
             }
         }
         .navigationTitle("日志与诊断")
+        .readingTabBarHidden()
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $query, prompt: "搜索内容或分类")
         .task { reload() }

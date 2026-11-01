@@ -117,6 +117,9 @@ struct TxtTocRuleManagementView: View {
             .onMove { offsets, destination in Task { await model.move(from: offsets, to: destination) } }
         }
         .navigationTitle("TXT目录规则")
+        // 二级页隐藏 TabBar。此页与 sheet 内的编辑页同名 `.navigationTitle`，
+        // 用「紧跟 `.toolbar { ToolbarItem(.primaryAction)`」锁定列表页这一处。
+        .readingTabBarHidden()
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button("新建", systemImage: "plus") { editing = TxtTocRule() }

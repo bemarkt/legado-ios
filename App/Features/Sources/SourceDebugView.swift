@@ -56,6 +56,9 @@ struct SourceDebugView: View {
         .textSelection(.enabled)
         .navigationTitle("书源调试")
         .navigationBarTitleDisplayMode(.inline)
+        // 二级页隐藏 TabBar：调试是「看完就返回」的浏览态，
+        // 底部标签会挤掉纵向空间，也与返回手势抢注意力。
+        .readingTabBarHidden()
     }
 
     /// 整体导出：一次给出全部阶段，不用逐个展开复制。

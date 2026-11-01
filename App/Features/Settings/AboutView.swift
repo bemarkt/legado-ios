@@ -69,6 +69,7 @@ struct AboutView: View {
             }.font(.footnote)
         }
         .navigationTitle("关于")
+        .readingTabBarHidden()
         .navigationBarTitleDisplayMode(.inline)
     }
 }

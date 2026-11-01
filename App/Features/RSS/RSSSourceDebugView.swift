@@ -56,6 +56,7 @@ struct RSSSourceDebugView: View {
             }
         }
         .navigationTitle("RSS源调试")
+        .readingTabBarHidden()
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Menu("查看源码", systemImage: "doc.plaintext") {

@@ -58,6 +58,9 @@ struct OtherSettingsView: View {
             }
         }
         .navigationTitle("其他设置")
+        // 二级页隐藏 TabBar：进入设置子页后底部标签既无用处，
+        // 又会在滚动时与内容抢视觉重心。仍走导航栈 push，右滑返回可用。
+        .readingTabBarHidden()
         .navigationBarTitleDisplayMode(.inline)
         .disabled(isWorking)
         .overlay { if isWorking { ProgressView("正在处理…").padding().background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12)) } }

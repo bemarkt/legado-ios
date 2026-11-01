@@ -118,6 +118,9 @@ struct HttpTTSManagementView: View {
             }
         }
         .navigationTitle("在线朗读引擎")
+        // 二级页隐藏 TabBar：朗读引擎管理是配置型二级页，
+        // 底部标签在这里既无导航价值又占走一行列表高度。
+        .readingTabBarHidden()
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 Button("新建", systemImage: "plus") { editing = HttpTTS() }

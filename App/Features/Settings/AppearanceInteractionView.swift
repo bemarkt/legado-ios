@@ -157,6 +157,7 @@ struct AppearanceInteractionView: View {
             }
         }
         .navigationTitle("外观与交互")
+        .readingTabBarHidden()
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showsNavigationSheet) {
             TabBarNavigationSheet()

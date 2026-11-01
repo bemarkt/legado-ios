@@ -28,6 +28,11 @@ struct RuleSubscriptionView: View {
             }
         }
         .navigationTitle("规则订阅")
+        // 二级页隐藏 TabBar：规则订阅是配置型列表页，底部标签既无导航价值
+        // 又与列表滚动抢视觉重心。仍走导航栈 push，右滑返回可用。
+        // 注意：这页与 sheet 内的编辑页同名 `.navigationTitle`，
+        // 只有带 `.toolbar` 的这一处是列表页，锚点必须包含 toolbar 才不会误伤。
+        .readingTabBarHidden()
         .toolbar { ToolbarItem(placement: .primaryAction) { Button("新建", systemImage: "plus") { editing = RuleSub() } }; ToolbarItem(placement: .primaryAction) { EditButton() } }
         .task { await model.load() }
         .sheet(item: $editing) { value in RuleSubscriptionEditView(value: value) { item in await model.save(item) } }

@@ -595,7 +595,10 @@ final class ReaderViewModel: ObservableObject {
     }
 
     private func schedulePreload(after index: Int, source: BookSource) {
-        let count = ApplicationSettingsStore.shared.settings.prefetchChapters
+        // 页序把「上一章 + 本章 + 下一章」拼在一起，晋升一次就要立刻重排一整章。
+        // 只预取 1 章时，连翻两下会在第二下撞上「正文还没到」的空白帧；窗口至少 2 章，
+        // 晋升那一刻新邻章的正文已经在缓存里。设置里的上限仍然生效。
+        let count = max(ApplicationSettingsStore.shared.settings.prefetchChapters, 2)
         let jobs = ChapterCachePlanner.plan(chapters: chapters, startIndex: index + 1, limit: count)
         guard index + 1 < chapters.count, !jobs.isEmpty else { return }
         Task { [book, contentCoordinator] in

@@ -34,9 +34,22 @@ struct ReaderView: View {
     @State private var showsReaderSettings = false
     @State private var showsClickActionSettings = false
     @State private var showsContentEditor = false
+    @State private var showsBookInfo = false
+    @State private var showsTitleDesigner = false
     @State private var editedContent = ""
     @State private var contentEditError: String?
     @State private var backgroundImage: UIImage?
+    /// 仿真模式：卷页层是否已经在屏上。
+    ///
+    /// 换章那一帧新章正文还没到，旧页必须继续留在屏上。这里若还是把界面换成
+    /// 「正在打开本章」，SwiftUI 会把 ReaderTextView 连同卷页层一起拆掉重建 ——
+    /// 观感就只剩闪一下加载，永远看不到卷页转场。
+    @State private var curlPublishedPages = false
+    /// 正在进行的跨章翻页：一次边界手势只许换一章。
+    ///
+    /// 章界同时挂着位移旁听、左右划兜底和程序化翻页到头三条通路，一次抬手可能
+    /// 连续触发两三次回调，每回调一次就换一章 —— 实测「第 18 章往回一次退到第 15 章」
+    /// 「第 15 章往回不是第 16 章」都是同一下手势换掉两三章的结果。
     @State private var backgroundError: String?
     @State private var showsBackgroundPicker = false
     @State private var showsFontImporter = false
@@ -71,11 +84,30 @@ struct ReaderView: View {
     @AppStorage("paddingBottom") private var paddingBottom = 6.0
     @AppStorage("textBold") private var fontWeight = 0
     @AppStorage("textFont") private var fontPath = ""
+
+    /// 目录里已注册的字体（含手动放进「文件」App 的）。
+    private var installedFontFaces: [ReaderFontStore.Face] { ReaderFontStore.installedFaces() }
     @AppStorage("titleMode") private var titleMode = 0
     @AppStorage("titleSize") private var titleSize = 0.0
     @AppStorage("titleTopSpacing") private var titleTopSpacing = 0.0
     @AppStorage("titleBottomSpacing") private var titleBottomSpacing = 0.0
     @AppStorage("underlineMode") private var underlineMode = 0
+    /// 下划线线型：0 实线 / 1 点线 / 2 虚线 / 3 点划线（Juyue `reader_underline_pattern`）。
+    @AppStorage("underlinePattern") private var underlinePattern = 0
+    /// 段末分隔线根数：0 关闭（Juyue `paragraph_separator_lines`）。
+    @AppStorage("paragraphSeparatorLines") private var paragraphSeparatorLines = 0
+    /// 页末匀空白（Juyue `reader_justify_last_page`）。
+    @AppStorage("justifyLastPage") private var justifyLastPage = true
+    /// 中文标点禁则（Juyue `reader_punctuation_kinsoku`）。
+    @AppStorage("punctuationKinsoku") private var punctuationKinsoku = true
+    /// 智能分段（Juyue `reader_smart_paragraphs`）：只拆「长且完全没有段落」的行。
+    @AppStorage("smartParagraphs") private var smartParagraphs = true
+    /// 简繁转换：0 原文 / 1 转简 / 2 转繁（Juyue `chinese_conversion`）。
+    @AppStorage("chineseConversion") private var chineseConversion = 0
+    /// 章节标题设计稿：HTML 模板 + 工程 JSON + 画布高度（Juyue `chapterTitleHTMLTemplate` 那一组）。
+    @AppStorage("chapterTitleHTMLTemplate") private var chapterTitleHTMLTemplate = ""
+    @AppStorage("chapterTitleProjectJSON") private var chapterTitleProjectJSON = ""
+    @AppStorage("chapterTitleCanvasHeight") private var chapterTitleCanvasHeight = 0.0
     @AppStorage("headerPaddingBottom") private var headerPaddingBottom = 0.0
     @AppStorage("headerPaddingLeft") private var headerPaddingLeft = 16.0
     @AppStorage("headerPaddingRight") private var headerPaddingRight = 16.0
@@ -86,16 +118,26 @@ struct ReaderView: View {
     @AppStorage("footerPaddingTop") private var footerPaddingTop = 6.0
     @AppStorage("showHeaderLine") private var showHeaderLine = false
     @AppStorage("showFooterLine") private var showFooterLine = true
-    @AppStorage("tipHeaderLeft") private var tipHeaderLeft = 2
-    @AppStorage("tipHeaderMiddle") private var tipHeaderMiddle = 0
-    @AppStorage("tipHeaderRight") private var tipHeaderRight = 3
-    @AppStorage("tipFooterLeft") private var tipFooterLeft = 1
-    @AppStorage("tipFooterMiddle") private var tipFooterMiddle = 0
-    @AppStorage("tipFooterRight") private var tipFooterRight = 6
+    /// 页眉页脚六栏的条目：存成 `|` 连接的 `ReaderBarContent` rawValue，一栏可填多个。
+    /// 旧版的六个整数码在 `migrateBarSettingsIfNeeded()` 里一次性搬过来，老配置不失效。
+    @AppStorage("readerBarHeaderLeft") private var barHeaderLeft = "时间"
+    @AppStorage("readerBarHeaderMiddle") private var barHeaderMiddle = ""
+    @AppStorage("readerBarHeaderRight") private var barHeaderRight = "电量图标"
+    @AppStorage("readerBarFooterLeft") private var barFooterLeft = "标题"
+    @AppStorage("readerBarFooterMiddle") private var barFooterMiddle = ""
+    @AppStorage("readerBarFooterRight") private var barFooterRight = "页码|进度(%)"
+    /// 页栏配套参数（Juyue `shortTitleLength` / `customDatePattern` / `customBarText`）。
+    @AppStorage("readerBarShortTitleLength") private var barShortTitleLength = 6
+    @AppStorage("readerBarCustomDatePattern") private var barCustomDatePattern = "M月d日"
+    @AppStorage("readerBarCustomText") private var barCustomText = ""
+    /// 阅读会话起点：页栏的「阅读时长 / 剩余时间」靠它算。
+    @State private var barSessionStart = Date()
     @AppStorage("headerMode") private var headerMode = 0
     @AppStorage("footerMode") private var footerMode = 0
     @AppStorage("readerTheme") private var theme = "wechat"
     @AppStorage("readerPreviousDayTheme") private var previousDayTheme = "wechat"
+    /// 自动夜间（Juyue `reader_auto_night`）：22:00–07:00 自动切夜间，白天还原成进入夜间前的那套主题。
+    @AppStorage("readerAutoNight") private var autoNight = false
     @AppStorage("autoReadSpeed") private var autoReadSpeed = 10
     @AppStorage("ttsFollowSys") private var ttsFollowSystem = true
     @AppStorage("ttsSpeechRate") private var ttsSpeechRate = 5
@@ -130,6 +172,8 @@ struct ReaderView: View {
 
 
     init(book: Book, chapters: [BookChapter], initialIndex: Int, source: BookSource) {
+        // 旧版六个整数码 → 新的条目数组，只在第一次进阅读页时搬一次。
+        Self.migrateBarSettingsIfNeeded()
         _pageAnimation = State(initialValue: book.readConfig?.pageAnim.flatMap { $0 >= 0 ? $0 : nil }
             ?? Self.globalPageAnimation())
         _model = StateObject(wrappedValue: ReaderViewModel(
@@ -232,6 +276,8 @@ struct ReaderView: View {
             }
             backgroundImage = ReaderBackgroundStore.load()
             ReaderScreenOrientation.apply(screenOrientation)
+            // 进阅读页先按时间点判断一次：晚上打开直接是夜间，白天打开不会被上次的夜间主题粘住。
+            applyAutoNightIfNeeded()
             Task { await loadHTTPEngines() }
             if ProcessInfo.processInfo.arguments.contains("-uiDemoBookmarks") {
                 showsBookmarks = true
@@ -297,6 +343,8 @@ struct ReaderView: View {
         .sheet(isPresented: $showsReaderSettings) { readerSettings }
         .sheet(isPresented: $showsClickActionSettings) { clickActionSettings }
         .sheet(isPresented: $showsContentEditor) { contentEditor }
+        .sheet(isPresented: $showsBookInfo) { bookInfoSheet }
+        .sheet(isPresented: $showsTitleDesigner) { titleDesignerSheet }
         .task(id: model.chapterLoadGeneration) {
             isWaitingForNextChapter = false
             isWaitingForPreviousChapter = false
@@ -329,9 +377,18 @@ struct ReaderView: View {
                 startConfiguredSpeech()
             }
         }
-        .task(id: "\(model.chapterLoadGeneration):\(pageAnimation == 3):\(model.hasLoadedCurrentChapter):\(model.scrollRevision)") {
-            guard pageAnimation == 3 else { return }
-            await model.prepareContinuousReading(rules: model.usesReplaceRules ? replaceRules.rules : [])
+        .task(id: "\(model.chapterLoadGeneration):\(pageAnimation):\(model.hasLoadedCurrentChapter):\(model.scrollRevision)") {
+            if pageAnimation == 3 {
+                await model.prepareContinuousReading(rules: model.usesReplaceRules ? replaceRules.rules : [])
+                return
+            }
+            // 仿真翻页也要先备好相邻章：章界要退化成一次普通拖拽卷页，「上一章末页 +
+            // 本章各页 + 下一章首页」就得在同一份页序里排好，正文必须已经在手。
+            // 以前只有滚动模式预取，仿真到章界才发请求 —— 那正是「章界只能程序化转场」
+            // 的物理原因，也是落页 / 方向 / 重投一类问题的总源头。
+            if pageAnimation == 2 {
+                await model.loadAdjacentChapters(rules: model.usesReplaceRules ? replaceRules.rules : [])
+            }
         }
         .onAppear { updateIdleTimer() }
         .onChange(of: keepScreenOn) { _ in
@@ -372,6 +429,8 @@ struct ReaderView: View {
         }
         .onChange(of: scenePhase) { phase in
             if phase == .active {
+                // 回到前台再判断一次：阅读页可能在后台挂了整晚。
+                applyAutoNightIfNeeded()
                 if !followsSystemBrightness {
                     UIScreen.main.brightness = CGFloat(readerBrightness)
                 }
@@ -428,6 +487,7 @@ struct ReaderView: View {
 
     @ViewBuilder private var readerContent: some View {
         if pageAnimation != 3,
+           !showsCurlPages,
            (model.isLoading && model.content.isEmpty) || (model.content.isEmpty && !model.hasLoadedCurrentChapter) {
             VStack(spacing: 14) {
                 ProgressView()
@@ -462,9 +522,11 @@ struct ReaderView: View {
             .background(backgroundColor.ignoresSafeArea())
         } else {
             VStack(spacing: 0) {
-                if headerVisible { readerTipBar(isHeader: true) }
+                // 仿真翻页的页眉页脚画在每一页里（跟着纸页一起卷），
+                // 外层这两条停画，否则同一屏会出现两份。
+                if headerVisible, pageAnimation != 2 { readerTipBar(isHeader: true) }
                 readerSurface
-                if footerVisible { readerTipBar(isHeader: false) }
+                if footerVisible, pageAnimation != 2 { readerTipBar(isHeader: false) }
             }
             .frame(maxWidth: readingColumnMaxWidth)
             .frame(maxWidth: .infinity)
@@ -547,16 +609,25 @@ struct ReaderView: View {
         }
     }
 
+    /// 相邻章正文要不要交给正文层。
+    ///
+    /// 以前只有滚动模式（`pageAnimation == 3`）拿得到，仿真模式一律给空串 —— 于是仿真
+    /// 的章界只能是「本章翻到头 → 发起换章 → 等正文 → 程序化转场」，那是所有落页 /
+    /// 方向 / 重投问题的总源头。仿真要根治，就必须和滚动一样先把相邻章正文握在手里，
+    /// 才能把「上一章末页 + 本章各页 + 下一章首页」拼进同一份扁平页序。
+    private var usesAdjacentWindows: Bool { pageAnimation == 2 || pageAnimation == 3 }
+
     private var readerTextConfiguration: ReaderTextView {
         ReaderTextView(
             text: readerDisplayText,
             title: model.title,
-            previousTitle: pageAnimation == 3 ? model.previousTitle : nil,
-            previousText: pageAnimation == 3 ? model.previousContent : "",
-            isPreviousReady: pageAnimation == 3 && model.isPreviousWindowReady,
-            continuationTitle: pageAnimation == 3 ? model.continuationTitle : nil,
-            continuationText: pageAnimation == 3 ? model.continuationContent : "",
-            isContinuationReady: pageAnimation == 3 && model.isContinuationWindowReady,
+            previousTitle: usesAdjacentWindows ? model.previousTitle : nil,
+            previousText: usesAdjacentWindows ? model.previousContent : "",
+            isPreviousReady: usesAdjacentWindows && model.isPreviousWindowReady,
+            continuationTitle: usesAdjacentWindows ? model.continuationTitle : nil,
+            continuationText: usesAdjacentWindows ? model.continuationContent : "",
+            isContinuationReady: usesAdjacentWindows && model.isContinuationWindowReady,
+            chapterIndex: model.currentIndex,
             isVolume: model.currentChapter?.isVolume == true,
             fontSize: fontSize,
             fontPath: fontPath,
@@ -568,20 +639,32 @@ struct ReaderView: View {
             paddingRight: paddingRight,
             paddingTop: paddingTop,
             paddingBottom: paddingBottom,
-            headerInset: 0,
-            footerInset: 0,
+            headerInset: simulationHeaderInset,
+            footerInset: simulationFooterInset,
+            headerBar: simulationHeaderBar,
+            footerBar: simulationFooterBar,
             fontWeight: fontWeight,
             titleMode: titleMode,
             titleSize: titleSize,
             titleTopSpacing: titleTopSpacing,
             titleBottomSpacing: titleBottomSpacing,
             underlineMode: underlineMode,
+            justifyLastPage: justifyLastPage,
+            punctuationKinsoku: punctuationKinsoku,
+            smartParagraphs: smartParagraphs,
+            chineseConversion: chineseConversion,
+            underlinePattern: underlinePattern,
+            paragraphSeparatorLines: paragraphSeparatorLines,
+            titleHTMLTemplate: chapterTitleHTMLTemplate,
+            titleProjectJSON: chapterTitleProjectJSON,
+            titleCanvasHeight: chapterTitleCanvasHeight,
             isSelectable: false,
             fullJustify: fullJustify,
             pageAnimation: pageAnimation,
             isEInkMode: themeMode == "3",
             clickActions: clickActions,
             backgroundColor: activeBackgroundImage == nil ? resolvedStyle.background : .clear,
+            backgroundImage: activeBackgroundImage,
             foregroundColor: resolvedStyle.foreground,
             requestedPosition: pageAnimation == 3 ? readerPosition : model.requestedPosition,
             jumpPosition: readerJumpPosition,
@@ -599,16 +682,17 @@ struct ReaderView: View {
                     requestNextChapter()
                     return
                 }
+                // 仿真模式：页序走到头只意味着「下一段正文还没拼进来」，不是换章信号。
+                // 换章由页序里的下一页承担（读者继续拖过去），这里只补预取 ——
+                // 旧的「闸门 + goNext」是一次程序化换章，正是「落页靠猜」那条老路的
+                // 残留，已整段删除，不再兜底。
+                readerPosition = boundaryPosition
+                saveProgress(immediate: true)
+                readerJumpPosition = nil
                 if model.canGoNext {
-                    showsReaderMenu = false
-                    readerPosition = boundaryPosition
-                    saveProgress(immediate: true)
-                    readerJumpPosition = nil
-                    // Keep every chapter in its own TextKit document. Appending
-                    // text here makes the absolute UTF-16 offset belong to the
-                    // previous chapter while progress is saved under the next.
-                    model.goNext()
-                    readerPosition = model.requestedPosition
+                    Task {
+                        await model.loadAdjacentChapters(rules: model.usesReplaceRules ? replaceRules.rules : [])
+                    }
                 } else {
                     isAutoReading = false
                 }
@@ -619,30 +703,38 @@ struct ReaderView: View {
                     return
                 }
                 guard model.canGoPrevious else { return }
-                showsReaderMenu = false
                 readerPosition = boundaryPosition
                 saveProgress(immediate: true)
                 readerJumpPosition = nil
-                model.goPrevious(position: Int.max)
+                Task {
+                    await model.loadAdjacentChapters(rules: model.usesReplaceRules ? replaceRules.rules : [])
+                }
             },
             onEnteredPrevious: { position in
-                guard pageAnimation == 3, model.canGoPrevious, model.hasPreviousWindow else { return }
+                guard model.canGoPrevious, model.hasPreviousWindow else { return }
                 saveProgress(immediate: true)
-                readerPosition = continuousPosition(position, content: model.previousContent)
                 readerJumpPosition = nil
+                // 仿真模式：读者是把上一章的某一页「继续拖」过来的，章内页号由正文层
+                // 记着并在下一帧按它落位；这里只把进度存档点交出去。
+                readerPosition = pageAnimation == 3
+                    ? continuousPosition(position, content: model.previousContent)
+                    : 0
                 model.promotePrevious(position: readerPosition)
             },
             onEnteredContinuation: { position in
-                guard pageAnimation == 3, model.canGoNext, model.hasContinuationWindow else { return }
+                guard model.canGoNext, model.hasContinuationWindow else { return }
                 saveProgress(immediate: true)
-                readerPosition = continuousPosition(position, content: model.continuationContent)
                 readerJumpPosition = nil
+                readerPosition = pageAnimation == 3
+                    ? continuousPosition(position, content: model.continuationContent)
+                    : 0
                 model.promoteContinuation(position: readerPosition)
             },
             onDeferredRender: { readerRenderRevision &+= 1 },
             onCancelNextLoading: { isWaitingForNextChapter = false },
             onPageChanged: pageDidChange,
-            onTapAction: handleTapAction
+            onTapAction: handleTapAction,
+            onCurlPublished: { curlPublishedPages = $0 }
         )
     }
 
@@ -665,10 +757,24 @@ struct ReaderView: View {
         (model.isPreviousWindowReady ? 1 : 0) | (model.isContinuationWindowReady ? 2 : 0)
     }
 
+    /// 仿真模式下卷页层已在屏上：换章那一帧不盖加载提示，旧页继续留在屏上，
+    /// 新章分页就绪后由卷页层按方向卷过去。
+    private var showsCurlPages: Bool {
+        pageAnimation == 2 && curlPublishedPages
+    }
+
     private var readerDisplayText: String {
         if !model.content.isEmpty { return model.content }
         if pageAnimation == 3 {
             return String(repeating: "\n", count: 80)
+        }
+        // 仿真翻页：换章那一帧新章正文还没到，旧页要继续留在屏上。
+        //
+        // 这里若递进「正文正在后台加载…」那句占位串，卷页层会拿它换一次页面集合 ——
+        // 观感就是「章末翻到下一章时整屏刷新重载了一下」，而不是卷过去。真正文到达时
+        // 再换一次页面集合，那一次才是带方向的卷页动画。
+        if pageAnimation == 2 {
+            return ""
         }
         if model.isLoading || !model.hasLoadedCurrentChapter {
             return "正文正在后台加载…\n\n你可以继续向下滚动，下一章已经提前生成。"
@@ -696,6 +802,74 @@ struct ReaderView: View {
 
     private var resolvedStyle: ReaderStylePreset {
         themeMode == "3" ? .eInk : ReaderStylePreset.resolve(theme)
+    }
+
+    /// 仿真翻页把页眉页脚画进每一页里（跟着纸页一起卷），所以两栏高度要作为
+    /// 正文内边距预留出来，否则栏会压住首行 / 末行。
+    private var simulationHeaderInset: Double {
+        guard let bar = simulationHeaderBar else { return 0 }
+        return Double(bar.gap + ReaderCurlBarSpec.height)
+    }
+
+    private var simulationFooterInset: Double {
+        guard let bar = simulationFooterBar else { return 0 }
+        return Double(bar.gap + ReaderCurlBarSpec.height)
+    }
+
+    /// 页内页眉：口径与设置里的页眉一致（左 / 中 / 右三栏、分隔线、边距）。
+    private var simulationHeaderBar: ReaderCurlBarSpec? {
+        guard pageAnimation == 2, headerVisible else { return nil }
+        let now = Date()
+        return ReaderCurlBarSpec(
+            left: barTemplate(barHeaderLeft, date: now),
+            middle: barTemplate(barHeaderMiddle, date: now),
+            right: barTemplate(barHeaderRight, date: now),
+            textColor: resolvedStyle.foreground,
+            gap: headerPaddingTop,
+            leftInset: headerPaddingLeft,
+            rightInset: headerPaddingRight,
+            showsDivider: showHeaderLine,
+            dividerOnBottom: true
+        )
+    }
+
+    /// 页内页脚：同上，分隔线贴正文在上沿。
+    private var simulationFooterBar: ReaderCurlBarSpec? {
+        guard pageAnimation == 2, footerVisible else { return nil }
+        let now = Date()
+        return ReaderCurlBarSpec(
+            left: barTemplate(barFooterLeft, date: now),
+            middle: barTemplate(barFooterMiddle, date: now),
+            right: barTemplate(barFooterRight, date: now),
+            textColor: resolvedStyle.foreground,
+            gap: footerPaddingBottom,
+            leftInset: footerPaddingLeft,
+            rightInset: footerPaddingRight,
+            showsDivider: showFooterLine,
+            dividerOnBottom: false
+        )
+    }
+
+    /// 页内栏的一栏文案：一栏可填多个条目，按顺序拼起来。
+    private func barTemplate(_ raw: String, date: Date) -> String {
+        let items = ReaderBarContent.decode(raw)
+        guard !items.isEmpty else { return "" }
+        return items.map { barTemplate($0) }.joined(separator: "  ")
+    }
+
+    /// 单个条目的页内文案：页码类用 `{page}` / `{pages}` 占位（活页按页盖章），
+    /// 图形类退成文字（页内栏画不了图形）。
+    private func barTemplate(_ content: ReaderBarContent) -> String {
+        switch content {
+        case .pageInfo, .pagePercent:
+            return "{page}/{pages}"
+        case .pageNumberLabel:
+            return "第 {page} 页"
+        case .none:
+            return ""
+        default:
+            return content.plainText(readerBarContext)
+        }
     }
 
     private var headerVisible: Bool {
@@ -728,7 +902,9 @@ struct ReaderView: View {
     private func readerTipBar(isHeader: Bool) -> some View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
             readerTipRow(
-                isHeader ? [tipHeaderLeft, tipHeaderMiddle, tipHeaderRight] : [tipFooterLeft, tipFooterMiddle, tipFooterRight],
+                isHeader
+                    ? [barHeaderLeft, barHeaderMiddle, barHeaderRight]
+                    : [barFooterLeft, barFooterMiddle, barFooterRight],
                 date: context.date,
                 showDivider: isHeader ? showHeaderLine : showFooterLine,
                 isHeader: isHeader
@@ -739,14 +915,11 @@ struct ReaderView: View {
         .allowsHitTesting(false)
     }
 
-    private func readerTipRow(_ values: [Int], date: Date, showDivider: Bool, isHeader: Bool) -> some View {
+    private func readerTipRow(_ slots: [String], date: Date, showDivider: Bool, isHeader: Bool) -> some View {
         HStack(spacing: 8) {
-            Text(readerTipText(values[0], date: date))
-                .frame(maxWidth: .infinity, alignment: .leading)
-            Text(readerTipText(values[1], date: date))
-                .frame(maxWidth: .infinity, alignment: .center)
-            Text(readerTipText(values[2], date: date))
-                .frame(maxWidth: .infinity, alignment: .trailing)
+            barSlot(ReaderBarContent.decode(slots[0]), alignment: .leading)
+            barSlot(ReaderBarContent.decode(slots[1]), alignment: .center)
+            barSlot(ReaderBarContent.decode(slots[2]), alignment: .trailing)
         }
         .font(.system(size: 12))
         .foregroundStyle(foregroundColor)
@@ -758,28 +931,107 @@ struct ReaderView: View {
         }
     }
 
-    private func readerTipText(_ value: Int, date: Date) -> String {
-        let time = date.formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
-        let batteryValue = UIDevice.current.batteryLevel
-        let battery = batteryValue >= 0 ? Int((batteryValue * 100).rounded()) : 100
-        let chapterCount = max(model.chapters.filter { !$0.isVolume }.count, 1)
-        let readableIndex = model.chapters.prefix(model.currentIndex + 1).filter { !$0.isVolume }.count
-        let chapterFraction = chapterPageFraction
-        let progress = min(max((Double(max(readableIndex - 1, 0)) + chapterFraction) / Double(chapterCount), 0), 1)
-        let progressText = String(format: "%.1f%%", progress * 100)
-        switch value {
-        case 1: return model.title
-        case 2: return time
-        case 3: return "▰"
-        case 4: return "\(currentPage)/\(totalPages)"
-        case 5: return progressText
-        case 6: return "\(currentPage)/\(totalPages)  \(progressText)"
-        case 7: return book.name
-        case 8: return "\(time) ▰"
-        case 9: return "\(time) \(battery)%"
-        case 10: return "\(battery)%"
-        case 11: return "\(readableIndex)/\(chapterCount)"
-        default: return ""
+    /// 一栏可以有多个条目：按顺序排，图形项单独画。
+    @ViewBuilder
+    private func barSlot(_ items: [ReaderBarContent], alignment: Alignment) -> some View {
+        let visible = items.filter { $0 != .none }
+        if visible.isEmpty {
+            Color.clear.frame(maxWidth: .infinity)
+        } else {
+            HStack(spacing: 6) {
+                ForEach(Array(visible.enumerated()), id: \.offset) { _, item in
+                    barSlotView(item)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: alignment)
+        }
+    }
+
+    /// 单个条目：电量图标 / 电量条 / 总进度条画图形，其余照 `readerBarText` 出文字。
+    @ViewBuilder
+    private func barSlotView(_ content: ReaderBarContent) -> some View {
+        switch content {
+        case .bookPercentBar:
+            barCapacitor(fraction: chapterProgress)
+        case .batteryBar:
+            barCapacitor(fraction: ReaderBarBattery.level() ?? 0)
+        case .batteryIcon:
+            Image(systemName: ReaderBarBattery.symbolName(for: ReaderBarBattery.level()))
+                .font(.system(size: 11))
+        case .batteryGlyphWithPercent:
+            HStack(spacing: 3) {
+                Image(systemName: ReaderBarBattery.symbolName(for: ReaderBarBattery.level()))
+                    .font(.system(size: 11))
+                Text(readerBarText(content, readerBarContext))
+            }
+        default:
+            Text(readerBarText(content, readerBarContext))
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+    }
+
+    /// 电量条 / 总进度条：固定 44×3，太长会把一栏整个占满。
+    private func barCapacitor(fraction: Double) -> some View {
+        ZStack(alignment: .leading) {
+            Capsule().fill(foregroundColor.opacity(0.18))
+            GeometryReader { geo in
+                Capsule()
+                    .fill(foregroundColor.opacity(0.65))
+                    .frame(width: geo.size.width * CGFloat(max(0, min(1, fraction))), height: 3)
+            }
+        }
+        .frame(width: 44, height: 3)
+    }
+
+    /// 页栏取值的输入：格式化交给共用的 `readerBarText`，滚动 / 分页 / 仿真三条路径同一套。
+    private var readerBarContext: ReaderBarContext {
+        var ctx = ReaderBarContext()
+        ctx.bookName = book.name
+        ctx.chapterTitle = model.title
+        ctx.chapterIndex = readableChapterIndex
+        ctx.chapterCount = max(readableChapterCount, 1)
+        ctx.pageIndex = max(currentPage - 1, 0)
+        ctx.pageCount = max(totalPages, 1)
+        ctx.isPaged = pageAnimation != 3
+        ctx.bookProgress = chapterProgress
+        ctx.sessionStart = barSessionStart
+        ctx.shortTitleLength = barShortTitleLength
+        ctx.customDatePattern = barCustomDatePattern
+        ctx.customBarText = barCustomText
+        return ctx
+    }
+
+    /// 可读章总数（不含卷）：页栏的「共 N 章」「N 章」都用它。
+    private var readableChapterCount: Int {
+        model.chapters.filter { !$0.isVolume }.count
+    }
+
+    /// 已读到的非卷章序号（0 基）：只用前缀，避免把后面所有章都数进来。
+    private var readableChapterIndex: Int {
+        let count = model.chapters.prefix(model.currentIndex + 1).filter { !$0.isVolume }.count
+        return max(count - 1, 0)
+    }
+
+    /// 旧版六个整数码 → 新的条目数组，只在第一次进阅读页时搬一次。
+    /// 老用户存的是 `tipHeaderLeft = 2` 这类整数；没有对应项就映射成空栏，不去猜他想要什么。
+    private static func migrateBarSettingsIfNeeded() {
+        let defaults = UserDefaults.standard
+        guard defaults.object(forKey: "readerBarMigrated") == nil else { return }
+        defaults.set(true, forKey: "readerBarMigrated")
+        let pairs: [(key: String, legacy: String, fallback: Int)] = [
+            ("readerBarHeaderLeft", "tipHeaderLeft", 2),
+            ("readerBarHeaderMiddle", "tipHeaderMiddle", 0),
+            ("readerBarHeaderRight", "tipHeaderRight", 3),
+            ("readerBarFooterLeft", "tipFooterLeft", 1),
+            ("readerBarFooterMiddle", "tipFooterMiddle", 0),
+            ("readerBarFooterRight", "tipFooterRight", 6)
+        ]
+        for pair in pairs where defaults.string(forKey: pair.key) == nil {
+            let code = defaults.object(forKey: pair.legacy) != nil
+                ? defaults.integer(forKey: pair.legacy)
+                : pair.fallback
+            defaults.set(ReaderBarContent.encode(ReaderBarContent.legacy(code)), forKey: pair.key)
         }
     }
 
@@ -860,6 +1112,10 @@ struct ReaderView: View {
             Button("书签列表", systemImage: "bookmark") {
                 showsReaderMenu = false
                 showsBookmarks = true
+            }
+            Button("书籍信息", systemImage: "info.circle") {
+                showsReaderMenu = false
+                showsBookInfo = true
             }
             Button(isAutoReading ? "停止自动阅读" : "自动阅读", systemImage: isAutoReading ? "stop" : "play") {
                 if isAutoReading {
@@ -1008,6 +1264,149 @@ struct ReaderView: View {
         } else {
             previousDayTheme = resolvedStyle.id
             theme = "night"
+        }
+    }
+
+    /// 自动夜间（Juyue `autoNight`）：22:00–07:00 用夜间主题，其余时段还原成进入夜间前的那套主题。
+    ///
+    /// 切之前先记到 `previousDayTheme`，所以「先手动切夜间、再叠自动夜间」也不会把白天的
+    /// 主题弄丢；E-Ink 模式（`themeMode == "3"`）不参与，它有自己的黑白纸面。
+    private func applyAutoNightIfNeeded() {
+        guard autoNight, themeMode != "3" else { return }
+        let hour = Calendar.current.component(.hour, from: Date())
+        let shouldBeNight = hour >= 22 || hour < 7
+        if shouldBeNight, resolvedStyle.id != "night" {
+            previousDayTheme = resolvedStyle.id
+            theme = "night"
+        } else if !shouldBeNight, resolvedStyle.id == "night" {
+            theme = previousDayTheme == "night" ? "wechat" : previousDayTheme
+        }
+    }
+
+    /// 书籍信息：书目元数据 + 阅读进度。字段与排版照本项目 `BookDetailView.hero`，
+    /// 只读展示，不放「换源 / 缓存」这类动作 —— 那些在详情页里做，阅读页不该有第二个入口。
+    private var bookInfoSheet: some View {
+        ReadingNavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    HStack(alignment: .top, spacing: 16) {
+                        BookCoverArtwork(
+                            title: book.name,
+                            author: book.author,
+                            remoteURL: book.customCoverUrl ?? book.coverUrl,
+                            width: 88,
+                            height: 126
+                        )
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(book.name)
+                                .font(.title3.weight(.semibold))
+                                .lineLimit(3)
+                            Text(book.author.isEmpty ? "未知作者" : book.author)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            if let kind = book.kind, !kind.isEmpty {
+                                Text(kind).font(.caption).foregroundStyle(.secondary)
+                            }
+                            Text(book.originName.isEmpty ? book.origin : book.originName)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 0)
+                    }
+
+                    Divider()
+
+                    VStack(spacing: 10) {
+                        bookInfoRow("阅读进度", "第 \(readableChapterIndex + 1) 章 / 共 \(max(readableChapterCount, 1)) 章")
+                        bookInfoRow("当前章", model.title)
+                        if let dur = book.durChapterTitle, !dur.isEmpty {
+                            bookInfoRow("上次读到", dur)
+                        }
+                        bookInfoRow("总章数", "\(book.totalChapterNum) 章")
+                        bookInfoRow("本章页数", "\(currentPage)/\(totalPages)")
+                        if let words = book.wordCount, !words.isEmpty {
+                            bookInfoRow("字数", words)
+                        }
+                        if let latest = book.latestChapterTitle, !latest.isEmpty {
+                            bookInfoRow("最近更新", latest)
+                        }
+                        if let charset = book.charset, !charset.isEmpty {
+                            bookInfoRow("编码", charset)
+                        }
+                        bookInfoRow("允许更新", book.canUpdate ? "是" : "否")
+                    }
+
+                    if let intro = MetadataTextSanitizer().clean(book.customIntro ?? book.intro), !intro.isEmpty {
+                        Divider()
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("简介").font(.headline)
+                            Text(intro)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .lineSpacing(5)
+                        }
+                    }
+                }
+                .padding(20)
+            }
+            .navigationTitle("书籍信息")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { showsBookInfo = false }
+                }
+            }
+        }
+        .readingPresentationDetents([.medium, .large])
+    }
+
+    private func bookInfoRow(_ title: String, _ value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(title)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 8)
+            Text(value)
+                .font(.subheadline)
+                .multilineTextAlignment(.trailing)
+        }
+    }
+
+    /// 章节标题设计器：没有静态资源时给可读提示，而不是一张白页。
+    @ViewBuilder private var titleDesignerSheet: some View {
+        if ChapterTitleDesignerBundle.isAvailable {
+            ChapterTitleDesignerView(
+                initialProjectJSON: chapterTitleProjectJSON,
+                isDark: resolvedStyle.id == "night"
+            ) { export in
+                chapterTitleHTMLTemplate = export.htmlTemplate
+                chapterTitleProjectJSON = export.projectJSON
+                chapterTitleCanvasHeight = export.canvasHeight
+                // 换了设计稿：丢掉旧位图，否则会继续用上一版标题图。
+                ReaderChapterTitleStore.shared.clear()
+                readerRenderRevision &+= 1
+            }
+        } else {
+            ReadingNavigationStack {
+                VStack(spacing: 14) {
+                    Image(systemName: "paintbrush").font(.largeTitle).foregroundStyle(.secondary)
+                    Text("设计器页面没有打进 App 包")
+                        .font(.headline)
+                    Text("缺少 Resources/ChapterTitleDesigner/index.html。检查工程里的 ChapterTitleDesigner folder reference 是否进了 Resources 阶段。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+                .padding(24)
+                .navigationTitle("章节标题设计器")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("完成") { showsTitleDesigner = false }
+                    }
+                }
+            }
+            .readingPresentationDetents([.medium])
         }
     }
 
@@ -1274,6 +1673,20 @@ struct ReaderView: View {
                         }
                         Button("恢复默认字体", role: .destructive) { fontPath = "" }
                     }
+                    if !installedFontFaces.isEmpty {
+                        Menu {
+                            ForEach(installedFontFaces, id: \.path) { face in
+                                Button(face.displayName) { fontPath = face.path }
+                            }
+                        } label: {
+                            Label("已安装字体（\(installedFontFaces.count)）", systemImage: "list.bullet")
+                        }
+                        .accessibilityIdentifier("reader.fontList")
+                    } else {
+                        Text("把 .ttf/.otf/.ttc 放进「文件 › 我的 iPhone › 小浣熊阅读 › fonts」，重启后回到这里选择。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                     if let fontError {
                         Text(fontError).font(.footnote).foregroundStyle(.red)
                     }
@@ -1283,6 +1696,31 @@ struct ReaderView: View {
                         options: [ReadingMenuOption(0, "关闭"), ReadingMenuOption(1, "实线"), ReadingMenuOption(2, "虚线")],
                         identifier: "reader.underline"
                     )
+                    ReadingMenuPickerRow(
+                        title: "下划线线型",
+                        selection: $underlinePattern,
+                        options: [
+                            ReadingMenuOption(0, "实线"),
+                            ReadingMenuOption(1, "点线"),
+                            ReadingMenuOption(2, "虚线"),
+                            ReadingMenuOption(3, "点划线")
+                        ],
+                        identifier: "reader.underlinePattern"
+                    )
+                    Stepper("段末分隔线：\(paragraphSeparatorLines) 根", value: $paragraphSeparatorLines, in: 0...3)
+                    ReadingMenuPickerRow(
+                        title: "简繁转换",
+                        selection: $chineseConversion,
+                        options: [
+                            ReadingMenuOption(0, "原文"),
+                            ReadingMenuOption(1, "转简体"),
+                            ReadingMenuOption(2, "转繁体")
+                        ],
+                        identifier: "reader.chineseConversion"
+                    )
+                    Toggle("智能分段", isOn: $smartParagraphs)
+                    Toggle("中文标点禁则", isOn: $punctuationKinsoku)
+                    Toggle("页末匀空白", isOn: $justifyLastPage)
                 }
 
                 Section("章节标题") {
@@ -1295,6 +1733,26 @@ struct ReaderView: View {
                     valueSlider("标题字号增量", value: $titleSize, range: -10...30, format: { String(format: "%+.0f", $0) })
                     valueSlider("标题上间距", value: $titleTopSpacing, range: 0...100, format: { "\(Int($0))" })
                     valueSlider("标题下间距", value: $titleBottomSpacing, range: 0...100, format: { "\(Int($0))" })
+                    Button("设计章节标题", systemImage: "paintbrush") {
+                        showsReaderMenu = false
+                        showsStyleControls = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { showsTitleDesigner = true }
+                    }
+                    .disabled(!ChapterTitleDesignerBundle.isAvailable)
+                    if !chapterTitleHTMLTemplate.isEmpty {
+                        Button("清除标题设计稿", systemImage: "trash", role: .destructive) {
+                            chapterTitleHTMLTemplate = ""
+                            chapterTitleProjectJSON = ""
+                            chapterTitleCanvasHeight = 0
+                            ReaderChapterTitleStore.shared.clear()
+                            readerRenderRevision &+= 1
+                        }
+                    }
+                    if !ChapterTitleDesignerBundle.isAvailable {
+                        Text("设计器资源没有进 App 包（Resources/ChapterTitleDesigner），这一项暂时不可用。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 Section("翻页动画") {
@@ -1357,12 +1815,15 @@ struct ReaderView: View {
                         options: [ReadingMenuOption(0, "显示"), ReadingMenuOption(1, "隐藏")],
                         identifier: "reader.footerMode"
                     )
-                    tipPicker("页眉左", selection: $tipHeaderLeft)
-                    tipPicker("页眉中", selection: $tipHeaderMiddle)
-                    tipPicker("页眉右", selection: $tipHeaderRight)
-                    tipPicker("页脚左", selection: $tipFooterLeft)
-                    tipPicker("页脚中", selection: $tipFooterMiddle)
-                    tipPicker("页脚右", selection: $tipFooterRight)
+                    barContentPicker("页眉左", selection: $barHeaderLeft)
+                    barContentPicker("页眉中", selection: $barHeaderMiddle)
+                    barContentPicker("页眉右", selection: $barHeaderRight)
+                    barContentPicker("页脚左", selection: $barFooterLeft)
+                    barContentPicker("页脚中", selection: $barFooterMiddle)
+                    barContentPicker("页脚右", selection: $barFooterRight)
+                    Stepper("短标题字数：\(barShortTitleLength)", value: $barShortTitleLength, in: 2...20)
+                    TextField("自定义日期格式（如 M月d日）", text: $barCustomDatePattern)
+                    TextField("自定义栏内容", text: $barCustomText)
                     Toggle("页眉分隔线", isOn: $showHeaderLine)
                     Toggle("页脚分隔线", isOn: $showFooterLine)
                 }
@@ -1402,7 +1863,7 @@ struct ReaderView: View {
         }
         .fileImporter(
             isPresented: $showsFontImporter,
-            allowedContentTypes: [.font, .data],
+            allowedContentTypes: ReaderFontStore.importableContentTypes,
             allowsMultipleSelection: false
         ) { result in
             fontError = nil
@@ -1458,19 +1919,34 @@ struct ReaderView: View {
         }
     }
 
-    private static let readerTipChoices: [(Int, String)] = [
-        (0, "无"), (7, "书名"), (1, "标题"), (2, "时间"), (3, "电量"),
-        (10, "电量%"), (4, "页数"), (5, "进度(%)"), (11, "进度(xx/yyy)"),
-        (6, "页数及进度"), (8, "时间及电量"), (9, "时间及电量%")
-    ]
-
-    private func tipPicker(_ title: String, selection: Binding<Int>) -> some View {
-        ReadingMenuPickerRow(
-            title: title,
-            selection: selection,
-            options: Self.readerTipChoices.map { ReadingMenuOption($0.0, $0.1) },
-            identifier: "reader.tip.\(title)"
-        )
+    /// 一栏可填多个条目：点一下加进去，再点一下拿出来。
+    private func barContentPicker(_ title: String, selection: Binding<String>) -> some View {
+        let selected = ReaderBarContent.decode(selection.wrappedValue)
+        return Menu {
+            ForEach(ReaderBarContent.allCases) { item in
+                Button {
+                    var items = ReaderBarContent.decode(selection.wrappedValue)
+                    if let index = items.firstIndex(of: item) {
+                        items.remove(at: index)
+                    } else if item != .none {
+                        items.append(item)
+                    }
+                    selection.wrappedValue = ReaderBarContent.encode(items)
+                } label: {
+                    Label(item.rawValue, systemImage: selected.contains(item) ? "checkmark" : "square")
+                }
+            }
+            Divider()
+            Button("清空", role: .destructive) { selection.wrappedValue = "" }
+        } label: {
+            HStack {
+                Text(title)
+                Spacer()
+                Text(selected.isEmpty ? "无" : selected.map(\.rawValue).joined(separator: " + "))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
     }
 
 
@@ -1630,6 +2106,7 @@ struct ReaderView: View {
                         Toggle("阅读时隐藏小横条", isOn: $hideHomeIndicator)
                     }
                     Toggle("隐藏状态栏", isOn: $hideStatusBar)
+                    Toggle("自动夜间（22:00–07:00）", isOn: $autoNight)
                     Toggle("显示亮度调节", isOn: $showBrightness)
                     Button("跟随系统亮度", systemImage: "sun.max") {
                         followsSystemBrightness = true

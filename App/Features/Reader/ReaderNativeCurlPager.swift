@@ -117,10 +117,15 @@ func readerCurlBackColor(_ color: UIColor) -> UIColor {
 // MARK: - 页序（扁平页表）
 
 /// 一页在「整本书页序」里的坐标：第几章第几页（都从 0 起）。
-struct ReaderDeckLocation: Hashable {
-    let chapterIndex: Int
-    let pageIndex: Int
-}
+///
+/// 权威定义在 `LegadoCore.PageDeckLocation`（无 UIKit，由 `PageDeckTests` 每次 CI 覆盖）：
+/// 页序的拼接顺序、章界相邻、坐标重映射全是纯算术，挂在 UIKit 文件里就只能靠真机试。
+/// 这里用别名而不是新增模块导入：`PageDeck.swift` 已按 pbxproj 口径登记进 Legado target
+/// （`PBXBuildFile` / `PBXFileReference` / 组 children / Sources phase 四处，路径写
+/// `Sources/LegadoCore/Reader/PageDeck.swift`，与整套 JS 文件同一形式），与 App 同模块可见。
+/// 改成用 SwiftPM 产品模块的方式导入会直接把 app target 编红
+/// （`unable to resolve module dependency: 'LegadoCore'`），那条路不再走。
+typealias ReaderDeckLocation = PageDeckLocation
 
 /// 页序里的一页：内容归属 + 画这一页要用的纸。
 struct ReaderDeckSlot {
@@ -147,102 +152,60 @@ struct ReaderPageDeck {
         let sheets: [ReaderCurlSheet]
     }
 
-    private(set) var slots: [ReaderDeckSlot] = []
-    private(set) var currentChapterIndex: Int = 0
-    /// 章下标 → 该章第一页在 `slots` 里的绝对下标。
-    private(set) var chapterStarts: [Int: Int] = [:]
-    /// 页坐标 → 绝对下标。
-    private var indexByLocation: [ReaderDeckLocation: Int] = [:]
+    /// 页序算术的唯一实现：`LegadoCore.PageDeck`（已按 pbxproj 口径登记进 Legado target，
+    /// 与 App 同模块，因此不需要 `import LegadoCore` —— 那条路曾把 app target 直接编红）。
+    /// 这里只把泛型载荷换成「一页纸」，对外 API 与原来逐点一致，App 侧调用点零改动。
+    private let base: PageDeck<ReaderCurlSheet>
 
-    init() {}
+    var slots: [ReaderDeckSlot] {
+        base.slots.map {
+            ReaderDeckSlot(location: $0.location, chapterTitle: $0.chapterTitle, sheet: $0.payload)
+        }
+    }
+
+    var currentChapterIndex: Int { base.currentChapterIndex }
+    /// 章下标 → 该章第一页在 `slots` 里的绝对下标。
+    var chapterStarts: [Int: Int] { base.chapterStarts }
+
+    init() { base = PageDeck() }
 
     init(chapters: [Chapter], currentChapterIndex: Int) {
-        var slots: [ReaderDeckSlot] = []
-        var starts: [Int: Int] = [:]
-        var lookup: [ReaderDeckLocation: Int] = [:]
-        // 空页表的章不进页序：相邻章还没加载时，页序自然退化成「只有本章」，
+        // 空页表的章由 `PageDeck` 自己跳过：相邻章还没排进来时，页序自然退化成「只有本章」，
         // 不会多出一段空白帧，也不会让下标映射错位。
-        for chapter in chapters where !chapter.sheets.isEmpty {
-            starts[chapter.index] = slots.count
-            for (pageIndex, sheet) in chapter.sheets.enumerated() {
-                let location = ReaderDeckLocation(chapterIndex: chapter.index, pageIndex: pageIndex)
-                lookup[location] = slots.count
-                slots.append(ReaderDeckSlot(location: location, chapterTitle: chapter.title, sheet: sheet))
-            }
-        }
-        self.slots = slots
-        self.currentChapterIndex = currentChapterIndex
-        self.chapterStarts = starts
-        self.indexByLocation = lookup
+        base = PageDeck(
+            chapters: chapters.map {
+                PageDeck<ReaderCurlSheet>.Chapter(index: $0.index, title: $0.title, pages: $0.sheets)
+            },
+            currentChapterIndex: currentChapterIndex
+        )
     }
 
     var isEmpty: Bool { slots.isEmpty }
     var count: Int { slots.count }
 
     func slot(at index: Int) -> ReaderDeckSlot? {
-        slots.indices.contains(index) ? slots[index] : nil
+        base.slot(at: index).map {
+            ReaderDeckSlot(location: $0.location, chapterTitle: $0.chapterTitle, sheet: $0.payload)
+        }
     }
 
-    func index(of location: ReaderDeckLocation) -> Int? { indexByLocation[location] }
+    func index(of location: ReaderDeckLocation) -> Int? { base.index(of: location) }
 
     /// 本章第一页的绝对下标（本章没排进来时返回 nil）。
-    var currentChapterStart: Int? { chapterStarts[currentChapterIndex] }
+    var currentChapterStart: Int? { base.currentChapterStart }
 
     /// 本章最后一页的绝对下标（含）。
-    ///
-    /// 走显式循环而不是 `chapterStarts.filter{...}.values.min()`：`Dictionary.filter`
-    /// 的返回类型依赖标准库版本，这里不值得赌，一次写准。
-    func currentChapterEnd() -> Int? {
-        guard let start = chapterStarts[currentChapterIndex] else { return nil }
-        var offset = start
-        var end = start
-        while offset < slots.count, slots[offset].location.chapterIndex == currentChapterIndex {
-            end = offset
-            offset += 1
-        }
-        return end
-    }
+    func currentChapterEnd() -> Int? { base.currentChapterEnd() }
 
     /// 把某一页坐标落到最近的合法下标：同章里取不超过它的最后一页，没有就取该章首页。
-    ///
-    /// 换章/重排之后页表会变（页数、分页点都可能不同），落点必须按坐标重新映射一次，
-    /// 否则读者会被「上一次的绝对下标」带偏一页。
-    func nearestIndex(to location: ReaderDeckLocation) -> Int? {
-        if let exact = indexByLocation[location] { return exact }
-        guard let start = chapterStarts[location.chapterIndex] else { return nil }
-        var candidate = start
-        var offset = start
-        while offset < slots.count, slots[offset].location.chapterIndex == location.chapterIndex {
-            if slots[offset].location.pageIndex <= location.pageIndex { candidate = offset }
-            offset += 1
-        }
-        return candidate
-    }
+    func nearestIndex(to location: ReaderDeckLocation) -> Int? { base.nearestIndex(to: location) }
 
-    func firstIndex(inChapter chapterIndex: Int) -> Int? { chapterStarts[chapterIndex] }
+    func firstIndex(inChapter chapterIndex: Int) -> Int? { base.firstIndex(inChapter: chapterIndex) }
 
-    /// 某一章有多少页（该章没排进页序时返回 0）。
-    ///
-    /// 页内栏的 `{page}` / `{pages}` 必须是「章内页码」，不是整卷绝对下标：
-    /// 页序把上一章、本章、下一章拼在一起之后，绝对下标一跨章就等于整本进度，
-    /// 直接拿来盖章，页眉会显示成「第 27 页 / 共 41 页」这种读者对不上的数。
-    func pageCount(inChapter chapterIndex: Int) -> Int {
-        guard let start = chapterStarts[chapterIndex] else { return 0 }
-        var offset = start
-        while offset < slots.count, slots[offset].location.chapterIndex == chapterIndex { offset += 1 }
-        return offset - start
-    }
+    /// 某一章有多少页（该章没排进页序时返回 0）。页内栏按「章」编号，不按整卷绝对下标。
+    func pageCount(inChapter chapterIndex: Int) -> Int { base.pageCount(inChapter: chapterIndex) }
 
-    func lastIndex(inChapter chapterIndex: Int) -> Int? {
-        guard let start = chapterStarts[chapterIndex] else { return nil }
-        var offset = start
-        var last = start
-        while offset < slots.count, slots[offset].location.chapterIndex == chapterIndex {
-            last = offset
-            offset += 1
-        }
-        return last
-    }
+    func lastIndex(inChapter chapterIndex: Int) -> Int? { base.lastIndex(inChapter: chapterIndex) }
 }
 
 // MARK: - 卷页控制器

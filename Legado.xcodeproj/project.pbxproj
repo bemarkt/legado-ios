@@ -92,6 +92,7 @@
 		C10000000000000000000017 /* BookSourceDebugger.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000017 /* BookSourceDebugger.swift */; };
 		C10000000000000000000018 /* LocalBookService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000018 /* LocalBookService.swift */; };
 		C10000000000000000000019 /* ContentSanitizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000019 /* ContentSanitizer.swift */; };
+		CE1FF000000000000000FF02 /* PageDeck.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE2FF000000000000000FF02 /* PageDeck.swift */; };
 		C1000000000000000000001A /* ReplaceRuleRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000001A /* ReplaceRuleRepository.swift */; };
 		C1000000000000000000001B /* ReadingActivityRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000001B /* ReadingActivityRepository.swift */; };
 		C1000000000000000000001C /* ChapterContentCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000001C /* ChapterContentCache.swift */; };
@@ -251,6 +252,7 @@
 		C20000000000000000000017 /* BookSourceDebugger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookSourceDebugger.swift; sourceTree = "<group>"; };
 		C20000000000000000000018 /* LocalBookService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalBookService.swift; sourceTree = "<group>"; };
 		C20000000000000000000019 /* ContentSanitizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentSanitizer.swift; sourceTree = "<group>"; };
+		CE2FF000000000000000FF02 /* PageDeck.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/LegadoCore/Reader/PageDeck.swift; sourceTree = SOURCE_ROOT; };
 		C2000000000000000000001A /* ReplaceRuleRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReplaceRuleRepository.swift; sourceTree = "<group>"; };
 		C2000000000000000000001B /* ReadingActivityRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingActivityRepository.swift; sourceTree = "<group>"; };
 		C2000000000000000000001C /* ChapterContentCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChapterContentCache.swift; sourceTree = "<group>"; };
@@ -503,6 +505,7 @@
 				C3000000000000000000000B /* LocalBook */,
 				C3000000000000000000000C /* RSS */,
 				C3000000000000000000000D /* TTS */,
+				CE2FF000000000000000FF02 /* PageDeck.swift */,
 			);
 			path = Sources/LegadoCore;
 			sourceTree = "<group>";
@@ -925,6 +928,7 @@
 				EB1000000000000000000003 /* EPUBIllustrationsView.swift in Sources */,
 				EB1000000000000000000001 /* EPUBBook.swift in Sources */,
 				C10000000000000000000019 /* ContentSanitizer.swift in Sources */,
+				CE1FF000000000000000FF02 /* PageDeck.swift in Sources */,
 				C1000000000000000000001A /* ReplaceRuleRepository.swift in Sources */,
 				C1000000000000000000001B /* ReadingActivityRepository.swift in Sources */,
 				C1000000000000000000001C /* ChapterContentCache.swift in Sources */,

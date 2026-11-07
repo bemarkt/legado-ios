@@ -98,6 +98,28 @@ struct ReaderCurlStyle {
         parts.append(footer.map { "\($0.gap)/\($0.showsDivider)/\($0.dividerOnBottom)/\($0.leftInset)/\($0.rightInset)" } ?? "-")
         return parts.joined(separator: "|")
     }
+
+    /// 只含「会改变分页 / 行内排版」的那几项。
+    ///
+    /// 照 InkShelf `ReaderPageAppearance.hasSameLayout(as:)` 的分工：布局变了必须重投
+    /// 控制器（这一页的画法真的换了），纯外观变化（底色、文字色、背景图、页内栏）
+    /// 只需要就地刷新，绝不重投。此前两者合成一个 `signature`，于是任何一次外观更新
+    /// 都被当成「页面变了」重投一遍 —— 正好撞在卷页收尾那一拍上。
+    var layoutSignature: String {
+        var parts: [String] = []
+        parts.reserveCapacity(10)
+        parts.append("\(layout.fontSize)")
+        parts.append("\(layout.lineSpacing)")
+        parts.append("\(layout.letterSpacing)")
+        parts.append("\(layout.paragraphSpacing)")
+        parts.append("\(layout.firstLineIndent)")
+        parts.append("\(layout.weightLevel)")
+        parts.append(layout.fontPostScriptName)
+        parts.append(layout.fontBoldPostScriptName)
+        parts.append("\(contentWidth)")
+        parts.append("\(titleFontSize)")
+        return parts.joined(separator: "|")
+    }
 }
 
 /// 系统卷页会给卷起的那张纸加一层关不掉的提亮高光，纸背底色必须预压暗一档，
@@ -258,6 +280,13 @@ final class ReaderNativeCurlController: UIPageViewController {
     var onTap: ((CGPoint) -> Void)?
     /// 转场进行中：此时禁止 setViewControllers 刷新页面。
     private(set) var isTurning = false
+    /// 这一次手势的落地页：`willTransitionTo` 里算出来，`didFinishAnimating` 只确认成败。
+    ///
+    /// 照 InkShelf `CurlPageTurnController` 的 `PageTurnTransaction`：落点在手势**开始**时
+    /// 由 pending 控制器决定，收尾不再从 `view.tag` 事后反推 —— tag 是可写状态，`adopt`
+    /// 与纸背换面都会改写它，落地一拍读到的值完全可能比记账下标多一格（真机日志里
+    /// 「从=29 到=27」「从=17 到=15」就是它，观感即「回翻时先闪一下前一页内容」）。
+    private var pendingTurnTarget: Int?
     /// 章界换章的一次性闩锁：记已经为哪一次换章 token 触发过。
     ///
     /// 章界同时挂着位移旁听、左右划兜底和程序化翻页到头三条通路，一次抬手
@@ -389,6 +418,8 @@ final class ReaderNativeCurlController: UIPageViewController {
         animated: Bool = false
     ) -> Int {
         let styleChanged = newStyle.signature != style.signature
+        // 外观变了不必重投，排版变了必须重投：两类变化的处置完全不同，先分开。
+        let layoutChanged = newStyle.layoutSignature != style.layoutSignature
         let chapterChanged = newToken != chapterToken
         // 落点只由页坐标决定：换章 / 重排之后页表会变（页数、分页点都可能不同），
         // 绝对下标必须按坐标重映射一次，否则读者会被「上一次的绝对下标」带偏一页。
@@ -420,8 +451,16 @@ final class ReaderNativeCurlController: UIPageViewController {
         ReaderChapterTrace.log(
             "页序更新 换章=\(chapterChanged) 样式=\(styleChanged) 页面=\(visibleContentChanged) 规模=\(pageCountChanged) token=\(newToken) 落点=(\(focus.chapterIndex),\(focus.pageIndex)) 下标=\(target + 1)/\(newDeck.count)"
         )
-        if !chapterChanged, !styleChanged, !visibleContentChanged {
-            // 眼前这一页一个字都没变（只是邻章页表拼进来了）：静默接管页序，绝不重投。
+        if !chapterChanged, !layoutChanged, !visibleContentChanged {
+            // 眼前这一页一个字都没变，排版参数也没动：只是邻章页表拼进来了，或者只是
+            // 底色 / 文字色 / 背景图 / 页内栏这类外观参数变了。
+            // 静默接管页序，绝不重投。
+            //
+            // 照 InkShelf `CurlPageTurnController.configure` 的分工：只有
+            // `contentChanged || layoutChanged` 才 `setViewControllers`，纯外观变化只
+            // `updateHighlight`。这里对应「只 refreshBars」。此前把 `styleChanged` 并进
+            // 重投分支，于是落地那一拍外层判 `样式=true 页面=false 规模=false` 就清缓存
+            // 重投一次，正撞在卷页收尾上 —— 观感就是「回翻先闪一下前一页」。
             if isTurning {
                 // 转场途中改 tag 会搅乱 UIKit 的记账：先排队，落地后再补。
                 pendingState = PendingState(
@@ -435,6 +474,8 @@ final class ReaderNativeCurlController: UIPageViewController {
                 return target
             }
             adopt(deck: newDeck, focus: focus, chapterToken: newToken, style: newStyle)
+            // 绘制参数真的变了就就地刷栏（时间、页码这类），不重建页面集合。
+            refreshBars(header: newStyle.header, footer: newStyle.footer)
             return index
         }
         if isTurning {
@@ -531,9 +572,14 @@ final class ReaderNativeCurlController: UIPageViewController {
         var visibleLocation: ReaderDeckLocation?
         var visibleIsBack = false
         if let current = viewControllers?.first {
-            let tag = current.view.tag
-            visibleIsBack = tag % 2 == 1
-            visibleLocation = deck.slot(at: tag / 2)?.location
+            // 用控制器身份而不是 `view.tag` 反查：tag 可写，改写它只为兼容，
+            // 记账一律走 `deckIndex`（照 InkShelf `CurlPageSide.physicalPageIndex`）。
+            if let back = current as? ReaderCurlBackController {
+                visibleIsBack = true
+                visibleLocation = deck.slot(at: back.deckIndex)?.location
+            } else if let front = current as? ReaderCurlFrontController {
+                visibleLocation = deck.slot(at: front.deckIndex)?.location
+            }
         }
         deck = newDeck
         chapterToken = newToken
@@ -552,6 +598,12 @@ final class ReaderNativeCurlController: UIPageViewController {
         chapterTitle = newDeck.slot(at: landing)?.chapterTitle
         // 物理 tag 必须跟着改写：dataSource 全靠它算 before / after，留着旧 tag 会指到错的页。
         if let current = viewControllers?.first {
+            if let front = current as? ReaderCurlFrontController {
+                front.deckIndex = landing
+            } else if let back = current as? ReaderCurlBackController {
+                back.deckIndex = landing
+            }
+            // tag 只作兼容保留（调试与系统内部不作数），记账一律走 `deckIndex`。
             current.view.tag = visibleIsBack ? landing * 2 + 1 : landing * 2
         }
         view.backgroundColor = newStyle.backgroundColor
@@ -565,6 +617,9 @@ final class ReaderNativeCurlController: UIPageViewController {
         for (_, entry) in frontCache {
             (entry.controller as? ReaderCurlFrontController)?.refreshBars(header: header, footer: footer)
         }
+        // 屏上那一张不在缓存里（`adopt` 刚把缓存整体清空）：外观变化要就地刷到它身上，
+        // 否则「不重投」就变成「这一页的底色 / 页码永远停在旧值」。
+        (viewControllers?.first as? ReaderCurlFrontController)?.refreshBars(header: header, footer: footer)
     }
 
     /// 状态刷新时把当前页对齐：不重建控制器，避免丢掉进行中的卷页状态。
@@ -668,6 +723,7 @@ final class ReaderNativeCurlController: UIPageViewController {
             pageCount: pageCount
         )
         // 物理页编号：正面 = 2i（纸背 = 2i + 1，见 `back`）。
+        controller.deckIndex = clamped
         controller.view.tag = clamped * 2
         frontCache[clamped] = (key, controller)
         trim(&frontCache)
@@ -686,6 +742,7 @@ final class ReaderNativeCurlController: UIPageViewController {
             style: style,
             ghostSheet: deck.slot(at: clamped)?.sheet ?? ReaderCurlSheet()
         )
+        controller.deckIndex = clamped
         controller.view.tag = clamped * 2 + 1
         backCache[clamped] = (key, controller)
         trim(&backCache)
@@ -710,7 +767,7 @@ final class ReaderNativeCurlController: UIPageViewController {
         let target = index
         DispatchQueue.main.async { [weak self] in
             guard let self, self.view.window != nil, !self.isTurning else { return }
-            guard let current = self.viewControllers?.first, current.view.tag % 2 == 1 else { return }
+            guard self.viewControllers?.first is ReaderCurlBackController else { return }
             self.setViewControllers([self.front(target)], direction: .forward, animated: false)
         }
     }
@@ -735,10 +792,10 @@ extension ReaderNativeCurlController: UIPageViewControllerDataSource, UIPageView
         viewControllerBefore viewController: UIViewController
     ) -> UIViewController? {
         // 一张纸两个面：从纸背往回翻 = 回到同一页的正面；从正面往回翻 = 上一张纸的背面。
-        let tag = viewController.view.tag
-        let page = tag / 2
-        if tag % 2 == 1 { return front(page) }
-        let previous = page - 1
+        // 寻址走控制器自己的 `deckIndex`，不看 `view.tag` —— tag 可写，一旦被改写就会指错页。
+        if let backPage = viewController as? ReaderCurlBackController { return front(backPage.deckIndex) }
+        guard let frontPage = viewController as? ReaderCurlFrontController else { return nil }
+        let previous = frontPage.deckIndex - 1
         return previous >= 0 ? back(previous) : nil
     }
 
@@ -749,14 +806,13 @@ extension ReaderNativeCurlController: UIPageViewControllerDataSource, UIPageView
         // 从正面往前翻 = 这一张纸的背面（落地后按方向翻译成 i + 1）；从纸背往前翻 =
         // 下一张纸的正面。页序到头必须返回 nil：给了纸，系统会把它卷出来卡在那里，
         // 章末那一下也落不到 gesture 的 ended 分支去请求下一段正文。
-        let tag = viewController.view.tag
-        let page = tag / 2
-        if tag % 2 == 1 {
-            let next = page + 1
+        if let backPage = viewController as? ReaderCurlBackController {
+            let next = backPage.deckIndex + 1
             return next < deck.count ? front(next) : nil
         }
-        guard page + 1 < deck.count else { return nil }
-        return back(page)
+        guard let frontPage = viewController as? ReaderCurlFrontController else { return nil }
+        guard frontPage.deckIndex + 1 < deck.count else { return nil }
+        return back(frontPage.deckIndex)
     }
 
     func pageViewController(
@@ -764,11 +820,23 @@ extension ReaderNativeCurlController: UIPageViewControllerDataSource, UIPageView
         willTransitionTo pendingViewControllers: [UIViewController]
     ) {
         isTurning = true
+        guard let pending = pendingViewControllers.first else { return }
+        // 落点在手势开始时就算出来（照 InkShelf `PageTurnTransaction.begin`）：
+        // 正面 = 这一页自己；纸背看方向 —— 往前翻是「这一张纸越过去了」＝下一页，
+        // 往回翻是「上一张纸」＝它自己那一页。收尾只确认成败，不再事后反推。
+        let target: Int
+        if let front = pending as? ReaderCurlFrontController {
+            target = front.deckIndex
+        } else if let back = pending as? ReaderCurlBackController {
+            let backPage = back.deckIndex
+            target = backPage == index ? min(index + 1, max(deck.count - 1, 0)) : backPage
+        } else {
+            target = index
+        }
+        pendingTurnTarget = target
         // 纸背上的淡影必须是「落地那一页」：往前翻是下一张纸，往回翻是上一张纸。
-        guard let pending = pendingViewControllers.first as? ReaderCurlBackController else { return }
-        let page = pending.view.tag / 2
-        let ghost = page == index ? min(index + 1, max(deck.count - 1, 0)) : page
-        pending.configure(ghostSheet: deck.slot(at: ghost)?.sheet ?? ReaderCurlSheet())
+        guard let back = pending as? ReaderCurlBackController else { return }
+        back.configure(ghostSheet: deck.slot(at: target)?.sheet ?? ReaderCurlSheet())
     }
 
     func pageViewController(
@@ -779,29 +847,35 @@ extension ReaderNativeCurlController: UIPageViewControllerDataSource, UIPageView
     ) {
         // 不管落没落地都先放开闸门，否则取消一次手势就把刷新卡死。
         isTurning = false
+        // 手势开始时定下的落点在这里消费掉：取消的手势也一并清空，绝不留给下一次。
+        let gestureTarget = pendingTurnTarget
+        pendingTurnTarget = nil
         if completed,
            let controllers = pageViewController.viewControllers,
            !controllers.isEmpty {
             // 物理页 → 内容页：落在纸背上是「这一张纸已经翻过去了」，往前翻就是下一页，
             // 往回翻就是这一张纸自己那一页。这是双面卷页唯一的记账点，错一位就是
             // 「往后翻跳一页」或「翻不动」。
-            let tag = controllers[0].view.tag
-            let page = tag / 2
-            let landedOnBack = tag % 2 == 1
-            let newIndex: Int
-            if landedOnBack, page == index, page + 1 < deck.count {
-                newIndex = page + 1
-            } else {
-                newIndex = page
-            }
+            // 落地页在手势开始时已经定下（`willTransitionTo`），这里只确认成败：
+            // 照 InkShelf `CurlPageTurnController` 的 `transaction.finish(committed:)`，
+            // 落点由 begin 决定、收尾只做确认。绝不再按屏上控制器的 tag 事后反推 ——
+            // tag 是可变状态，`adopt` 与纸背换面都会改写它，落地一拍读到的 tag
+            // 完全可能比记账下标多一格。
+            let newIndex = gestureTarget ?? index
+            let landedOnBack = (controllers[0] as? ReaderCurlBackController) != nil
             if newIndex >= 0, newIndex < deck.count, newIndex != index {
-                // 每次落地都记一条，页号只允许 ±1。下次若又觉得「跳页」，一条日志就能
-                // 分辨是真跳了两页，还是两次手势之间夹了一次页序重建 —— 普通翻页不写
-                // 日志，早先那种粒度正是「看着像跳页」的来源。
+                // 一次手势只许走一页。页序重建与纸背换面叠在一起时，物理 tag 会比记账
+                // 下标多走一格（真机日志里「从=29 到=27」「从=17 到=15」就是它）：记账
+                // 一旦滑过位，下一帧的落点、纸背鬼影、页内页码全都跟着错一格 —— 回翻时
+                // 看到的「先闪一下前一页内容」正是这一格。越界只夹回 ±1 并记一条日志。
+                let clamped = index + (newIndex > index ? 1 : -1)
                 ReaderChapterTrace.log("卷页落地 从=\(index + 1) 到=\(newIndex + 1) 纸背=\(landedOnBack)")
-                index = newIndex
-                onIndexChange?(newIndex)
-                if let location = deck.slot(at: newIndex)?.location { onDeckCommit?(location) }
+                if clamped != newIndex {
+                    ReaderChapterTrace.log("卷页落地越界已夹回 从=\(index + 1) 到=\(newIndex + 1) 夹后=\(clamped + 1)")
+                }
+                index = clamped
+                onIndexChange?(clamped)
+                if let location = deck.slot(at: clamped)?.location { onDeckCommit?(location) }
             }
             // 落在纸背上：下一拍换回同一页的正面。绝不在转场收尾里同步重投控制器。
             normalizeBackFaceIfNeeded()
@@ -823,6 +897,8 @@ extension ReaderNativeCurlController: UIPageViewControllerDataSource, UIPageView
                 chapterToken: pending.chapterToken,
                 style: pending.style
             )
+            // 静默接管同样要把栏文案刷到新参数上：不重投，但也不能停着旧时间。
+            refreshBars(header: pending.style.header, footer: pending.style.footer)
             return
         }
         apply(
@@ -858,6 +934,8 @@ extension ReaderNativeCurlController: UIGestureRecognizerDelegate {
 private final class ReaderCurlBackController: UIViewController {
     private let style: ReaderCurlStyle
     private var ghostSheet: ReaderCurlSheet
+    /// 这一面属于哪一页（整卷绝对下标）：与正面同一口径，供寻址与落地确认使用。
+    var deckIndex = 0
     private let backgroundView = UIImageView()
     private lazy var ghostView = PaginatedTextPageView(frame: .zero)
 
@@ -943,6 +1021,12 @@ private final class ReaderCurlFrontController: UIViewController {
     private let chapterTitle: String?
     private let pageIndex: Int
     private let pageCount: Int
+    /// 这一页在整卷页序里的绝对下标。
+    ///
+    /// 寻址一律认它（照 InkShelf `CurlPageSide.physicalPageIndex` 的控制器身份），
+    /// `view.tag` 只作兼容保留：tag 可写、会被 `adopt` 改写，靠它反推邻页与落地页
+    /// 会错一格。`pageIndex` 是「章内页号」，只用于页内栏盖章，不能当寻址用。
+    var deckIndex = 0
 
     private let backgroundView = UIImageView()
     private let titleImageView = UIImageView()

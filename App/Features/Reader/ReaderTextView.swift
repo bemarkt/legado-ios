@@ -1174,7 +1174,14 @@ struct ReaderTextView: UIViewRepresentable {
             // 安全区那块矩形，换算出来的偏移会把正文推偏 —— 实测「开关背景图后正文整体
             // 上移到状态栏」。窗口坐标与容器何时创建无关，窗口尺寸变化时也自然跟着变。
             guard let window = view.window else { return inset }
-            let text = view.convert(view.bounds, to: window)
+            // 必须传「origin 归零」的那个矩形：`UITextView` 是 `UIScrollView`，它的
+            // `bounds.origin` 就是 `contentOffset`。直接转 `view.bounds` 会让这块矩形
+            // 跟着每次落地后的偏移一起平移，于是「每翻一页 contentInsets 就变一个值」：
+            // 样式指纹跟着变、`curlContentKey` 也跟着变，整章每翻一页重排一次。
+            // 真机日志里每条「卷页落地」后面紧跟的「样式=true 页面=false 规模=false」
+            // 就是它；而「样式变了 → 清页面缓存 + 同步重投」正撞在卷页收尾那一拍上，
+            // 落点偏一格，观感就是「回翻先闪一下前一页，再显示目标页」。
+            let text = view.convert(CGRect(origin: .zero, size: view.bounds.size), to: window)
             let screen = window.bounds
             let left = text.minX + inset.left
             let top = text.minY + inset.top
@@ -1670,6 +1677,11 @@ struct ReaderTextView: UIViewRepresentable {
             // 否则一次布局回调就会把读者按「上一章遗留的偏移」重新算一遍并拽走。
             curlCurrentIndex = index
             curlEntryIndex = index
+            // 落点坐标必须与卷页层同一拍写进「读者现在在哪一页」的唯一权威：
+            // `onIndexChange` 在 `onDeckCommit` 之前触发，中间这一拍 `activeDeckLocation`
+            // 还停在上一页，下一帧 `update(focus:)` 就会按旧坐标重投一次页面 ——
+            // 回翻时那一下「先闪一页再回来」正是这个窗口。
+            activeDeckLocation = ReaderDeckLocation(chapterIndex: parent.chapterIndex, pageIndex: index)
             view.setContentOffset(CGPoint(x: 0, y: starts[index]), animated: false)
             layoutGeneration &+= 1
             reportPage(in: view)

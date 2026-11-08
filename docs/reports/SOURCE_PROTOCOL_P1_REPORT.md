@@ -1,6 +1,6 @@
 # P1 WebKit 垂直原型报告
 
-日期：2026-11-08（Asia/Hong_Kong）。状态：首轮原型已实现；原生编译和模拟器测试结果待 GitHub CI 回填，G1 未通过。
+日期：2026-11-08（Asia/Hong_Kong）。状态：首轮原型已实现并通过原生编译、12 项 WebKit 模拟器测试及 IPA 构建。用户反馈真机离线示例及两份本地 JS 源测试正常；G1 的完整真机故障与资源验收尚未通过。
 
 ## 本轮范围
 
@@ -8,7 +8,7 @@
 - P1-02：每次操作创建新的无持久化执行页，以 Blob ES Module 装载已检查的不可变源码。脚本和网站页面分离；暂不做页面池。
 - P1-03：原生绑定页面、主 frame、session/operation ID；限制消息大小、方法、请求次数和重复 ID。成功/失败/取消/超时只结算一次。输出在另一可信页面校验。
 - P1-04：原生 URLSession HTTP，逐跳 origin 检查、流式响应体上限、禁 Cookie/凭据共享、单次消费、POST 字节体和取消。App 默认仅 HTTPS；模拟器测试显式开启 loopback HTTP。
-- P1-05：HTML/JSON 四项操作和两页目录的真实 WebKit 测试已加入独立 GitHub workflow，待运行证据。
+- P1-05：HTML/JSON 四项操作和两页目录的真实 WebKit 测试已通过独立 GitHub workflow。
 - P1-06：加入无穷 Promise、取消、未等待 HTTP、全局状态清理和后续运行恢复测试。同步死循环不在普通测试套件执行；进程级故障恢复仍待真机专项。
 - P1-07：尚未测量真机冷/热运行、总内存、能耗和并发档位。
 
@@ -34,8 +34,19 @@ Windows：`npm --prefix tools/source-protocol run check`。当前 77 个 Node �
 
 GitHub：`Source Runtime WebKit` 在 macos-26 的 iOS 26 模拟器执行 `xcodebuild test -only-testing:LegadoReaderTests/SourceRuntimeTests`，同时启动只绑定 loopback 的受控 Node fixture 服务。不是仅 build。每次上传日志与 xcresult。
 
-原生运行结果、提交及 IPA：待 CI 完成后补充。上轮 `3045faf` 的 335 个核心测试、74 个 App model 测试和 IPA 构建基线已通过；该结果不覆盖本轮运行时。
+实现提交：`b9b7b5c5f6ee6b15e56504795efc84e4e167d164`。
+
+| 验证 | 证据 | 结果 |
+| --- | --- | --- |
+| Swift 核心与 App model、模拟器编译 | [JavaScript Engine CI 42476920071](https://github.com/bemarkt/legado-ios/actions/runs/42476920071) | 335 + 74 测试通过，App 编译通过 |
+| 实际 WebKit 执行 | [Source Runtime WebKit 42476920073](https://github.com/bemarkt/legado-ios/actions/runs/42476920073) | 12 项测试通过；iPhone Air 模拟器，iOS 26.5，Xcode 26.6；约 213 秒 |
+| Release arm64 IPA | [Build Unsigned IPA 42476935559](https://github.com/bemarkt/legado-ios/actions/runs/42476935559) | 构建成功；最低 iOS 26.0，版本 0.1.14 build 20 |
+| 真机离线及联网样本 | 2026-11-08 用户在当前开发会话先后反馈离线示例和两份本地 JS 源测试正常 | 用户报告通过；网站专用脚本及资料仅保存在本机忽略目录；未提供机型、精确系统小版本、性能数据或操作明细 |
+
+IPA 文件名 `Legado-0.1.14-20-b9b7b5c-unsigned.ipa`，17,575,055 bytes；SHA-256 `f97f568061ed7169a0b6bb60be148f2b3c633786bacb31c7f868e78d9793e9c6`。已检查 ZIP CRC、Info.plist、arm64 Mach-O、未签名状态，以及全部内嵌 SourceRuntime 资源与提交文件一致。日志/包校验记录保存在本地忽略目录 `build/github-actions/b9b7b5c`。
+
+上述真机反馈覆盖用户报告的离线示例和两份本地联网样本体验，不推导所有书源、最低 iOS 26.0、iPad、后台运行、内存恢复或同步死循环已通过。
 
 ## 下一轮
 
-先依据本轮 CI 反馈修正实现，再扩充桥接身份/请求预算/错误编码与配置样本。随后在 iOS 26 真机专项执行同步死循环、进程异常、前后台切换、取消后总资源与恢复测量，形成 D01–D04、D10 的决定。G1 达标后才进入 P2 的领域接口、账号范围持久化、缓存和阅读闭环。
+下一轮扩充桥接身份、请求预算、错误编码与配置样本。随后在 iOS 26 真机专项执行同步死循环、进程异常、前后台切换、取消后总资源与恢复测量，形成 D01–D04、D10 的决定。G1 达标后才进入 P2 的领域接口、账号范围持久化、缓存和阅读闭环。

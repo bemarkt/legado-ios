@@ -74,7 +74,7 @@ public enum SourceCoding {
 public struct SourceDomainError: Error, Sendable, LocalizedError, Equatable {
     public enum Code: String, Codable, Sendable {
         case invalidInput = "INVALID_INPUT", invalidData = "INVALID_DATA", resourceLimit = "RESOURCE_LIMIT"
-        case cancelled = "CANCELLED", stale = "STALE_SNAPSHOT", catalogChanged = "CATALOG_CHANGED"
+        case cancelled = "CANCELLED", timeout = "TIMEOUT", stale = "STALE_SNAPSHOT", catalogChanged = "CATALOG_CHANGED"
         case storageConflict = "STORAGE_CONFLICT", notDownloaded = "NOT_DOWNLOADED", unavailable = "UNAVAILABLE"
     }
     public let code: Code
@@ -120,12 +120,14 @@ public struct SourceExecutionIdentity: Codable, Hashable, Sendable {
     public let scope: SourceScope
     public let sourceDigest: String
     public let configurationDigest: String
-    public init(scope: SourceScope, sourceDigest: String, configuration: SourceJSON) throws {
+    public let credentialRevision: String?
+    public init(scope: SourceScope, sourceDigest: String, configuration: SourceJSON, credentialRevision: String? = nil) throws {
         guard sourceDigest.count == 64, sourceDigest.allSatisfy({ $0.isHexDigit }) else {
             throw SourceDomainError(.invalidInput, "Invalid source digest")
         }
         self.scope = scope
         self.sourceDigest = sourceDigest
+        self.credentialRevision = credentialRevision
         configurationDigest = SourceCoding.digest(try configuration.validatedData(maximumBytes: 65_536))
     }
 }
@@ -158,8 +160,9 @@ public struct SourceProviderDescriptor: Sendable {
     public let identity: SourceExecutionIdentity
     public let name: String
     public let supportsSearch: Bool
-    public init(identity: SourceExecutionIdentity, name: String, supportsSearch: Bool = true) {
-        self.identity = identity; self.name = name; self.supportsSearch = supportsSearch
+    public let commitGate: SourceCommitGate?
+    public init(identity: SourceExecutionIdentity, name: String, supportsSearch: Bool = true, commitGate: SourceCommitGate? = nil) {
+        self.identity = identity; self.name = name; self.supportsSearch = supportsSearch; self.commitGate = commitGate
     }
 }
 
@@ -177,12 +180,15 @@ public protocol SourceProvider: Sendable {
 public final class SourceCommitGate: @unchecked Sendable {
     private let lock = NSLock()
     private var active = true
-    public init() { }
+    private let parent: SourceCommitGate?
+    public init(parent: SourceCommitGate? = nil) { self.parent = parent }
+    public func check() throws { try withCommit { } }
     public func invalidate() { lock.lock(); active = false; lock.unlock() }
     public func withCommit<T>(_ body: () throws -> T) throws -> T {
         lock.lock(); defer { lock.unlock() }
         guard active else { throw SourceDomainError(.stale, "Operation already ended or was superseded") }
         try Task.checkCancellation()
+        if let parent { return try parent.withCommit(body) }
         return try body()
     }
 }

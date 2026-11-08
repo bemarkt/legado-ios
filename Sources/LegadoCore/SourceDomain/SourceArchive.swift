@@ -250,6 +250,37 @@ public actor SourceArchive {
             try put("installation", scope: "", key: value.id.uuidString, value: value)
         }
     }
+    public func accountSettings(installationID: UUID) throws -> SourceAccountSettings {
+        guard try installation(installationID) != nil else { throw SourceDomainError(.unavailable, "书源安装已不存在。") }
+        let value: SourceAccountSettings = try record("accounts", scope: "", key: installationID.uuidString) ?? .init()
+        guard value.accounts.count <= 32, value.accounts.first == .guest,
+              Set(value.accounts.map(\.id)).count == value.accounts.count,
+              value.accounts.contains(where: { $0.id == value.selectedID }),
+              value.accounts.allSatisfy({ $0.id == "guest" || UUID(uuidString: $0.id) != nil }) else {
+            throw SourceDomainError(.invalidData, "账号列表无效。")
+        }
+        return value
+    }
+    @discardableResult
+    public func addAccount(name: String, installationID: UUID) throws -> SourceAccount {
+        try transaction {
+            var settings = try accountSettings(installationID: installationID)
+            guard settings.accounts.count < 32 else { throw SourceDomainError(.resourceLimit, "每个书源最多保存 31 个独立账号。") }
+            let account = try SourceAccount(name: name)
+            settings.accounts.append(account)
+            try put("accounts", scope: "", key: installationID.uuidString, value: settings)
+            return account
+        }
+    }
+    public func selectAccount(_ accountID: String, installationID: UUID) throws {
+        try transaction {
+            var settings = try accountSettings(installationID: installationID)
+            guard settings.accounts.contains(where: { $0.id == accountID }) else { throw SourceDomainError(.invalidInput, "账号已不存在。") }
+            settings.selectedID = accountID
+            try put("accounts", scope: "", key: installationID.uuidString, value: settings)
+        }
+    }
+
     public func configuration(scope: SourceScope) throws -> SourceJSON? { try record("configuration", scope: scopeKey(scope), key: "values") }
     public func saveConfiguration(_ value: SourceJSON, scope: SourceScope, expectedSourceDigest: String? = nil) throws {
         guard case .object = value else { throw SourceDomainError(.invalidInput, "Configuration must be an object") }
@@ -264,9 +295,9 @@ public actor SourceArchive {
         } else { try put("configuration", scope: scopeKey(scope), key: "values", value: value) }
     }
     public func books(scope: SourceScope) throws -> [SourceSavedBook] { try records("book", scope: scopeKey(scope), as: SourceSavedBook.self) }
-    public func saveBook(_ value: SourceSavedBook) throws {
+    public func saveBook(_ value: SourceSavedBook, gate: SourceCommitGate? = nil) throws {
         guard value.key.bookID == value.details.ref.id else { throw SourceDomainError(.invalidInput, "Book identity mismatch") }
-        try put("book", scope: scopeKey(value.key.scope), key: value.key.bookID, value: value)
+        try put("book", scope: scopeKey(value.key.scope), key: value.key.bookID, value: value, gate: gate)
     }
     public func catalog(book: SourceBookKey) throws -> SourceCatalog? {
         try transaction { try catalogIndex(book: book)?.catalog }

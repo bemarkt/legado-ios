@@ -31,6 +31,7 @@ public actor SourceSearchPager {
 
     public func next() async throws -> Batch {
         try Task.checkCancellation()
+        try descriptor.commitGate?.check()
         guard !loading else { throw SourceDomainError(.stale, "Search page is already loading") }
         guard !finished else { return Batch(items: [], hasMore: false) }
         guard provider.descriptor.identity == descriptor.identity else {
@@ -78,6 +79,7 @@ public actor SourceSearchPager {
                 next = try SourceCursorEnvelope(identity: descriptor.identity, input: input, value: page.nextCursor)
             }
             try Task.checkCancellation()
+            try descriptor.commitGate?.check()
             seenBooks.formUnion(additions.map(\.ref.id))
             if let cursorData { seenCursors.insert(cursorData) }
             pages += 1; revision = page.revision; cursor = next; finished = next == nil

@@ -42,7 +42,8 @@ final class SourceHostBridge: NSObject, WKScriptMessageHandlerWithReply {
     private var operationDeadline: ContinuousClock.Instant?
     private let stateBinding: SourceStateBinding?
     private let priority: SourceWorkScheduler.Priority
-    private let stateGate = SourceCommitGate()
+    private let stateGate: SourceCommitGate
+    private let credentials: SourceCredentialSession?
     private var stateCount = 0
     private var active = true
     private var ready = false
@@ -51,10 +52,12 @@ final class SourceHostBridge: NSObject, WKScriptMessageHandlerWithReply {
     private var tasks: [String: Task<Void, Never>] = [:]
     private var replies: [String: @MainActor @Sendable (Any?, String?) -> Void] = [:]
 
-    init(snapshot: SourceSnapshot, profile: SourceProfile, allowLoopbackHTTP: Bool, timeoutMs: Int, state: SourceStateBinding? = nil, priority: SourceWorkScheduler.Priority = .reading) {
+    init(snapshot: SourceSnapshot, profile: SourceProfile, allowLoopbackHTTP: Bool, timeoutMs: Int, state: SourceStateBinding? = nil, priority: SourceWorkScheduler.Priority = .reading, credentials: SourceCredentialSession? = nil) {
         self.profile = profile
         networkBudget = SourceHTTPRequestBudget(maximumRequests: profile.limits.operationHTTPRequests)
         stateBinding = state
+        self.credentials = credentials
+        stateGate = SourceCommitGate(parent: credentials?.commitGate)
         self.priority = priority
         policy = SourceHTTPPolicy(origins: Set(snapshot.inspection.metadata.origins), allowLoopbackHTTP: allowLoopbackHTTP,
                                   maximumBytes: profile.limits.httpResponseBytes,
@@ -85,6 +88,7 @@ final class SourceHostBridge: NSObject, WKScriptMessageHandlerWithReply {
                   let text = message.body as? String, text.utf8.count <= 3_000_000 else {
                 throw SourceFailure(code: "INVALID_INPUT", message: "Inactive, oversized or foreign bridge message")
             }
+            try stateGate.check()
             let data = Data(text.utf8)
             guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                   Set(object.keys).isSubset(of: ["session", "operation", "id", "method", "request", "state"]) else {
@@ -133,9 +137,11 @@ final class SourceHostBridge: NSObject, WKScriptMessageHandlerWithReply {
                     let response: String
                     do {
                         try Task.checkCancellation()
+                        try stateGate.check()
                         switch envelope.method {
                         case "storageGet":
                             let entry = try await binding.archive.state(scope: binding.scope, key: state.key)
+                            try stateGate.check()
                             response = String(decoding: try SourceCoding.encode(entry), as: UTF8.self)
                         case "storageSet":
                             guard let value = state.value else { throw SourceFailure(code: "INVALID_INPUT", message: "Missing state value") }
@@ -169,9 +175,9 @@ final class SourceHostBridge: NSObject, WKScriptMessageHandlerWithReply {
             count += 1
             seen.insert(envelope.id)
             replies[envelope.id] = replyHandler
-            tasks[envelope.id] = Task { [weak self, policy, priority, networkBudget, deadline = operationDeadline] in
+            tasks[envelope.id] = Task { [weak self, policy, priority, networkBudget, credentials, deadline = operationDeadline] in
                 let response: String
-                do { response = String(decoding: try JSONEncoder().encode(await SourceHTTP.fetch(request, policy: policy, priority: priority, deadline: deadline, budget: networkBudget)), as: UTF8.self) }
+                do { response = String(decoding: try JSONEncoder().encode(await SourceHTTP.fetch(request, policy: policy, priority: priority, deadline: deadline, budget: networkBudget, credentials: credentials)), as: UTF8.self) }
                 catch { response = Self.errorJSON(error as? SourceFailure ?? .init(code: "NETWORK", message: "HTTP request failed")) }
                 guard let self, self.active, let reply = self.replies.removeValue(forKey: envelope.id) else { return }
                 self.tasks.removeValue(forKey: envelope.id)
@@ -191,7 +197,9 @@ final class SourceRuntime {
 
     func run(_ operation: SourceOperation, inputJSON: String, snapshot: SourceSnapshot,
              allowLoopbackHTTP: Bool = false, timeoutMs: Int? = nil,
-             configuration: SourceJSON? = nil, state: SourceStateBinding? = nil, priority: SourceWorkScheduler.Priority = .reading) async throws -> String {
+             configuration: SourceJSON? = nil, state: SourceStateBinding? = nil, priority: SourceWorkScheduler.Priority = .reading,
+             credentials: SourceCredentialSession? = nil) async throws -> String {
+        try credentials?.commitGate.check()
         guard snapshot.inspection.unsupportedRequirements.isEmpty,
               snapshot.inspection.operations.contains(operation.rawValue) else {
             throw SourceFailure(code: "UNSUPPORTED", message: "Required source capability is unavailable")
@@ -199,7 +207,7 @@ final class SourceRuntime {
         try await inspector.validate(operation.inputContract, json: inputJSON)
         try Task.checkCancellation()
         let budget = min(max(timeoutMs ?? profile.experimentalRuntimeBudgets.operationMs, 1), profile.experimentalRuntimeBudgets.operationMs)
-        let bridge = SourceHostBridge(snapshot: snapshot, profile: profile, allowLoopbackHTTP: allowLoopbackHTTP, timeoutMs: budget, state: state, priority: priority)
+        let bridge = SourceHostBridge(snapshot: snapshot, profile: profile, allowLoopbackHTTP: allowLoopbackHTTP, timeoutMs: budget, state: state, priority: priority, credentials: credentials)
         let page = try SourceWebPage(script: SourceAssets.script("SourceRunner"), bridge: bridge)
         bridge.page = page
         page.onClose = { [weak bridge] in bridge?.finish() }
@@ -209,6 +217,7 @@ final class SourceRuntime {
                                          arguments: ["source": snapshot.source, "operation": operation.rawValue,
                                                      "inputJSON": inputJSON, "configJSON": configJSON, "session": bridge.session, "operationID": bridge.operation],
                                          timeoutMs: profile.experimentalRuntimeBudgets.moduleInitializationMs)
+        try credentials?.commitGate.check()
         // The envelope escapes the serialized result. Bound both wire and decoded sizes.
         guard raw.utf8.count <= profile.limits.outputBytes * 2 + 4096 else {
             throw SourceFailure(code: "RESOURCE_LIMIT", message: "Output byte budget exceeded")
@@ -219,7 +228,7 @@ final class SourceRuntime {
             // Author exceptions are data. Do not allow arbitrary codes or retry budgets to enter native scheduling.
             let codes: Set<String> = ["INVALID_INPUT", "INVALID_RESULT", "INVALID_DATA", "NETWORK", "HTTP",
                 "RATE_LIMITED", "AUTH_REQUIRED", "PARSE", "UNSUPPORTED", "TIMEOUT", "CANCELLED", "RESOURCE_LIMIT",
-                "PERMISSION_DENIED", "STORAGE_CONFLICT", "SCRIPT_ERROR"]
+                "PERMISSION_DENIED", "STORAGE_CONFLICT", "STALE_SNAPSHOT", "SCRIPT_ERROR"]
             guard codes.contains(error.code), !error.message.isEmpty, error.message.utf16.count <= 2048,
                   error.retryAfterMs.map({ (0...86_400_000).contains($0) }) ?? true else {
                 throw SourceFailure(code: "INVALID_DATA", message: "Invalid source error envelope")
@@ -242,17 +251,22 @@ struct WebKitSourceProvider: SourceProvider {
     private let configuration: SourceJSON
     private let state: SourceStateBinding
     private let allowLoopbackHTTP: Bool
+    private let credentials: SourceCredentialSession?
     private static let scheduler = SourceWorkScheduler(globalLimit: 2, perOriginLimit: 1)
     private var priorityOverride: SourceWorkScheduler.Priority?
 
     init(snapshot: SourceSnapshot, installation: SourceInstallation, accountID: String = "guest", configuration: SourceJSON? = nil,
-         archive: SourceArchive, allowLoopbackHTTP: Bool = false) throws {
+         archive: SourceArchive, allowLoopbackHTTP: Bool = false, credentials: SourceCredentialSession? = nil) throws {
         guard snapshot.sha256 == installation.digest else { throw SourceFailure(code: "INVALID_INPUT", message: "Installed source digest mismatch") }
         self.snapshot = snapshot
         self.configuration = try snapshot.configuration(overrides: configuration)
         let scope = try SourceScope(installationID: installation.id, accountID: accountID)
-        descriptor = SourceProviderDescriptor(identity: try .init(scope: scope, sourceDigest: snapshot.sha256, configuration: self.configuration),
-                                              name: snapshot.inspection.metadata.name, supportsSearch: snapshot.inspection.operations.contains("search"))
+        guard credentials == nil || (credentials?.scope == scope && credentials?.allowedOrigins == Set(snapshot.inspection.metadata.origins)) else {
+            throw SourceFailure(code: "INVALID_INPUT", message: "Credential scope does not match the source snapshot")
+        }
+        self.credentials = credentials
+        descriptor = SourceProviderDescriptor(identity: try .init(scope: scope, sourceDigest: snapshot.sha256, configuration: self.configuration, credentialRevision: credentials?.revision),
+                                              name: snapshot.inspection.metadata.name, supportsSearch: snapshot.inspection.operations.contains("search"), commitGate: credentials?.commitGate)
         state = SourceStateBinding(archive: archive, scope: scope)
         self.allowLoopbackHTTP = allowLoopbackHTTP
     }
@@ -268,16 +282,18 @@ struct WebKitSourceProvider: SourceProvider {
     }
 
     private func invoke<Input: Encodable & Sendable, Output: Decodable & Sendable>(_ operation: SourceOperation, input: Input) async throws -> Output {
+        try credentials?.commitGate.check()
         let inputJSON = String(decoding: try SourceCoding.encode(input), as: UTF8.self)
         let priority = priorityOverride ?? (operation == .content ? .reading : .search)
         let raw = try await Self.scheduler.withPermit(origin: descriptor.identity.scope.installationID.uuidString,
             priority: priority, deadline: Date().addingTimeInterval(30)) {
             try await execute(operation, inputJSON: inputJSON, priority: priority)
         }
+        try credentials?.commitGate.check()
         return try SourceCoding.decode(Output.self, from: Data(raw.utf8))
     }
     @MainActor private func execute(_ operation: SourceOperation, inputJSON: String, priority: SourceWorkScheduler.Priority) async throws -> String {
         try await SourceRuntime().run(operation, inputJSON: inputJSON, snapshot: snapshot, allowLoopbackHTTP: allowLoopbackHTTP,
-                                      configuration: configuration, state: state, priority: priority)
+                                      configuration: configuration, state: state, priority: priority, credentials: credentials)
     }
 }

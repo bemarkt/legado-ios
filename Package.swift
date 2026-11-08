@@ -29,6 +29,7 @@ let package = Package(
             ],
             linkerSettings: [
                 .linkedFramework("CryptoKit"),
+                .linkedFramework("Security"),
                 .linkedLibrary("sqlite3")
             ]
         ),

@@ -336,6 +336,59 @@ struct SourceHostHTTPTests {
         await failure(.invalidInput) { _ = try await client.fetch(.init(url: origin + "/cookies", headers: ["Cookie":"must not send"]), policy: policy) }
     }
 
+    @Test func redirectedCredentialsAreSelectedForEachOriginInsteadOfForwarded() async throws {
+        let target = try NativeHTTPFixture { _ in .init() }
+        let b = try await target.start(); defer { target.stop() }
+        let redirect = try NativeHTTPFixture { _ in .init(status: 302, headers: ["Location": b + "/end"]) }
+        let a = try await redirect.start(); defer { redirect.stop() }
+        let vault = SourceCredentialVault(persistence: MemorySourceCredentials())
+        let scope = try SourceScope(installationID: UUID(), accountID: UUID().uuidString)
+        let first = try await vault.session(scope: scope, allowedOrigins: [a,b])
+        try await first.receive([.init(origin: a, name: "session", value: "origin-a", secure: false), .init(origin: b, name: "session", value: "origin-b", secure: false)])
+        try await vault.setBearer("token-a", origin: a, session: first)
+        let second = try await vault.session(scope: scope, allowedOrigins: [a,b])
+        try await vault.setBearer("token-b", origin: b, session: second)
+        let session = try await vault.session(scope: scope, allowedOrigins: [a,b])
+        _ = try await SourceHostHTTPClient().fetch(.init(url: a + "/start"), policy: policy([a,b]), credentials: session)
+        let firstRequest = try #require(await redirect.statistics().requests.first)
+        let lastRequest = try #require(await target.statistics().requests.first)
+        #expect(firstRequest.headers["cookie"] == "session=origin-a")
+        #expect(firstRequest.headers["authorization"] == "Bearer token-a")
+        #expect(lastRequest.headers["cookie"] == "session=origin-b")
+        #expect(lastRequest.headers["authorization"] == "Bearer token-b")
+    }
+
+    @Test func redirectCookieCanAuthenticateNextHopWithoutLeakingThroughResponse() async throws {
+        let server = try NativeHTTPFixture { request in
+            if request.target == "/login" { return .init(status: 302, headers: ["Location": "/reader", "Set-Cookie": "session=saved; Path=/; HttpOnly"]) }
+            return .init(body: Data((request.headers["cookie"] ?? "guest").utf8))
+        }
+        let origin = try await server.start(); defer { server.stop() }
+        let vault = SourceCredentialVault(persistence: MemorySourceCredentials())
+        let scope = try SourceScope(installationID: UUID(), accountID: UUID().uuidString)
+        let session = try await vault.session(scope: scope, allowedOrigins: [origin])
+        let client = SourceHostHTTPClient()
+        let response = try await client.fetch(.init(url: origin + "/login"), policy: policy([origin]), credentials: session)
+        #expect(Data(base64Encoded: response.body) == Data("session=saved".utf8))
+        #expect(response.headers["set-cookie"] == nil)
+        let guest = try await client.fetch(.init(url: origin + "/reader"), policy: policy([origin]))
+        #expect(Data(base64Encoded: guest.body) == Data("guest".utf8))
+    }
+
+    @Test func logoutDuringHTTPRejectsResponseAndDoesNotRecreateCookies() async throws {
+        let server = try NativeHTTPFixture { _ in .init(headers: ["Set-Cookie": "session=late; Path=/"], delay: 0.15) }
+        let origin = try await server.start(); defer { server.stop() }
+        let vault = SourceCredentialVault(persistence: MemorySourceCredentials())
+        let scope = try SourceScope(installationID: UUID(), accountID: UUID().uuidString)
+        let session = try await vault.session(scope: scope, allowedOrigins: [origin])
+        let task = Task { try await SourceHostHTTPClient().fetch(.init(url: origin + "/slow"), policy: policy([origin]), credentials: session) }
+        try await wait { await server.statistics().requests.count == 1 }
+        try await vault.clear(scope: scope)
+        await failure(.stale) { _ = try await task.value }
+        let next = try await vault.session(scope: scope, allowedOrigins: [origin])
+        #expect(try await next.headers(for: URL(string: origin)!).isEmpty)
+    }
+
     @Test func retryAfterParsesDateWithoutShorteningAndRejectsMalformedValues() {
         let now = Date(timeIntervalSince1970: 784111777) // 1994-11-06 08:49:37 GMT
         #expect(SourceHostHTTPClient.retryDelay(header: "Sun, 06 Nov 1994 08:49:39 GMT", maximumDelay: 3, remaining: 4, now: now) == 2)

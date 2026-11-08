@@ -13,11 +13,15 @@ public actor SourceLibraryService {
     public init(archive: SourceArchive) { self.archive = archive }
 
     public func addBook(provider: any SourceProvider, ref: SourceWire.SourceRef) async throws -> SourceSavedBook {
+        let descriptor = provider.descriptor
+        let gate = SourceCommitGate(parent: descriptor.commitGate)
+        try gate.check()
         let details = try await provider.book(.init(ref: ref))
         try Task.checkCancellation()
         guard details.ref.id == ref.id else { throw SourceDomainError(.invalidData, "Provider changed stable book identity") }
         let saved = SourceSavedBook(key: try .init(scope: provider.descriptor.identity.scope, bookID: ref.id), details: details)
-        try await archive.saveBook(saved)
+        guard provider.descriptor.identity == descriptor.identity else { throw SourceDomainError(.stale, "Source changed during book loading") }
+        try await archive.saveBook(saved, gate: gate)
         return saved
     }
 
@@ -26,7 +30,7 @@ public actor SourceLibraryService {
         let key = try SourceBookKey(scope: provider.descriptor.identity.scope, bookID: book.id)
         let operation = "catalog:" + SourceCoding.digest(try SourceCoding.encode(key))
         generations[operation]?.invalidate()
-        let generation = SourceCommitGate()
+        let generation = SourceCommitGate(parent: provider.descriptor.commitGate)
         generations[operation] = generation
         defer {
             generation.invalidate()
@@ -45,7 +49,7 @@ public actor SourceLibraryService {
         let key = try SourceChapterKey(book: .init(scope: identity.scope, bookID: book.id), chapterID: chapter.id)
         let operation = "chapter:" + SourceCoding.digest(try SourceCoding.encode(key))
         generations[operation]?.invalidate()
-        let generation = SourceCommitGate()
+        let generation = SourceCommitGate(parent: provider.descriptor.commitGate)
         generations[operation] = generation
         defer {
             generation.invalidate()

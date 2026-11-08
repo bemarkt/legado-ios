@@ -21,7 +21,7 @@ public struct SourceHostHTTPResponse: Encodable, Sendable {
 public struct SourceHostHTTPFailure: Error, LocalizedError, Sendable, Equatable {
     public enum Code: String, Sendable {
         case invalidInput = "INVALID_INPUT", permissionDenied = "PERMISSION_DENIED", resourceLimit = "RESOURCE_LIMIT"
-        case network = "NETWORK", timeout = "TIMEOUT", cancelled = "CANCELLED"
+        case network = "NETWORK", timeout = "TIMEOUT", cancelled = "CANCELLED", stale = "STALE_SNAPSHOT"
     }
     public let code: Code
     public let message: String
@@ -84,13 +84,14 @@ public struct SourceHostHTTPClient: Sendable {
         let url: URL
         let headers: [String: String]
         let data: Data
+        let cookies: [SourceCredentialCookie]
     }
     private let scheduler: SourceWorkScheduler
     public init(scheduler: SourceWorkScheduler = .init(globalLimit: 4, perOriginLimit: 2)) { self.scheduler = scheduler }
 
     public func fetch(_ input: SourceHostHTTPRequest, policy: SourceHostHTTPPolicy,
                       priority: SourceWorkScheduler.Priority = .reading, deadline operationDeadline: ContinuousClock.Instant? = nil,
-                      budget: SourceHTTPRequestBudget? = nil) async throws -> SourceHostHTTPResponse {
+                      budget: SourceHTTPRequestBudget? = nil, credentials: SourceCredentialSession? = nil) async throws -> SourceHostHTTPResponse {
         do {
             guard policy.timeout.isFinite, policy.timeout > 0, policy.timeout <= 300,
                   (0...20).contains(policy.maximumRedirects), (1...3).contains(policy.maximumAttempts),
@@ -111,8 +112,13 @@ public struct SourceHostHTTPClient: Sendable {
                 do {
                     reply = try await scheduler.withPermit(origin: SourceHostHTTPPolicy.origin(hop.url!)!, priority: priority, deadline: deadline) {
                         try Self.check(deadline)
+                        var authorized = hop
+                        if let credentials {
+                            for (name, value) in try await credentials.headers(for: hop.url!) { authorized.setValue(value, forHTTPHeaderField: name) }
+                        }
+                        try Self.check(deadline)
                         try await budget?.consume()
-                        return try await Self.perform(hop, policy: policy, deadline: deadline)
+                        return try await Self.perform(authorized, policy: policy, deadline: deadline, captureCookies: credentials != nil)
                     }
                 } catch let error as URLError where retryable && retries + 1 < policy.maximumAttempts && error.code == .networkConnectionLost {
                     try Self.check(deadline)
@@ -122,6 +128,7 @@ public struct SourceHostHTTPClient: Sendable {
                     continue
                 }
                 try Self.check(deadline)
+                try await credentials?.receive(reply.cookies)
                 if [301,302,303,307,308].contains(reply.status), let location = reply.headers["location"] {
                     guard input.redirect == "follow" else { throw SourceHostHTTPFailure(.network, "Redirect rejected by request policy") }
                     guard redirects < policy.maximumRedirects else { throw SourceHostHTTPFailure(.resourceLimit, "Redirect budget exceeded") }
@@ -153,9 +160,13 @@ public struct SourceHostHTTPClient: Sendable {
                 return SourceHostHTTPResponse(status: reply.status, url: reply.url.absoluteString, headers: reply.headers, body: reply.data.base64EncodedString())
             }
         } catch let failure as SourceHostHTTPFailure { throw failure }
+        catch let failure as SourceDomainError {
+            let code: SourceHostHTTPFailure.Code = failure.code == .stale ? .stale : failure.code == .timeout ? .timeout : failure.code == .resourceLimit ? .resourceLimit : .network
+            throw SourceHostHTTPFailure(code, failure.message)
+        }
         catch {
             if Task.isCancelled || error is CancellationError { throw SourceHostHTTPFailure(.cancelled, "HTTP request cancelled") }
-            if error is SourceDomainError || (error as? URLError)?.code == .timedOut { throw SourceHostHTTPFailure(.timeout, "HTTP deadline exceeded") }
+            if (error as? URLError)?.code == .timedOut { throw SourceHostHTTPFailure(.timeout, "HTTP deadline exceeded") }
             throw SourceHostHTTPFailure(.network, "HTTP transport failed")
         }
     }
@@ -225,7 +236,7 @@ public struct SourceHostHTTPClient: Sendable {
         return delay
     }
 
-    private static func perform(_ original: URLRequest, policy: SourceHostHTTPPolicy, deadline: ContinuousClock.Instant) async throws -> Reply {
+    private static func perform(_ original: URLRequest, policy: SourceHostHTTPPolicy, deadline: ContinuousClock.Instant, captureCookies: Bool) async throws -> Reply {
         try check(deadline)
         var request = original
         let timeout = remaining(deadline)
@@ -245,13 +256,19 @@ public struct SourceHostHTTPClient: Sendable {
             guard let response = response as? HTTPURLResponse, let url = response.url else { throw SourceHostHTTPFailure(.network, "Missing HTTP response") }
             _ = try policy.validate(url.absoluteString)
             var headers: [String: String] = [:]
+            var cookieHeaders: [String: String] = [:]
             for (name, value) in response.allHeaderFields {
                 let name = String(describing: name).lowercased()
                 if !["set-cookie", "set-cookie2"].contains(name) { headers[name] = String(describing: value) }
+                else if captureCookies { cookieHeaders[name] = String(describing: value) }
             }
+            let cookies: [SourceCredentialCookie]
+            if captureCookies, let origin = SourceHostHTTPPolicy.origin(url) {
+                cookies = try HTTPCookie.cookies(withResponseHeaderFields: cookieHeaders, for: url).compactMap { try SourceCredentialCookie.capture($0, origin: origin) }
+            } else { cookies = [] }
             // Cancel/dispose this response before acquiring a permit for its redirect target.
             if [301,302,303,307,308].contains(response.statusCode), headers["location"] != nil {
-                return Reply(status: response.statusCode, url: url, headers: headers, data: Data())
+                return Reply(status: response.statusCode, url: url, headers: headers, data: Data(), cookies: cookies)
             }
             guard response.expectedContentLength <= Int64(policy.maximumBytes) else { throw SourceHostHTTPFailure(.resourceLimit, "HTTP response exceeds byte budget") }
             var data = Data()
@@ -261,7 +278,7 @@ public struct SourceHostHTTPClient: Sendable {
                 data.append(byte)
             }
             try check(deadline)
-            return Reply(status: response.statusCode, url: url, headers: headers, data: data)
+            return Reply(status: response.statusCode, url: url, headers: headers, data: data, cookies: cookies)
         } catch {
             if Task.isCancelled { throw CancellationError() }
             if deadline <= ContinuousClock.now { throw SourceHostHTTPFailure(.timeout, "HTTP deadline exceeded") }

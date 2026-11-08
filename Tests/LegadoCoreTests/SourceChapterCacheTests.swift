@@ -281,6 +281,8 @@ struct SourceChapterCacheTests {
         #expect(values.map(\.completed) == [0,0,1,1,2])
         #expect(values.map(\.currentChapter?.ref.id) == [nil,"one",nil,"two",nil])
         #expect(values.allSatisfy { $0.total == 2 })
+        let usage = try await f.archive.chapterStorageUsage()
+        #expect(usage.offlineCount == 2 && usage.readingCacheCount == 0)
         #expect(await f.provider.contentCalls == 2)
     }
 

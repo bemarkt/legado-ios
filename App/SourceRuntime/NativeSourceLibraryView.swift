@@ -15,6 +15,9 @@ struct NativeSourceLibraryView: View {
                 Text("自有 JS 书源的阅读预览。可保存书源、下载章节并离线继续阅读。")
                     .font(.footnote).foregroundStyle(.secondary)
                 Button { importing = true } label: { Label("添加 JS 书源", systemImage: "plus.circle") }
+                NavigationLink { NativeSourceStorageView(model: model) } label: {
+                    Label("缓存与下载", systemImage: "internaldrive")
+                }.frame(minHeight: 44)
             }
             Section("已安装书源") {
                 if model.installations.isEmpty { Text("添加一个 .source.js 文件，或使用离线示例开始。 ").foregroundStyle(.secondary) }
@@ -430,4 +433,88 @@ private struct NativeSourceEditorView: View {
         }
     }
 
+}
+
+private struct NativeSourceStorageView: View {
+    @ObservedObject var model: NativeSourceLibrary
+    @State private var usage: SourceChapterStorageUsage?
+    @State private var cacheMiB = 128
+    @State private var offlineMiB = 1024
+    @State private var busy = false
+    @State private var feedback: String?
+    @State private var clearing: SourceChapterStorageRemoval?
+    private let mib = 1024 * 1024
+
+    var body: some View {
+        Form {
+            Section {
+                if let usage {
+                    LabeledContent("阅读缓存", value: "\(usage.readingCacheCount) 章 · \(size(usage.readingCacheBytes))")
+                    LabeledContent("离线下载", value: "\(usage.offlineCount) 章 · \(size(usage.offlineBytes))")
+                } else { ProgressView("正在统计…") }
+            } footer: {
+                Text("阅读缓存会自动回收较久未使用的章节。主动下载和升级前已有的正文会保留，需手动移除。统计为正文记录的存储量。")
+            }
+            Section("容量上限") {
+                Picker("阅读缓存", selection: $cacheMiB) {
+                    ForEach(Array(Set([64,128,256,512,cacheMiB])).sorted(), id: \.self) { Text(size($0 * mib)).tag($0) }
+                }
+                Picker("离线下载", selection: $offlineMiB) {
+                    ForEach(Array(Set([256,512,1024,2048,4096,offlineMiB])).sorted(), id: \.self) { Text(size($0 * mib)).tag($0) }
+                }
+                Button("保存上限") { saveLimits() }.frame(minHeight: 44)
+            }.disabled(busy || usage == nil)
+            Section {
+                Button("清理阅读缓存", role: .destructive) { clearing = .readingCache }
+                    .frame(minHeight: 44).disabled(busy || usage?.readingCacheCount == 0 || usage == nil)
+                Button("移除全部离线下载", role: .destructive) { clearing = .offlineDownloads }
+                    .frame(minHeight: 44).disabled(busy || usage?.offlineCount == 0 || usage == nil)
+            } footer: {
+                Text("书架、目录和阅读位置会保留。移除的正文需要重新联网获取。")
+            }
+            if busy { Section { ProgressView("正在处理…") } }
+            if let feedback { Section { Text(feedback).font(.footnote) } }
+        }
+        .navigationTitle("缓存与下载").navigationBarTitleDisplayMode(.inline)
+        .task { await reload() }
+        .refreshable { await reload() }
+        .confirmationDialog(clearing == .offlineDownloads ? "移除全部离线下载？" : "清理阅读缓存？",
+                            isPresented: Binding(get: { clearing != nil }, set: { if !$0 { clearing = nil } }), titleVisibility: .visible) {
+            if let selection = clearing {
+                Button(selection == .offlineDownloads ? "移除离线下载" : "清理缓存", role: .destructive) { remove(selection) }
+            }
+            Button("取消", role: .cancel) { clearing = nil }
+        } message: {
+            Text(clearing == .offlineDownloads ? "所有书源的离线下载和升级前保留的正文都会移除；书架与阅读位置保留。" : "只移除自动缓存的正文，主动下载和升级前保留的正文不受影响。")
+        }
+    }
+    private func size(_ bytes: Int) -> String { ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .binary) }
+    @MainActor private func reload() async {
+        do {
+            let value = try await model.services().0.chapterStorageUsage()
+            usage = value
+            cacheMiB = max(1, value.limits.readingCacheBytes / mib)
+            offlineMiB = max(1, value.limits.offlineBytes / mib)
+        } catch { feedback = error.localizedDescription }
+    }
+    private func saveLimits() {
+        busy = true; feedback = nil
+        Task {
+            defer { busy = false }
+            do {
+                try await model.services().0.setChapterStorageLimits(.init(readingCacheBytes: cacheMiB * mib, offlineBytes: offlineMiB * mib))
+                await reload(); feedback = "容量上限已保存。"
+            } catch { feedback = error.localizedDescription }
+        }
+    }
+    private func remove(_ selection: SourceChapterStorageRemoval) {
+        clearing = nil; busy = true; feedback = nil
+        Task {
+            defer { busy = false }
+            do {
+                let count = try await model.services().0.removeChapterStorage(selection)
+                await reload(); feedback = "已移除 \(count) 章正文。"
+            } catch { feedback = error.localizedDescription }
+        }
+    }
 }

@@ -51,6 +51,8 @@ struct SourceChapterRequest: Sendable {
     let provenance: SourceChapterProvenance
     let catalogDigest: String?
     let previousCacheDigest: String?
+    let retainOffline: Bool
+    let storageGeneration: String
 }
 
 enum SourceChapterPreparation: Sendable {
@@ -71,6 +73,25 @@ public struct SourceCachedChapter: Codable, Sendable, Equatable {
         self.provenance = provenance
     }
 }
+
+public struct SourceChapterStorageLimits: Sendable, Equatable {
+    public let readingCacheBytes: Int
+    public let offlineBytes: Int
+    public init(readingCacheBytes: Int = 128 * 1024 * 1024, offlineBytes: Int = 1024 * 1024 * 1024) {
+        self.readingCacheBytes = max(1, readingCacheBytes)
+        self.offlineBytes = max(1, offlineBytes)
+    }
+}
+
+public struct SourceChapterStorageUsage: Sendable, Equatable {
+    public let readingCacheBytes: Int
+    public let readingCacheCount: Int
+    public let offlineBytes: Int
+    public let offlineCount: Int
+    public let limits: SourceChapterStorageLimits
+}
+
+public enum SourceChapterStorageRemoval: Sendable, Equatable { case readingCache, offlineDownloads }
 
 public struct SourceCatalogCacheLimits: Sendable {
     public let maximumCatalogs: Int
@@ -109,7 +130,8 @@ public actor SourceArchive {
     private var catalogCache: [SourceBookKey: CatalogIndex] = [:]
     private var catalogOrder: [SourceBookKey] = []
     private var catalogDecodes = 0
-    public init(url: URL, stateLimit: Int = 1_048_576, catalogCacheLimits: SourceCatalogCacheLimits = .init()) throws {
+    public init(url: URL, stateLimit: Int = 1_048_576, catalogCacheLimits: SourceCatalogCacheLimits = .init(),
+                initialChapterStorageLimits: SourceChapterStorageLimits = .init()) throws {
         self.stateLimit = stateLimit
         self.catalogCacheLimits = catalogCacheLimits
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -131,7 +153,7 @@ public actor SourceArchive {
             if sqlite3_step(query) == SQLITE_ROW { version = sqlite3_column_int(query, 0) }
             else { sqlite3_finalize(query); throw SourceDomainError(.unavailable, "Missing database version") }
             sqlite3_finalize(query)
-            guard version <= 2 else { throw SourceDomainError(.unavailable, "Native source database is newer than this app") }
+            guard version <= 3 else { throw SourceDomainError(.unavailable, "Native source database is newer than this app") }
             try Self.execute(raw, """
                 CREATE TABLE IF NOT EXISTS records(namespace TEXT NOT NULL, scope TEXT NOT NULL, key TEXT NOT NULL, payload BLOB NOT NULL, PRIMARY KEY(namespace,scope,key));
                 CREATE TABLE IF NOT EXISTS source_state(scope TEXT NOT NULL, key TEXT NOT NULL, payload BLOB NOT NULL, revision TEXT NOT NULL, PRIMARY KEY(scope,key));
@@ -151,9 +173,41 @@ public actor SourceArchive {
                     PRAGMA user_version=2;
                     """)
             }
+            if version < 3 {
+                try Self.execute(raw, Self.chapterStorageSchema)
+                try Self.execute(raw, "UPDATE chapter_usage SET cache_limit=\(initialChapterStorageLimits.readingCacheBytes),offline_limit=\(initialChapterStorageLimits.offlineBytes) WHERE id=1")
+            }
             try Self.execute(raw, "COMMIT")
         } catch { try? Self.execute(raw, "ROLLBACK"); sqlite3_close(raw); throw error }
     }
+    private static let chapterStorageSchema = """
+        CREATE TABLE chapter_usage(id INTEGER PRIMARY KEY CHECK(id=1),cache_bytes INTEGER NOT NULL DEFAULT 0,cache_count INTEGER NOT NULL DEFAULT 0,offline_bytes INTEGER NOT NULL DEFAULT 0,offline_count INTEGER NOT NULL DEFAULT 0,access_clock INTEGER NOT NULL DEFAULT 0,generation TEXT NOT NULL,cache_limit INTEGER NOT NULL DEFAULT 134217728,offline_limit INTEGER NOT NULL DEFAULT 1073741824);
+        INSERT INTO chapter_usage(id,generation) VALUES(1,lower(hex(randomblob(16))));
+        CREATE TABLE chapter_storage(scope TEXT NOT NULL,key TEXT NOT NULL,bytes INTEGER NOT NULL,retained INTEGER NOT NULL CHECK(retained IN (0,1)),last_access INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(scope,key));
+        CREATE INDEX chapter_storage_lru ON chapter_storage(retained,last_access,scope,key);
+        CREATE TRIGGER chapter_usage_insert AFTER INSERT ON chapter_storage BEGIN
+            UPDATE chapter_usage SET cache_bytes=cache_bytes+NEW.bytes*(1-NEW.retained),cache_count=cache_count+(1-NEW.retained),offline_bytes=offline_bytes+NEW.bytes*NEW.retained,offline_count=offline_count+NEW.retained WHERE id=1;
+        END;
+        CREATE TRIGGER chapter_usage_update AFTER UPDATE OF bytes,retained ON chapter_storage BEGIN
+            UPDATE chapter_usage SET cache_bytes=cache_bytes+NEW.bytes*(1-NEW.retained)-OLD.bytes*(1-OLD.retained),cache_count=cache_count+OLD.retained-NEW.retained,offline_bytes=offline_bytes+NEW.bytes*NEW.retained-OLD.bytes*OLD.retained,offline_count=offline_count+NEW.retained-OLD.retained WHERE id=1;
+        END;
+        CREATE TRIGGER chapter_usage_delete AFTER DELETE ON chapter_storage BEGIN
+            UPDATE chapter_usage SET cache_bytes=cache_bytes-OLD.bytes*(1-OLD.retained),cache_count=cache_count-(1-OLD.retained),offline_bytes=offline_bytes-OLD.bytes*OLD.retained,offline_count=offline_count-OLD.retained WHERE id=1;
+        END;
+        INSERT INTO chapter_storage(scope,key,bytes,retained) SELECT scope,key,length(payload),1 FROM records WHERE namespace='chapter';
+        CREATE TRIGGER chapter_record_insert AFTER INSERT ON records WHEN NEW.namespace='chapter' BEGIN
+            INSERT INTO chapter_storage(scope,key,bytes,retained) VALUES(NEW.scope,NEW.key,length(NEW.payload),1);
+        END;
+        CREATE TRIGGER chapter_record_update AFTER UPDATE OF payload ON records WHEN NEW.namespace='chapter' BEGIN
+            INSERT INTO chapter_storage(scope,key,bytes,retained) VALUES(NEW.scope,NEW.key,length(NEW.payload),1)
+            ON CONFLICT(scope,key) DO UPDATE SET bytes=excluded.bytes;
+        END;
+        CREATE TRIGGER chapter_record_delete AFTER DELETE ON records WHEN OLD.namespace='chapter' BEGIN
+            DELETE FROM chapter_storage WHERE scope=OLD.scope AND key=OLD.key;
+        END;
+        PRAGMA user_version=3;
+        """
+
     deinit { sqlite3_close(handle) }
     public static func defaultURL() -> URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Legado/native-sources.sqlite3")
@@ -297,9 +351,116 @@ public actor SourceArchive {
         }
     }
 
+    public func chapterStorageUsage() throws -> SourceChapterStorageUsage {
+        let query = try prepare("SELECT cache_bytes,cache_count,offline_bytes,offline_count,cache_limit,offline_limit FROM chapter_usage WHERE id=1", strings: [])
+        defer { sqlite3_finalize(query) }
+        guard sqlite3_step(query) == SQLITE_ROW else { throw databaseError() }
+        let values = (0..<6).map { Int(sqlite3_column_int64(query, Int32($0))) }
+        guard values.allSatisfy({ $0 >= 0 }) else { throw SourceDomainError(.invalidData, "Corrupt chapter storage accounting") }
+        return .init(readingCacheBytes: values[0], readingCacheCount: values[1], offlineBytes: values[2], offlineCount: values[3],
+                     limits: .init(readingCacheBytes: values[4], offlineBytes: values[5]))
+    }
+    public func setChapterStorageLimits(_ limits: SourceChapterStorageLimits) throws {
+        try transaction {
+            let usage = try chapterStorageUsage()
+            guard usage.offlineBytes <= limits.offlineBytes else {
+                throw SourceDomainError(.resourceLimit, "离线正文已超过所选上限，请先移除部分下载。")
+            }
+            let update = try prepare("UPDATE chapter_usage SET cache_limit=?,offline_limit=? WHERE id=1",
+                                     strings: [String(limits.readingCacheBytes), String(limits.offlineBytes)])
+            defer { sqlite3_finalize(update) }
+            try done(update)
+            try trimReadingCache()
+        }
+    }
+    /// User-requested removal also invalidates pending fetches, so late results cannot refill it.
+    @discardableResult
+    public func removeChapterStorage(_ selection: SourceChapterStorageRemoval) throws -> Int {
+        try transaction {
+            let retained = selection == .offlineDownloads ? "1" : "0"
+            let deletion = try prepare("DELETE FROM records WHERE namespace='chapter' AND (scope,key) IN (SELECT scope,key FROM chapter_storage WHERE retained=?)", strings: [retained])
+            defer { sqlite3_finalize(deletion) }
+            try done(deletion)
+            let count = Int(sqlite3_changes(handle))
+            try Self.execute(handle, "UPDATE chapter_usage SET generation=lower(hex(randomblob(16))) WHERE id=1")
+            return count
+        }
+    }
+    private func storageGeneration() throws -> String {
+        let query = try prepare("SELECT generation FROM chapter_usage WHERE id=1", strings: [])
+        defer { sqlite3_finalize(query) }
+        guard sqlite3_step(query) == SQLITE_ROW else { throw databaseError() }
+        return string(query, column: 0)
+    }
+    private func chapterStorage(_ key: SourceChapterKey) throws -> (bytes: Int, retained: Bool)? {
+        let query = try prepare("SELECT bytes,retained FROM chapter_storage WHERE scope=? AND key=?", strings: [scopeKey(key.book.scope), chapterKey(key)])
+        defer { sqlite3_finalize(query) }
+        switch sqlite3_step(query) {
+        case SQLITE_DONE: return nil
+        case SQLITE_ROW: return (Int(sqlite3_column_int64(query, 0)), sqlite3_column_int(query, 1) != 0)
+        default: throw databaseError()
+        }
+    }
+    private func touchChapter(_ key: SourceChapterKey, retainOffline: Bool = false) throws {
+        guard let stored = try chapterStorage(key) else { throw SourceDomainError(.invalidData, "Chapter storage metadata is missing") }
+        if retainOffline && !stored.retained {
+            let usage = try chapterStorageUsage()
+            guard usage.offlineBytes + stored.bytes <= usage.limits.offlineBytes else {
+                throw SourceDomainError(.resourceLimit, "离线正文空间已满，请在缓存与下载中清理后重试。")
+            }
+        }
+        try Self.execute(handle, "UPDATE chapter_usage SET access_clock=access_clock+1 WHERE id=1")
+        let update = try prepare("UPDATE chapter_storage SET last_access=(SELECT access_clock FROM chapter_usage WHERE id=1),retained=MAX(retained,?) WHERE scope=? AND key=?",
+                                 strings: [retainOffline ? "1" : "0", scopeKey(key.book.scope), chapterKey(key)])
+        defer { sqlite3_finalize(update) }
+        try done(update)
+    }
+    private func persistChapter(_ value: SourceCachedChapter, retainOffline: Bool) throws {
+        let previous = try chapterStorage(value.key)
+        let retained = retainOffline || previous?.retained == true
+        let payload = try SourceCoding.encode(value)
+        let usage = try chapterStorageUsage()
+        if retained {
+            let oldOfflineBytes = previous.flatMap { $0.retained ? $0.bytes : nil } ?? 0
+            let growth = payload.count - oldOfflineBytes
+            guard growth <= 0 || usage.offlineBytes + growth <= usage.limits.offlineBytes else {
+                throw SourceDomainError(.resourceLimit, "离线正文空间已满，请在缓存与下载中清理后重试。")
+            }
+        } else {
+            guard payload.count <= usage.limits.readingCacheBytes else {
+                throw SourceDomainError(.resourceLimit, "本章超过阅读缓存上限，请提高上限后重试。")
+            }
+        }
+        try putPayload("chapter", scope: scopeKey(value.key.book.scope), key: chapterKey(value.key), payload: payload)
+        let update = try prepare("UPDATE chapter_storage SET retained=? WHERE scope=? AND key=?",
+                                 strings: [retained ? "1" : "0", scopeKey(value.key.book.scope), chapterKey(value.key)])
+        defer { sqlite3_finalize(update) }
+        try done(update)
+        try touchChapter(value.key)
+        try trimReadingCache(protecting: value.key)
+    }
+    private func trimReadingCache(protecting key: SourceChapterKey? = nil) throws {
+        while true {
+            try Task.checkCancellation()
+            let usage = try chapterStorageUsage()
+            if usage.readingCacheBytes <= usage.limits.readingCacheBytes { return }
+            let fields = try key.map { try [scopeKey($0.book.scope), chapterKey($0)] } ?? []
+            let excluded = key == nil ? "" : " AND NOT(scope=? AND key=?)"
+            let candidate = try prepare("SELECT scope,key FROM chapter_storage WHERE retained=0" + excluded + " ORDER BY last_access,scope,key LIMIT 1", strings: fields)
+            let row: (String, String)
+            if sqlite3_step(candidate) == SQLITE_ROW { row = (string(candidate, column: 0), string(candidate, column: 1)) }
+            else { sqlite3_finalize(candidate); throw SourceDomainError(.invalidData, "Cannot reconcile chapter cache budget") }
+            sqlite3_finalize(candidate)
+            let deletion = try prepare("DELETE FROM records WHERE namespace='chapter' AND scope=? AND key=?", strings: [row.0, row.1])
+            defer { sqlite3_finalize(deletion) }
+            try done(deletion)
+            guard sqlite3_changes(handle) == 1 else { throw SourceDomainError(.invalidData, "Orphaned chapter storage metadata") }
+        }
+    }
+
     /// Without an expected request this is a diagnostic/cache lookup. Production online reads
     /// use prepareChapter so request validation and cache lookup share the same transaction.
-    public func chapter(_ key: SourceChapterKey, identity: SourceExecutionIdentity, allowPreviousExtraction: Bool = false, gate: SourceCommitGate? = nil) throws -> SourceCachedChapter? {
+    public func chapter(_ key: SourceChapterKey, identity: SourceExecutionIdentity, allowPreviousExtraction: Bool = false, retainOffline: Bool = false, gate: SourceCommitGate? = nil) throws -> SourceCachedChapter? {
         guard key.book.scope == identity.scope else { throw SourceDomainError(.invalidInput, "Cache scope mismatch") }
         return try transaction(gate: gate) {
             guard let cached = try storedChapter(key) else { return nil }
@@ -307,12 +468,14 @@ public actor SourceArchive {
                 guard cached.identity == identity, let provenance = cached.provenance,
                       try matchesCatalog(provenance, identity: identity, index: catalogIndex(book: key.book)) else { return nil }
             }
-            return try normalizeCachedChapter(cached)
+            let normalized = try normalizeCachedChapter(cached)
+            try touchChapter(key, retainOffline: retainOffline)
+            return normalized
         }
     }
 
     func prepareChapter(identity: SourceExecutionIdentity, book: SourceWire.SourceRef, chapter: SourceWire.SourceRef,
-                        expectedCatalog: SourceCatalog?, reload: Bool, gate: SourceCommitGate) throws -> SourceChapterPreparation {
+                        expectedCatalog: SourceCatalog?, reload: Bool, retainOffline: Bool = false, gate: SourceCommitGate) throws -> SourceChapterPreparation {
         let key = try SourceChapterKey(book: .init(scope: identity.scope, bookID: book.id), chapterID: chapter.id)
         return try transaction(gate: gate) {
             let current = try catalogIndex(book: key.book)
@@ -328,10 +491,13 @@ public actor SourceArchive {
             }
             let cached = try storedChapter(key)
             if !reload, let cached, cached.identity == identity, cached.provenance == provenance {
-                return .cached(try normalizeCachedChapter(cached))
+                let normalized = try normalizeCachedChapter(cached)
+                try touchChapter(key, retainOffline: retainOffline)
+                return .cached(normalized)
             }
             return .fetch(SourceChapterRequest(key: key, identity: identity, provenance: provenance,
-                                               catalogDigest: current?.digest, previousCacheDigest: try digest(cached)))
+                                               catalogDigest: current?.digest, previousCacheDigest: try digest(cached),
+                                               retainOffline: retainOffline, storageGeneration: try storageGeneration()))
         }
     }
 
@@ -341,13 +507,16 @@ public actor SourceArchive {
         guard value.key == request.key, value.identity == request.identity, value.provenance == request.provenance,
               value.key.book.scope == value.identity.scope else { throw SourceDomainError(.invalidInput, "Chapter request identity mismatch") }
         try transaction(gate: gate) {
+            guard try storageGeneration() == request.storageGeneration else {
+                throw SourceDomainError(.stale, "正文存储已被清理，请重新打开章节。")
+            }
             guard try catalogIndex(book: value.key.book)?.digest == request.catalogDigest else {
                 throw SourceDomainError(.catalogChanged, "读取期间目录已更新，请重新打开章节。")
             }
             guard try digest(storedChapter(value.key)) == request.previousCacheDigest else {
                 throw SourceDomainError(.stale, "章节缓存已由另一读取更新，请重试。")
             }
-            try put("chapter", scope: scopeKey(value.key.book.scope), key: chapterKey(value.key), value: value)
+            try persistChapter(value, retainOffline: request.retainOffline)
         }
     }
 
@@ -368,7 +537,11 @@ public actor SourceArchive {
         guard value.document.normalizationVersion != ChapterDocument.currentVersion else { return value }
         let normalized = SourceCachedChapter(key: value.key, identity: value.identity, content: value.content,
             document: try ChapterNormalizer.normalize(value.content), storedAt: value.storedAt, provenance: value.provenance)
-        try put("chapter", scope: scopeKey(value.key.book.scope), key: chapterKey(value.key), value: normalized)
+        do { try persistChapter(normalized, retainOffline: false) }
+        catch let error as SourceDomainError where error.code == .resourceLimit {
+            // Reading preserved raw content remains possible even when an upgraded document
+            // cannot fit the current quota. Retry persistence after space becomes available.
+        }
         return normalized
     }
     public func anchor(book: SourceBookKey) throws -> SourceReadingAnchor? { try record("anchor", scope: scopeKey(book.scope), key: book.bookID) }
@@ -452,7 +625,9 @@ public actor SourceArchive {
     }
     private func put<T: Encodable>(_ namespace: String, scope: String, key: String, value: T, gate: SourceCommitGate? = nil) throws {
         try Task.checkCancellation()
-        let payload = try SourceCoding.encode(value)
+        try putPayload(namespace, scope: scope, key: key, payload: SourceCoding.encode(value), gate: gate)
+    }
+    private func putPayload(_ namespace: String, scope: String, key: String, payload: Data, gate: SourceCommitGate? = nil) throws {
         guard payload.count <= 64 * 1024 * 1024 else { throw SourceDomainError(.resourceLimit, "Archive record budget exceeded") }
         let statement = try prepare("INSERT INTO records(namespace,scope,key,payload) VALUES(?,?,?,?) ON CONFLICT(namespace,scope,key) DO UPDATE SET payload=excluded.payload", strings: [namespace, scope, key])
         defer { sqlite3_finalize(statement) }

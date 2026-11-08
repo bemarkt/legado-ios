@@ -39,7 +39,7 @@ public actor SourceLibraryService {
     }
 
     public func chapter(provider: any SourceProvider, book: SourceWire.SourceRef, chapter: SourceWire.SourceRef,
-                        policy: ReadPolicy = .current, catalog: SourceCatalog? = nil) async throws -> SourceCachedChapter {
+                        policy: ReadPolicy = .current, catalog: SourceCatalog? = nil, retainOffline: Bool = false) async throws -> SourceCachedChapter {
         try Task.checkCancellation()
         let identity = provider.descriptor.identity
         let key = try SourceChapterKey(book: .init(scope: identity.scope, bookID: book.id), chapterID: chapter.id)
@@ -52,7 +52,7 @@ public actor SourceLibraryService {
             if generations[operation] === generation { generations.removeValue(forKey: operation) }
         }
         if policy == .offline {
-            guard let cached = try await archive.chapter(key, identity: identity, allowPreviousExtraction: true, gate: generation) else {
+            guard let cached = try await archive.chapter(key, identity: identity, allowPreviousExtraction: true, retainOffline: retainOffline, gate: generation) else {
                 throw SourceDomainError(.notDownloaded, "This chapter has not been downloaded for this account")
             }
             try Task.checkCancellation()
@@ -60,7 +60,7 @@ public actor SourceLibraryService {
             return cached
         }
         let prepared = try await archive.prepareChapter(identity: identity, book: book, chapter: chapter,
-            expectedCatalog: catalog, reload: policy == .reload, gate: generation)
+            expectedCatalog: catalog, reload: policy == .reload, retainOffline: retainOffline, gate: generation)
         try Task.checkCancellation()
         guard generations[operation] === generation else { throw SourceDomainError(.stale, "Chapter read superseded") }
         let request: SourceChapterRequest
@@ -90,7 +90,7 @@ public actor SourceLibraryService {
             try Task.checkCancellation()
             await progress(.init(completed: count, total: catalog.chapters.count, currentChapter: item))
             try Task.checkCancellation()
-            _ = try await chapter(provider: provider, book: catalog.book, chapter: item.ref, catalog: catalog)
+            _ = try await chapter(provider: provider, book: catalog.book, chapter: item.ref, catalog: catalog, retainOffline: true)
             count += 1
             await progress(.init(completed: count, total: catalog.chapters.count, currentChapter: nil))
         }

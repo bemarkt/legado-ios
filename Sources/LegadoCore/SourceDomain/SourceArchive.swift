@@ -91,6 +91,15 @@ public actor SourceArchive {
 
     public func installations() throws -> [SourceInstallation] { try records("installation", scope: "", as: SourceInstallation.self) }
     public func installation(_ id: UUID) throws -> SourceInstallation? { try record("installation", scope: "", key: id.uuidString) }
+    /// Source and configuration are captured in one database read transaction, including across connections.
+    public func executionSnapshot(scope: SourceScope) throws -> (installation: SourceInstallation, configuration: SourceJSON?) {
+        try transaction {
+            guard let source = try installation(scope.installationID) else {
+                throw SourceDomainError(.unavailable, "Source installation is unavailable")
+            }
+            return (source, try configuration(scope: scope))
+        }
+    }
     public func installationHistory(_ id: UUID) throws -> [SourceInstallation] {
         try record("installation-history", scope: "", key: id.uuidString) ?? []
     }

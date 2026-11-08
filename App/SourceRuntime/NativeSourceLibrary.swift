@@ -67,13 +67,10 @@ final class NativeSourceLibrary: ObservableObject {
     }
     func provider(_ installation: SourceInstallation) async throws -> WebKitSourceProvider {
         let (archive, _) = try services()
-        guard let current = try await archive.installation(installation.id) else {
-            throw SourceDomainError(.unavailable, "书源已不可用，请重新打开书架")
-        }
-        let snapshot = try await inspect(current.source)
-        let scope = try SourceScope(installationID: current.id)
-        let configuration = try await archive.configuration(scope: scope)
-        return try WebKitSourceProvider(snapshot: snapshot, installation: current, configuration: configuration, archive: archive)
+        let scope = try SourceScope(installationID: installation.id)
+        let captured = try await archive.executionSnapshot(scope: scope)
+        let snapshot = try await inspect(captured.installation.source)
+        return try WebKitSourceProvider(snapshot: snapshot, installation: captured.installation, configuration: captured.configuration, archive: archive)
     }
     func saveConfiguration(_ configuration: SourceJSON, installation: SourceInstallation) async throws {
         let snapshot = try await inspect(installation.source)
@@ -154,6 +151,9 @@ final class NativeSourceLibrary: ObservableObject {
     func pendingPositionWrites() async { await anchorWrite?.value }
     func add(_ hit: SearchHit) async throws {
         let provider = try await provider(hit.installation)
+        guard provider.descriptor.identity.sourceDigest == hit.installation.digest else {
+            throw SourceDomainError(.stale, "书源已经更新，请重新搜索后加入书架")
+        }
         _ = try await services().1.addBook(provider: provider, ref: hit.book.ref)
         await reload()
     }

@@ -357,6 +357,8 @@ struct SourceDomainTests {
         let updated = try SourceInstallation(id: original.id, publisherID: original.publisherID, name: "Updated", version: "2", source: "updated",
             origins: original.origins, locallyModified: true)
         try await archive.saveInstallation(updated, replacing: original.digest, resetConfigurationFor: scope)
+        let captured = try await archive.executionSnapshot(scope: scope)
+        #expect(captured.installation == updated && captured.configuration == .object([:]))
         #expect(try await archive.configuration(scope: scope) == .object([:]))
         #expect(try await archive.installationHistory(original.id) == [original])
         await #expect(throws: SourceDomainError.self) {

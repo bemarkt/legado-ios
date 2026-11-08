@@ -529,11 +529,21 @@ final class SourceRuntimeTests: XCTestCase {
             let host = UIHostingController(rootView: reader)
             host.traitOverrides.preferredContentSizeCategory = category
             host.overrideUserInterfaceStyle = dark ? .dark : .light
-            let window = UIWindow(frame: CGRect(origin: .zero, size: size))
-            window.rootViewController = host
+            let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+            let previousKeyWindow = scene.windows.first(where: \.isKeyWindow)
+            let window = UIWindow(windowScene: scene)
+            let container = UIViewController()
+            window.rootViewController = container
             window.makeKeyAndVisible()
-            defer { window.isHidden = true }
+            container.addChild(host)
+            host.view.frame = CGRect(origin: .zero, size: size)
+            host.view.backgroundColor = dark ? .black : .white
+            container.view.addSubview(host.view)
+            host.didMove(toParent: container)
+            defer { window.isHidden = true; previousKeyWindow?.makeKeyAndVisible() }
             window.layoutIfNeeded()
+            host.view.setNeedsLayout()
+            host.view.layoutIfNeeded()
             // Wait for the offline chapter's native anchor, not a timing assumption about WebKit startup.
             var restored = false
             for _ in 0..<100 {
@@ -543,7 +553,13 @@ final class SourceRuntimeTests: XCTestCase {
             XCTAssertTrue(restored, "Offline reader did not display content")
             try await Task.sleep(for: .milliseconds(300))
             window.layoutIfNeeded()
-            let image = UIGraphicsImageRenderer(size: size).image { _ in window.drawHierarchy(in: window.bounds, afterScreenUpdates: true) }
+            var rendered = false
+            let image = UIGraphicsImageRenderer(size: size).image { _ in
+                rendered = host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true)
+            }
+            XCTAssertTrue(rendered, "View hierarchy snapshot failed")
+            let pixels = try XCTUnwrap(image.cgImage?.dataProvider?.data) as Data
+            XCTAssertGreaterThan(Set(pixels).count, 8, "Blank snapshot must not count as layout evidence")
             let attachment = XCTAttachment(image: image)
             attachment.name = "native-reader-" + name
             attachment.lifetime = .keepAlways

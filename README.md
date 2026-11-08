@@ -128,6 +128,8 @@ EPUB 导入入口：书架 → 更多 → 本地书，或「我的 → 文件管
 
 请先去掉日志和规则中的账号、Cookie、Token 等个人信息。欢迎提交代码、兼容用例和文档改进，具体见 [贡献指南](CONTRIBUTING.md)。
 
+开发、测试与阅读器维护资料见 [文档索引](docs/README.md)，未发布改动见 [更新记录](CHANGELOG.md)。
+
 ## 开源许可
 
 本项目采用 **GNU GPL v3**，详见 [LICENSE](LICENSE)。

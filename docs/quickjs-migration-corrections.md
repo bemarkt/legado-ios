@@ -1,6 +1,6 @@
 # QuickJS 迁移报告订正（2026-11-01）
 
-对 `quickjs-migration.md` 以代码为准的订正，以及书源宿主 API 扩充记录。原文未改动，本文件是增量说明。
+本文保留迁移期间对 `quickjs-migration.md` 的实现订正，以及书源宿主 API 扩充记录。原始调试报告未纳入仓库；当前接口入口见 [JavaScript 宿主 API](javascript-host-api.md)，验证方式见 [开发指南](DEVELOPMENT.md)。以下历史结论应结合当前代码与测试阅读。
 
 ## 一、第五节订正：replacementEvaluator 不再复用字节码
 

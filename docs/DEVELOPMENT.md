@@ -25,11 +25,14 @@
 ## 验证命令
 
 ```sh
-swift test --disable-sandbox
+swift test --disable-sandbox --filter LegadoCoreTests --no-parallel
+swift test --disable-sandbox --filter LegadoAppModelsTests --no-parallel
 xcodebuild -project Legado.xcodeproj -scheme Legado \
   -destination 'generic/platform=iOS Simulator' \
   -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO build
 ```
+
+上述命令按测试 target 串行执行，与当前 CI 一致；仅完成模拟器 `build` 不代表已执行 UIKit 或 UI 测试。
 
 完整本地自检：
 
@@ -61,6 +64,33 @@ xcodebuild -project Legado.xcodeproj -scheme LegadoReaderUITests \
 RSS 的导入、源内搜索、分页、正文、收藏以及重启恢复可通过本地自造响应回归，避免依赖第三方网站。先在一个终端运行 `python3 scripts/fixtures/rss-flow-server.py`，再在 Xcode 选择 `LegadoRSSFlowUITests` Scheme 和模拟器运行；也可用 `xcodebuild -project Legado.xcodeproj -scheme LegadoRSSFlowUITests -destination 'platform=iOS Simulator,id=模拟器UUID' CODE_SIGNING_ALLOWED=NO test`。该服务仅监听本机 `127.0.0.1:18763`，测试结束后按 Ctrl-C 停止。普通 UI Scheme 默认跳过此用例。
 
 RSS 界面回归还验证正文的手动刷新确实重新请求网络。核心与页面模型回归覆盖查询隔离、刷新失败后的分页重试、重定向链接、文章变量、并发开关、书签与阅读记录保存顺序，以及自动更新过程中删除规则订阅；这些用例均使用临时数据库和自造响应，不访问个人书架。
+
+## 仿真翻页维护
+
+[仿真翻页维护说明](READER_PAGINATION.md) 记录页序、稳定视口、UTF-16 字符位置与落地进度的约束，并列出自动测试、真机检查和已完成验证的范围。修改分页、章节切换、进度保存或标题排版前，先核对这些约束。
+
+重点测试入口为 `PageDeckTests`、`ReaderCurlPositionRegressionTests` 和 iOS 的 `ReaderCurlProgressTests`。后者需要使用 `LegadoReaderTests` Scheme 执行测试，普通 App 构建不会运行它。
+
+## GitHub Actions 与 IPA
+
+| 工作流 | 触发方式 | 验证或产物 |
+| --- | --- | --- |
+| [JavaScript Engine CI](../.github/workflows/javascript-engine-ci.yml) | 匹配路径的 push、非草稿 PR 或手动触发 | 两个独立 job：SwiftPM 核心与页面模型测试，以及 Xcode 模拟器 App 构建 |
+| [Build Unsigned IPA](../.github/workflows/build-ipa.yml) | 仅手动 `workflow_dispatch` | iOS 设备构建、未签名 IPA、可选 dSYM 与构建日志 |
+
+自动工作流的路径过滤和 PR 事件以 YAML 为准。当前过滤包含 `App/`、核心代码和核心测试等路径；只修改 `Tests/LegadoAppModelsTests/` 或 `Tests/LegadoReaderTests/` 不会单独触发该工作流，必要时手动执行。UIKit 和 UI 测试仍需另外运行。
+
+手动构建时，在 Actions 选择 **Build Unsigned IPA → Run workflow**：
+
+1. 选择包含所需工作流定义的分支。`ref` 输入可指定要编译的分支、tag 或完整 commit SHA，留空则使用触发分支。
+2. 选择 `Release` 或 `Debug`，runner 使用 `macos-26`。
+3. 完成后下载 `Legado-Unsigned-IPA-<version>-<short_sha>` artifact。IPA 文件名包含版本、构建号和源码短 SHA，安装前自行签名。
+
+工作流定义来自触发分支，`ref` 决定 checkout 的源码；调整 CI 后应使用包含新定义的分支发起新运行。重新运行旧 run 不会采用后来修改的工作流定义。
+
+编译、打包和 IPA 上传是必需步骤。dSYM 与构建日志用于排查问题，各设置三分钟超时并允许失败；摘要中的 `outcome` 保留实际结果。若 dSYM 上传失败，IPA 仍可能已经可下载，但该次构建的符号文件不保证可用。若 IPA 上传失败，整个 job 仍失败。
+
+打包使用实际 `Info.plist` 的版本信息，不自动提升版本号，也不会发布 Release 或更新应用源。同一触发分支的新 IPA 运行会取消该分支上尚未完成的旧运行。
 
 ## 兼容性验证
 

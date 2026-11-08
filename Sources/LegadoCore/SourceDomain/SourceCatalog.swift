@@ -24,6 +24,9 @@ public struct SourceCatalog: Codable, Sendable, Equatable {
     public let chapters: [SourceWire.Chapter]
     public let revision: String?
     public let fetchedAt: Date
+    /// Host-owned invalidation epoch, absent in archives written before revision-aware caching.
+    /// Reused only for an identical catalog with an explicit, unchanged provider revision.
+    var cacheEpoch: UUID?
     public init(identity: SourceExecutionIdentity, book: SourceWire.SourceRef, chapters: [SourceWire.Chapter], revision: String?, fetchedAt: Date = Date()) {
         self.identity = identity; self.book = book; self.chapters = chapters; self.revision = revision; self.fetchedAt = fetchedAt
     }

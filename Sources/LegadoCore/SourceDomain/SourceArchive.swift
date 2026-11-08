@@ -37,14 +37,38 @@ public struct SourceSavedBook: Codable, Sendable, Equatable {
     }
 }
 
+/// The exact request and catalog generation that produced a downloaded chapter.
+/// Provider catalog revisions and content revisions are independent opaque values.
+public struct SourceChapterProvenance: Codable, Sendable, Equatable {
+    public let book: SourceWire.SourceRef
+    public let chapter: SourceWire.SourceRef
+    public let catalogEpoch: String?
+}
+
+struct SourceChapterRequest: Sendable {
+    let key: SourceChapterKey
+    let identity: SourceExecutionIdentity
+    let provenance: SourceChapterProvenance
+    let catalogDigest: String?
+    let previousCacheDigest: String?
+}
+
+enum SourceChapterPreparation: Sendable {
+    case cached(SourceCachedChapter)
+    case fetch(SourceChapterRequest)
+}
+
 public struct SourceCachedChapter: Codable, Sendable, Equatable {
     public let key: SourceChapterKey
     public let identity: SourceExecutionIdentity
     public let content: SourceWire.ChapterContent
     public let document: ChapterDocument
     public let storedAt: Date
-    public init(key: SourceChapterKey, identity: SourceExecutionIdentity, content: SourceWire.ChapterContent, document: ChapterDocument, storedAt: Date = Date()) {
+    public let provenance: SourceChapterProvenance?
+    public init(key: SourceChapterKey, identity: SourceExecutionIdentity, content: SourceWire.ChapterContent, document: ChapterDocument,
+                storedAt: Date = Date(), provenance: SourceChapterProvenance? = nil) {
         self.key = key; self.identity = identity; self.content = content; self.document = document; self.storedAt = storedAt
+        self.provenance = provenance
     }
 }
 
@@ -145,20 +169,99 @@ public actor SourceArchive {
         try put("book", scope: scopeKey(value.key.scope), key: value.key.bookID, value: value)
     }
     public func catalog(book: SourceBookKey) throws -> SourceCatalog? { try record("catalog", scope: scopeKey(book.scope), key: book.bookID) }
-    public func saveCatalog(_ value: SourceCatalog, gate: SourceCommitGate? = nil) throws {
-        try put("catalog", scope: scopeKey(value.identity.scope), key: value.book.id, value: value, gate: gate)
+    @discardableResult
+    public func saveCatalog(_ value: SourceCatalog, gate: SourceCommitGate? = nil) throws -> SourceCatalog {
+        try transaction(gate: gate) {
+            let key = try SourceBookKey(scope: value.identity.scope, bookID: value.book.id)
+            let previous = try catalog(book: key)
+            var saved = value
+            if let previous, let revision = value.revision, !revision.isEmpty,
+               previous.identity == value.identity, previous.book == value.book,
+               previous.revision == revision, previous.chapters == value.chapters,
+               let epoch = previous.cacheEpoch {
+                saved.cacheEpoch = epoch
+            } else { saved.cacheEpoch = UUID() }
+            try put("catalog", scope: scopeKey(key.scope), key: key.bookID, value: saved)
+            return saved
+        }
     }
-    public func chapter(_ key: SourceChapterKey, identity: SourceExecutionIdentity, allowPreviousExtraction: Bool = false) throws -> SourceCachedChapter? {
+
+    /// Without an expected request this is a diagnostic/cache lookup. Production online reads
+    /// use prepareChapter so request validation and cache lookup share the same transaction.
+    public func chapter(_ key: SourceChapterKey, identity: SourceExecutionIdentity, allowPreviousExtraction: Bool = false, gate: SourceCommitGate? = nil) throws -> SourceCachedChapter? {
         guard key.book.scope == identity.scope else { throw SourceDomainError(.invalidInput, "Cache scope mismatch") }
-        let result: SourceCachedChapter? = try record("chapter", scope: scopeKey(key.book.scope), key: chapterKey(key))
-        guard let result else { return nil }
-        guard result.key == key else { throw SourceDomainError(.invalidData, "Corrupt chapter cache identity") }
-        if !allowPreviousExtraction, result.identity != identity { return nil }
-        return result
+        return try transaction(gate: gate) {
+            guard let cached = try storedChapter(key) else { return nil }
+            if !allowPreviousExtraction {
+                guard cached.identity == identity, let provenance = cached.provenance,
+                      try matchesCatalog(provenance, identity: identity, catalog: catalog(book: key.book)) else { return nil }
+            }
+            return try normalizeCachedChapter(cached)
+        }
     }
-    public func saveChapter(_ value: SourceCachedChapter, gate: SourceCommitGate? = nil) throws {
-        guard value.key.book.scope == value.identity.scope else { throw SourceDomainError(.invalidInput, "Chapter cache scope mismatch") }
-        try put("chapter", scope: scopeKey(value.key.book.scope), key: chapterKey(value.key), value: value, gate: gate)
+
+    func prepareChapter(identity: SourceExecutionIdentity, book: SourceWire.SourceRef, chapter: SourceWire.SourceRef,
+                        expectedCatalog: SourceCatalog?, reload: Bool, gate: SourceCommitGate) throws -> SourceChapterPreparation {
+        let key = try SourceChapterKey(book: .init(scope: identity.scope, bookID: book.id), chapterID: chapter.id)
+        return try transaction(gate: gate) {
+            let current = try catalog(book: key.book)
+            if let expectedCatalog {
+                guard try digest(expectedCatalog) == digest(current) else {
+                    throw SourceDomainError(.catalogChanged, "目录已更新，请返回书籍详情重新打开章节。")
+                }
+            }
+            let provenance = SourceChapterProvenance(book: book, chapter: chapter, catalogEpoch: try epoch(current))
+            guard try matchesCatalog(provenance, identity: identity, catalog: current) else {
+                throw SourceDomainError(.catalogChanged, "书源、目录或章节引用已改变，请刷新目录后重试。")
+            }
+            let cached = try storedChapter(key)
+            if !reload, let cached, cached.identity == identity, cached.provenance == provenance {
+                return .cached(try normalizeCachedChapter(cached))
+            }
+            return .fetch(SourceChapterRequest(key: key, identity: identity, provenance: provenance,
+                                               catalogDigest: try digest(current), previousCacheDigest: try digest(cached)))
+        }
+    }
+
+    /// Compare the directory AND the previously observed cache in one SQLite transaction.
+    /// A response captured before another connection's commit cannot overwrite that commit.
+    func saveChapter(_ value: SourceCachedChapter, request: SourceChapterRequest, gate: SourceCommitGate) throws {
+        guard value.key == request.key, value.identity == request.identity, value.provenance == request.provenance,
+              value.key.book.scope == value.identity.scope else { throw SourceDomainError(.invalidInput, "Chapter request identity mismatch") }
+        try transaction(gate: gate) {
+            guard try digest(catalog(book: value.key.book)) == request.catalogDigest else {
+                throw SourceDomainError(.catalogChanged, "读取期间目录已更新，请重新打开章节。")
+            }
+            guard try digest(storedChapter(value.key)) == request.previousCacheDigest else {
+                throw SourceDomainError(.stale, "章节缓存已由另一读取更新，请重试。")
+            }
+            try put("chapter", scope: scopeKey(value.key.book.scope), key: chapterKey(value.key), value: value)
+        }
+    }
+
+    private func storedChapter(_ key: SourceChapterKey) throws -> SourceCachedChapter? {
+        let value: SourceCachedChapter? = try record("chapter", scope: scopeKey(key.book.scope), key: chapterKey(key))
+        guard value == nil || value?.key == key else { throw SourceDomainError(.invalidData, "Corrupt chapter cache identity") }
+        return value
+    }
+    private func digest<T: Encodable>(_ value: T?) throws -> String? {
+        try value.map { SourceCoding.digest(try SourceCoding.encode($0)) }
+    }
+    private func epoch(_ catalog: SourceCatalog?) throws -> String? {
+        guard let catalog else { return nil }
+        return try catalog.cacheEpoch?.uuidString ?? digest(catalog)
+    }
+    private func matchesCatalog(_ provenance: SourceChapterProvenance, identity: SourceExecutionIdentity, catalog: SourceCatalog?) throws -> Bool {
+        guard let catalog else { return provenance.catalogEpoch == nil }
+        return try catalog.identity == identity && catalog.book == provenance.book && epoch(catalog) == provenance.catalogEpoch &&
+            catalog.chapters.contains(where: { $0.ref == provenance.chapter })
+    }
+    private func normalizeCachedChapter(_ value: SourceCachedChapter) throws -> SourceCachedChapter {
+        guard value.document.normalizationVersion != ChapterDocument.currentVersion else { return value }
+        let normalized = SourceCachedChapter(key: value.key, identity: value.identity, content: value.content,
+            document: try ChapterNormalizer.normalize(value.content), storedAt: value.storedAt, provenance: value.provenance)
+        try put("chapter", scope: scopeKey(value.key.book.scope), key: chapterKey(value.key), value: normalized)
+        return normalized
     }
     public func anchor(book: SourceBookKey) throws -> SourceReadingAnchor? { try record("anchor", scope: scopeKey(book.scope), key: book.bookID) }
     public func saveAnchor(_ value: SourceReadingAnchor) throws { try put("anchor", scope: scopeKey(value.chapter.book.scope), key: value.chapter.book.bookID, value: value) }

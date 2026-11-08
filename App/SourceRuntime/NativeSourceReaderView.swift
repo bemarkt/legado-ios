@@ -113,6 +113,7 @@ struct NativeSourceReaderView: View {
     @State private var loading = false
     @State private var error: String?
     @State private var notice: String?
+    @State private var requestedPolicy = SourceLibraryService.ReadPolicy.current
     @State private var loadTask: Task<Void, Never>?
     @State private var prefetch: Task<Void, Never>?
     @State private var generation = UUID()
@@ -137,7 +138,12 @@ struct NativeSourceReaderView: View {
                     if let error {
                         ContentUnavailableView { Label("暂时无法读取", systemImage: "book.closed") }
                         description: { Text(error) }
-                        actions: { Button("重试") { load(currentID) } }
+                        actions: {
+                            Button("重试") { load(currentID, policy: requestedPolicy) }
+                            if !offline, requestedPolicy != .offline {
+                                Button("阅读已下载副本") { load(currentID, policy: .offline) }
+                            }
+                        }
                     }
                 }
                 .scrollTargetLayout()
@@ -155,7 +161,10 @@ struct NativeSourceReaderView: View {
                 Menu {
                     Button("增大字号", systemImage: "textformat.size.larger") { fontSize = min(36, fontSize + 2) }
                     Button("减小字号", systemImage: "textformat.size.smaller") { fontSize = max(14, fontSize - 2) }
-                } label: { Image(systemName: "textformat.size").accessibilityLabel("阅读字号") }
+                    Divider()
+                    Button("刷新本章", systemImage: "arrow.clockwise") { load(currentID, policy: .reload) }
+                        .disabled(offline || loading)
+                } label: { Image(systemName: "textformat.size").accessibilityLabel("阅读设置") }
             }
         }
         .safeAreaInset(edge: .bottom) {
@@ -185,11 +194,12 @@ struct NativeSourceReaderView: View {
             savePosition(); generation = UUID(); loadTask?.cancel(); prefetch?.cancel()
         }
     }
-    private func load(_ id: String) {
+    private func load(_ id: String, policy: SourceLibraryService.ReadPolicy? = nil) {
+        let policy: SourceLibraryService.ReadPolicy = offline ? .offline : policy ?? .current
         guard let selected = catalog.chapters.first(where: { $0.ref.id == id }) else { return }
         savePosition(); loadTask?.cancel(); prefetch?.cancel()
         let token = UUID(); generation = token
-        currentID = id; loading = true; error = nil; notice = nil
+        currentID = id; requestedPolicy = policy; loading = true; error = nil; notice = nil
         chapter = nil; passages = []; visibleID = nil
         loadTask = Task {
             defer { if generation == token { loading = false; loadTask = nil } }
@@ -198,10 +208,10 @@ struct NativeSourceReaderView: View {
                 if let existing = self.provider { provider = existing }
                 else { provider = try await model.provider(item.installation); self.provider = provider }
                 let (archive, service) = try model.services()
-                guard offline || catalog.identity == provider.descriptor.identity else {
+                guard policy == .offline || catalog.identity == provider.descriptor.identity else {
                     throw SourceDomainError(.stale, "书源或选项已改变，请返回书籍详情刷新目录后再阅读。已下载内容仍可在离线模式打开。")
                 }
-                let content = try await service.chapter(provider: provider, book: item.book.details.ref, chapter: selected.ref, policy: offline ? .offline : .current)
+                let content = try await service.chapter(provider: provider, book: catalog.book, chapter: selected.ref, policy: policy, catalog: catalog)
                 try Task.checkCancellation()
                 guard generation == token else { return }
                 await model.pendingPositionWrites()
@@ -215,10 +225,12 @@ struct NativeSourceReaderView: View {
                     visibleID = pieces.last(where: { $0.id <= resolution.offsetUTF16 })?.id ?? pieces.first?.id
                     if resolution.method == .nearest { notice = "章节内容有变化，已恢复到最接近的阅读位置。" }
                 } else { visibleID = pieces.first?.id }
-                if content.identity != provider.descriptor.identity { notice = "正在阅读此前下载的版本。" }
-                if !offline, let index = catalog.chapters.firstIndex(where: { $0.ref.id == id }), index + 1 < catalog.chapters.count {
+                if policy == .offline {
+                    notice = "正在阅读已下载的离线副本，未检查网站更新。" + (notice.map { " " + $0 } ?? "")
+                }
+                if policy != .offline, let index = catalog.chapters.firstIndex(where: { $0.ref.id == id }), index + 1 < catalog.chapters.count {
                     let next = catalog.chapters[index + 1]
-                    prefetch = Task { _ = try? await service.chapter(provider: provider.prioritized(.background), book: item.book.details.ref, chapter: next.ref) }
+                    prefetch = Task { _ = try? await service.chapter(provider: provider.prioritized(.background), book: catalog.book, chapter: next.ref, catalog: catalog) }
                 }
             } catch is CancellationError { if generation == token { error = "读取已取消" } }
             catch { if generation == token { self.error = error.localizedDescription } }

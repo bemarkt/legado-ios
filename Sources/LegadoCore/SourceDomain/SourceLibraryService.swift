@@ -1,7 +1,7 @@
 import Foundation
 
 public actor SourceLibraryService {
-    public enum ReadPolicy: Sendable, Equatable { case current, offline }
+    public enum ReadPolicy: Sendable, Equatable { case current, reload, offline }
     public let archive: SourceArchive
     private var generations: [String: SourceCommitGate] = [:]
     public init(archive: SourceArchive) { self.archive = archive }
@@ -29,12 +29,11 @@ public actor SourceLibraryService {
         let catalog = try await SourceCatalogLoader().load(provider: provider, book: book)
         try Task.checkCancellation()
         guard generations[operation] === generation else { throw SourceDomainError(.stale, "A newer catalog refresh superseded this result") }
-        try await archive.saveCatalog(catalog, gate: generation)
-        return catalog
+        return try await archive.saveCatalog(catalog, gate: generation)
     }
 
     public func chapter(provider: any SourceProvider, book: SourceWire.SourceRef, chapter: SourceWire.SourceRef,
-                        policy: ReadPolicy = .current) async throws -> SourceCachedChapter {
+                        policy: ReadPolicy = .current, catalog: SourceCatalog? = nil) async throws -> SourceCachedChapter {
         try Task.checkCancellation()
         let identity = provider.descriptor.identity
         let key = try SourceChapterKey(book: .init(scope: identity.scope, bookID: book.id), chapterID: chapter.id)
@@ -46,20 +45,31 @@ public actor SourceLibraryService {
             generation.invalidate()
             if generations[operation] === generation { generations.removeValue(forKey: operation) }
         }
-        if let cached = try await archive.chapter(key, identity: identity, allowPreviousExtraction: policy == .offline) {
+        if policy == .offline {
+            guard let cached = try await archive.chapter(key, identity: identity, allowPreviousExtraction: true, gate: generation) else {
+                throw SourceDomainError(.notDownloaded, "This chapter has not been downloaded for this account")
+            }
             try Task.checkCancellation()
             guard generations[operation] === generation else { throw SourceDomainError(.stale, "Chapter read superseded") }
             return cached
         }
-        guard policy != .offline else { throw SourceDomainError(.notDownloaded, "This chapter has not been downloaded for this account") }
+        let prepared = try await archive.prepareChapter(identity: identity, book: book, chapter: chapter,
+            expectedCatalog: catalog, reload: policy == .reload, gate: generation)
+        try Task.checkCancellation()
+        guard generations[operation] === generation else { throw SourceDomainError(.stale, "Chapter read superseded") }
+        let request: SourceChapterRequest
+        switch prepared {
+        case .cached(let cached): return cached
+        case .fetch(let value): request = value
+        }
         let content = try await provider.content(.init(book: book, chapter: chapter))
         try Task.checkCancellation()
         guard provider.descriptor.identity == identity, generations[operation] === generation else {
             throw SourceDomainError(.stale, "Chapter result belongs to an older operation")
         }
-        let value = SourceCachedChapter(key: key, identity: identity, content: content, document: try ChapterNormalizer.normalize(content))
+        let value = SourceCachedChapter(key: key, identity: identity, content: content, document: try ChapterNormalizer.normalize(content), provenance: request.provenance)
         try Task.checkCancellation()
-        try await archive.saveChapter(value, gate: generation)
+        try await archive.saveChapter(value, request: request, gate: generation)
         return value
     }
 
@@ -69,7 +79,7 @@ public actor SourceLibraryService {
         var count = 0
         for item in catalog.chapters {
             try Task.checkCancellation()
-            _ = try await chapter(provider: provider, book: catalog.book, chapter: item.ref)
+            _ = try await chapter(provider: provider, book: catalog.book, chapter: item.ref, catalog: catalog)
             count += 1
         }
         return count

@@ -39,14 +39,15 @@ final class NativeSourceLibrary: ObservableObject {
     @Published private(set) var canLoadMore = false
     @Published var message: String?
     private let databaseURL: URL
+    private let allowLoopbackHTTP: Bool
     let credentials: SourceCredentialVault
     private var reloadGeneration = UUID()
     private var guestGates: [UUID: SourceCommitGate] = [:]
     private var credentialEditGates: [UUID: SourceCommitGate] = [:]
     private var selectingAccounts = Set<UUID>()
     private var replacingInstallations = Set<UUID>()
-    init(databaseURL: URL = SourceArchive.defaultURL(), credentials: SourceCredentialVault = .shared) {
-        self.databaseURL = databaseURL; self.credentials = credentials
+    init(databaseURL: URL = SourceArchive.defaultURL(), credentials: SourceCredentialVault = .shared, allowLoopbackHTTP: Bool = false) {
+        self.databaseURL = databaseURL; self.credentials = credentials; self.allowLoopbackHTTP = allowLoopbackHTTP
     }
     private var database: SourceArchive?
     private var service: SourceLibraryService?
@@ -81,7 +82,7 @@ final class NativeSourceLibrary: ObservableObject {
             coverService = service
         }
         let data = try await service.image(url: cover.url, identity: provider.descriptor.identity, origins: provider.coverOrigins,
-            credentials: provider.coverCredentials, gate: provider.descriptor.commitGate)
+            credentials: provider.coverCredentials, gate: provider.descriptor.commitGate, allowLoopbackHTTP: allowLoopbackHTTP)
         guard try await selectedScope(installation) == scope else { throw SourceDomainError(.stale, "账号已切换。") }
         try provider.descriptor.commitGate?.check()
         return data
@@ -143,7 +144,7 @@ final class NativeSourceLibrary: ObservableObject {
         try requireStableAccount(installation.id)
         try activityGate?.check()
         return try WebKitSourceProvider(snapshot: snapshot, installation: captured.installation, accountID: scope.accountID,
-                                       configuration: captured.configuration, archive: archive, credentials: session, activityGate: activityGate)
+                                       configuration: captured.configuration, archive: archive, allowLoopbackHTTP: allowLoopbackHTTP, credentials: session, activityGate: activityGate)
     }
     func saveConfiguration(_ configuration: SourceJSON, installation: SourceInstallation, scope: SourceScope) async throws {
         guard try await selectedScope(installation) == scope else { throw SourceDomainError(.stale, "账号已切换，请重新打开选项。") }

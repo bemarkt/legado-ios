@@ -34,6 +34,10 @@ export async function startFixtureServer({ port = 0 } = {}) {
       send(200, `<!doctype html><html><head><title>Fixture login</title><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><h1>Fixture login</h1><button id="login" onclick="fetch('/state/login').then(() => document.getElementById('status').textContent='Saved in browser')">Sign in</button><p id="status">Temporary browser</p></body></html>`, { 'Content-Type': 'text/html; charset=utf-8' });
       return;
     }
+    if (url.pathname === '/covers/public.png' || url.pathname === '/covers/private.png') {
+      if (url.pathname.includes('private') && !/(?:^|;\s*)fixture_session=fixture-a(?:;|$)/.test(request.headers.cookie ?? '')) { json(401, { error: 'AUTH_REQUIRED' }); return; }
+      send(200, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAEAAAABgCAIAAAAip+O/AAABxklEQVR4nNXCA3YjAABF0becsW12bNdIGptt7Nq2bXeMjc06/j2XI8UG6RwtMUrnWGmtdI6XmaRzotwsnZMVFumcqrRK53SVTTpnqu3SOVvjkM45g1M6540u6VyodUvnoskjnUtmr3QuW3zSuWL1S+eqLSCda/agdK47QtK54QxL56arTjq33PXSue2JSOeONyqdu76YdO7549K5H0hI50EwKZ2HoZR0isJp6Tyqy0jncX1WOk8iOek8jeal8yxWkM7zeIN0XiQapfMy2SSdV6lm6bxOt0jnTaZVOm+zbdJ5l2uXzvt8h3Q+FDql87GhSzqfGrul87mpRzpfmnulU9zSJ52S1n7plLYNSKesfVA65R1D0qnoHJZOZdeIdKq6R6VT3TMmnZrecekY+iakY+yflE7twJR0TIPT0jEPzUjHMjwrHevInHRso/PSsY8tSMcxvigd58SSdFyTy9JxT61IxzO9Kh3vzJp0fLPr0vHPbUgnML8pneDClnRCi9vSCS/tSKdueVc69St70oms7ksnunYgndj6oXTiG1+lk9j8Jp3k1nfppLZ/SCe981M6md1f0snu/ZZObv+PdPIHf6VTOPwn/T/zbe3/96qaXAAAAABJRU5ErkJggg==', 'base64'), { 'Content-Type': 'image/png' }); return;
+    }
     if (url.pathname === '/health') { json(200, { fixtureVersion: 1 }); return; }
     if (url.pathname === '/diagnostics') { json(200, { requests, activeRequests: activeRequests - 1 }); return; }
     if (url.pathname === '/redirect/allowed') { send(302, '', { Location: '/health' }); return; }

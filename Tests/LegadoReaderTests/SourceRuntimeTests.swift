@@ -957,4 +957,51 @@ extension SourceRuntimeTests {
         }
     }
 
+    func testNativeCoverUsesAccountCredentialsAndPersistsAcrossModelRestart() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("cover-model-\(UUID().uuidString)/native.sqlite3")
+        let credentials = SourceCredentialVault(persistence: RuntimeMemoryCredentials())
+        let model = NativeSourceLibrary(databaseURL: url, credentials: credentials, allowLoopbackHTTP: true)
+        try await model.install(source("return {items:[],nextCursor:null};"))
+        let installation = try XCTUnwrap(model.installations.first)
+        let account = try await model.services().0.addAccount(name: "Reader", installationID: installation.id)
+        try await model.selectAccount(account.id, installation: installation)
+        let context = try await model.credentialContext(installation, accountID: account.id)
+        try await model.saveLoginCookies([.init(origin: origin, name: "fixture_session", value: "fixture-a", secure: false)], origin: origin, context: context)
+        let scope = try await model.selectedScope(installation)
+        let cover = SourceWire.Cover(url: origin + "/covers/private.png?request=" + UUID().uuidString)
+        let first = try await model.cover(cover, installation: installation, scope: scope)
+        let image = try XCTUnwrap(UIImage(data: first))
+        XCTAssertEqual(image.size.width, 64); XCTAssertEqual(image.size.height, 96)
+        let reopened = NativeSourceLibrary(databaseURL: url, credentials: credentials, allowLoopbackHTTP: true)
+        await reopened.reload()
+        let restored = try await reopened.cover(cover, installation: installation, scope: scope)
+        XCTAssertEqual(restored, first)
+        let (diagnosticData, _) = try await URLSession.shared.data(from: URL(string: origin + "/diagnostics")!)
+        let requests = try XCTUnwrap(object(String(decoding: diagnosticData, as: UTF8.self))["requests"] as? [[String: Any]])
+        let path = try XCTUnwrap(URLComponents(string: cover.url)).percentEncodedPath + "?" + (URLComponents(string: cover.url)?.percentEncodedQuery ?? "")
+        XCTAssertEqual(requests.filter { ($0["path"] as? String) == path }.count, 1)
+        try await reopened.selectAccount("guest", installation: installation)
+        do { _ = try await reopened.cover(cover, installation: installation, scope: scope); XCTFail("Old account cover remained accessible") }
+        catch let error as SourceDomainError { XCTAssertEqual(error.code, .stale) }
+    }
+
+    func testSearchAuthenticationFailureStaysTypedAndDiagnosticExportDropsWebsiteMessage() async throws {
+        let marker = "secret-fixture-message-" + UUID().uuidString
+        let model = accountModel()
+        let snapshot = try await source("throw ctx.errors.authRequired({message:'\(marker)'});")
+        try await model.install(snapshot)
+        model.search("private-query")
+        try await waitForNativeSearch(model)
+        XCTAssertTrue(model.results.isEmpty)
+        let failure = try XCTUnwrap(model.searchFailures.first)
+        XCTAssertEqual(failure.issue.code, "AUTH_REQUIRED")
+        XCTAssertEqual(failure.issue.recovery, .login)
+        XCTAssertFalse(failure.issue.message.contains(marker))
+        let exported = try await SourceDiagnostics.shared.export()
+        let text = String(decoding: exported, as: UTF8.self)
+        XCTAssertFalse(text.contains(marker)); XCTAssertFalse(text.contains("private-query"))
+        let records = await SourceDiagnostics.shared.records()
+        XCTAssertTrue(records.contains { $0.sourceDigest == snapshot.sha256 && $0.operation == .search && $0.code == "AUTH_REQUIRED" })
+    }
+
 }

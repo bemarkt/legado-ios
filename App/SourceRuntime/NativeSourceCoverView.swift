@@ -19,6 +19,7 @@ struct NativeSourceCoverView: View {
         .frame(width: width, height: width * 1.4)
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .accessibilityHidden(true)
+        .onDisappear { image = nil }
         .task(id: requestID) {
             image = nil
             guard let cover else { return }

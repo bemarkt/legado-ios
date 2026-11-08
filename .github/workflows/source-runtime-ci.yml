@@ -76,9 +76,15 @@ jobs:
           curl --fail http://127.0.0.1:18764/health
           xcrun simctl boot "$SOURCE_SIMULATOR" || true
           xcrun simctl bootstatus "$SOURCE_SIMULATOR" -b
-          TEST_SELECTOR='LegadoReaderTests/SourceRuntimeTests'
+          TEST_SELECTORS=(-only-testing:LegadoReaderTests/SourceRuntimeTests)
           if [ "$SOURCE_TEST_SUITE" = 'reader-layout' ]; then
-            TEST_SELECTOR="$TEST_SELECTOR/testNativeReaderRendersOfflineAtPhoneAndTabletWidths"
+            TEST_SELECTORS=(-only-testing:LegadoReaderTests/SourceRuntimeTests/testNativeReaderRendersOfflineAtPhoneAndTabletWidths)
+          else
+            # Keep the existing local readers covered at the same integration milestone.
+            TEST_SELECTORS+=(-only-testing:LegadoReaderTests/EPUBReaderIntegrationTests
+              -only-testing:LegadoReaderTests/ReaderBookmarkPersistenceTests
+              -only-testing:LegadoReaderTests/ReaderScrollGeometryTests
+              -only-testing:LegadoReaderTests/ReaderCurlProgressTests)
           fi
           # The simulator host needs an ad-hoc identity for actual Keychain access.
           # These synthetic entitlements are CI-only; the device IPA remains unsigned.
@@ -96,7 +102,7 @@ jobs:
             -destination "platform=iOS Simulator,id=$SOURCE_SIMULATOR" \
             -derivedDataPath build/SourceRuntimeDerivedData -clonedSourcePackagesDirPath SourcePackages \
             -skipPackagePluginValidation -skipMacroValidation \
-            -only-testing:"$TEST_SELECTOR" \
+            "${TEST_SELECTORS[@]}" \
             -parallel-testing-enabled NO -maximum-concurrent-test-simulator-destinations 1 \
             -resultBundlePath build/SourceRuntime.xcresult \
             CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual \

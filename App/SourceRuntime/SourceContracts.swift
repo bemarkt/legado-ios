@@ -7,6 +7,7 @@ struct SourceFailure: Error, Codable, Sendable, LocalizedError {
     let message: String
     var line: Int? = nil
     var column: Int? = nil
+    var retryAfterMs: Int? = nil
     var errorDescription: String? {
         "\(code): \(message)" + (line.map { " (\($0):\(column ?? 1))" } ?? "")
     }

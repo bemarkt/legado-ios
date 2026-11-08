@@ -10,7 +10,26 @@ const SourceRunner = (() => {
   const Decoder = TextDecoder;
   const Bytes = Uint8Array;
   const controller = new AbortController();
-  const failure = (code, message) => Object.assign(new Error(message), { code });
+  const failure = (code, message, retryAfterMs) => Object.assign(new Error(message), {
+    code, ...(retryAfterMs === undefined ? {} : { retryAfterMs })
+  });
+  const errorCodes = new Set(['INVALID_INPUT', 'INVALID_RESULT', 'INVALID_DATA', 'NETWORK', 'HTTP',
+    'RATE_LIMITED', 'AUTH_REQUIRED', 'PARSE', 'UNSUPPORTED', 'TIMEOUT', 'CANCELLED', 'RESOURCE_LIMIT',
+    'PERMISSION_DENIED', 'STORAGE_CONFLICT']);
+  const isErrorCode = Set.prototype.has.bind(errorCodes);
+  const isInteger = Number.isInteger;
+  const validRetry = value => isInteger(value) && value >= 0 && value <= 86400000;
+  function errorEnvelope(error) {
+    // Exception properties may themselves throw. Reporting an exception must not depend on toString().
+    let code = 'SCRIPT_ERROR', message = 'Source operation failed', retryAfterMs;
+    try {
+      if (isErrorCode(error?.code)) code = error.code;
+      const text = typeof error?.message === 'string' ? error.message : typeof error === 'string' ? error : '';
+      if (text) message = text.slice(0, 2048);
+      if (validRetry(error?.retryAfterMs)) retryAfterMs = error.retryAfterMs;
+    } catch { /* Keep a bounded diagnostic even for a hostile exception object. */ }
+    return { code, message, ...(retryAfterMs === undefined ? {} : { retryAfterMs }) };
+  }
   // CSP remains the resource policy. Disable APIs with side channels CSP does not cover uniformly.
   for (const name of ['fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource', 'Worker', 'SharedWorker',
     'RTCPeerConnection', 'webkitRTCPeerConnection', 'WebTransport', 'open', 'indexedDB', 'caches']) {
@@ -64,13 +83,19 @@ const SourceRunner = (() => {
       const raw = await post(stringify({ session, operation: operationID, method, id, ...(request ? { request } : {}) }));
       if (ended) throw failure('CANCELLED', 'Operation ended');
       const result = parse(raw);
-      if (result.error) throw failure(result.error.code, result.error.message);
+      if (result.error) throw failure(result.error.code, result.error.message, result.error.retryAfterMs);
       return result;
     };
     const errors = freeze({
       parse: ({ field, message }) => failure('PARSE', field + ': ' + message),
       authRequired: ({ message = 'Authentication required' } = {}) => failure('AUTH_REQUIRED', message),
-      http: ({ status }) => failure(status === 401 || status === 403 ? 'AUTH_REQUIRED' : status === 429 ? 'RATE_LIMITED' : 'HTTP', 'HTTP ' + status)
+      http: ({ status, retryAfterMs }) => {
+        if (!isInteger(status) || status < 100 || status > 599 || (retryAfterMs !== undefined && !validRetry(retryAfterMs))) {
+          return failure('INVALID_INPUT', 'Invalid HTTP error status or retry delay');
+        }
+        return failure(status === 401 ? 'AUTH_REQUIRED' : status === 429 ? 'RATE_LIMITED' : 'HTTP',
+          'HTTP ' + status, retryAfterMs);
+      }
     });
     const unsupported = async () => { throw failure('UNSUPPORTED', 'Persistent source storage is not implemented in the P1 prototype'); };
     const context = freeze({
@@ -113,8 +138,7 @@ const SourceRunner = (() => {
       if (encode.encode(json).length > 8388608) throw failure('RESOURCE_LIMIT', 'Output byte budget exceeded');
       return stringify({ json });
     } catch (error) {
-      return stringify({ error: { code: typeof error?.code === 'string' ? error.code.slice(0, 128) : 'SCRIPT_ERROR',
-        message: String(error?.message ?? error).slice(0, 2048) } });
+      return stringify({ error: errorEnvelope(error) });
     } finally {
       ended = true;
       controller.abort();

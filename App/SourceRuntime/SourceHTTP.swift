@@ -146,7 +146,12 @@ enum SourceHTTP {
         } catch let failure as SourceFailure { throw failure }
         catch {
             if let failure = delegate.failure { throw failure }
-            if Task.isCancelled { throw SourceFailure(code: "CANCELLED", message: "HTTP request cancelled") }
+            if Task.isCancelled || (error as? URLError)?.code == .cancelled {
+                throw SourceFailure(code: "CANCELLED", message: "HTTP request cancelled")
+            }
+            if (error as? URLError)?.code == .timedOut {
+                throw SourceFailure(code: "TIMEOUT", message: "HTTP request timed out")
+            }
             throw SourceFailure(code: "NETWORK", message: "HTTP transport failed")
         }
     }

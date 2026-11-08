@@ -54,6 +54,8 @@ Schema 限制单页 1000 项，profile 另外限制总输出、JSON 深度/节�
 
 `ctx.errors.http({status,...})`：401 → AUTH_REQUIRED；429 → RATE_LIMITED；其余非成功状态 → HTTP。403 不自动推断为登录问题；源若能确认登录失效，可显式 `authRequired`。传输层失败 → NETWORK；解析/必要节点缺失 → PARSE；限额 → RESOURCE_LIMIT；来源越界 → PERMISSION_DENIED。原生宿主翻译错误，但不靠错误文案判断类别。
 
+P1 运行时已按此区分 403 与 401。`retryAfterMs` 只接受 0–86,400,000 的整数，跨 JS/原生边界保留，不因此自动重试；非法 helper 参数返回 INVALID_INPUT。传输超时为 TIMEOUT，其他传输失败为 NETWORK，取消为 CANCELLED。未知作者错误码统一为 SCRIPT_ERROR；异常消息最多 2,048 个 UTF-16 单元，异常对象的 getter/toString 不能阻止生成备用诊断。P1 保留内部 INVALID_DATA 诊断码，`details` 尚不跨原生错误封套传输，不宣称完整业务错误服务已完成。
+
 ## 5. HTTP 候选语义
 
 `ctx.http.fetch` 是有范围限制的原生 HTTP API，不承诺全部浏览器 Fetch 行为。

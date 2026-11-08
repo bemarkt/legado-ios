@@ -2,7 +2,7 @@ import Foundation
 import WebKit
 
 @MainActor
-private final class SourceHostBridge: NSObject, WKScriptMessageHandlerWithReply {
+final class SourceHostBridge: NSObject, WKScriptMessageHandlerWithReply {
     private struct Message: Decodable {
         let session: String
         let operation: String
@@ -62,7 +62,9 @@ private final class SourceHostBridge: NSObject, WKScriptMessageHandlerWithReply 
                 throw SourceFailure(code: "INVALID_INPUT", message: "Bridge identity mismatch")
             }
             if envelope.method == "ready" {
-                guard !ready else { throw SourceFailure(code: "INVALID_INPUT", message: "Module already initialized") }
+                guard !ready, envelope.id == "ready", envelope.request == nil else {
+                    throw SourceFailure(code: "INVALID_INPUT", message: "Invalid or repeated module initialization")
+                }
                 ready = true
                 page?.resetDeadline(milliseconds: Int(policy.timeout * 1000))
                 replyHandler("{}", nil)
@@ -70,6 +72,9 @@ private final class SourceHostBridge: NSObject, WKScriptMessageHandlerWithReply 
             }
             guard ready else { throw SourceFailure(code: "INVALID_INPUT", message: "Module not initialized") }
             if envelope.method == "abortHTTP" {
+                guard envelope.request == nil, seen.contains(envelope.id) else {
+                    throw SourceFailure(code: "INVALID_INPUT", message: "Unknown cancellation target")
+                }
                 tasks[envelope.id]?.cancel()
                 replyHandler("{}", nil)
                 return
@@ -133,7 +138,17 @@ final class SourceRuntime {
         }
         struct ResultEnvelope: Decodable { let json: String?; let error: SourceFailure? }
         let result = try JSONDecoder().decode(ResultEnvelope.self, from: Data(raw.utf8))
-        if let error = result.error { throw error }
+        if let error = result.error {
+            // Author exceptions are data. Do not allow arbitrary codes or retry budgets to enter native scheduling.
+            let codes: Set<String> = ["INVALID_INPUT", "INVALID_RESULT", "INVALID_DATA", "NETWORK", "HTTP",
+                "RATE_LIMITED", "AUTH_REQUIRED", "PARSE", "UNSUPPORTED", "TIMEOUT", "CANCELLED", "RESOURCE_LIMIT",
+                "PERMISSION_DENIED", "STORAGE_CONFLICT", "SCRIPT_ERROR"]
+            guard codes.contains(error.code), !error.message.isEmpty, error.message.utf16.count <= 2048,
+                  error.retryAfterMs.map({ (0...86_400_000).contains($0) }) ?? true else {
+                throw SourceFailure(code: "INVALID_DATA", message: "Invalid source error envelope")
+            }
+            throw error
+        }
         guard let json = result.json else { throw SourceFailure(code: "INVALID_DATA", message: "Missing operation result") }
         // The author page cannot change this independent page's validator or schema.
         try Task.checkCancellation()

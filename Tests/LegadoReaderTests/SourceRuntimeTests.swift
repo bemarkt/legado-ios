@@ -17,9 +17,9 @@ final class SourceRuntimeTests: XCTestCase {
     private func object(_ text: String) throws -> [String: Any] {
         try XCTUnwrap(JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any])
     }
-    private func source(_ operationBody: String, topLevel: String = "") async throws -> SourceSnapshot {
+    private func source(_ operationBody: String, topLevel: String = "", settings: String = "{}") async throws -> SourceSnapshot {
         let source = """
-        export const metadata = {apiVersion:1,id:'org.example.runtime',name:'Runtime test',version:'1.0.0',origins:['\(origin)']};
+        export const metadata = {apiVersion:1,id:'org.example.runtime',name:'Runtime test',version:'1.0.0',origins:['\(origin)'],settings:\(settings)};
         \(topLevel)
         export async function search(ctx, input) { \(operationBody) }
         export async function book() { return {ref:{id:'b'},title:'Book'}; }
@@ -220,5 +220,149 @@ final class SourceRuntimeTests: XCTestCase {
             let items = try XCTUnwrap(result["items"] as? [[String: Any]])
             XCTAssertEqual(items.first?["title"] as? String, "1")
         }
+    }
+
+    func testBridgeRejectsReplayMalformedMessagesAndCallsAfterFinish() async throws {
+        let snapshot = try await source("return {items:[],nextCursor:null};")
+        let profile = try SourceProfile.load()
+        let bridge = SourceHostBridge(snapshot: snapshot, profile: profile, allowLoopbackHTTP: true, timeoutMs: 15000)
+        let page = try SourceWebPage(script: "", bridge: bridge)
+        bridge.page = page
+        defer { bridge.finish() }
+        let marker = UUID().uuidString
+        let arguments: [String: Any] = ["session": bridge.session, "operation": bridge.operation, "origin": origin, "marker": marker]
+        let result = try await page.perform("""
+        const post = value => window.webkit.messageHandlers.sourceHost.postMessage(value).then(JSON.parse);
+        const message = (method, id, extra={}) => ({session, operation, method, id, ...extra});
+        const request = {url:origin+'/health?marker='+marker,method:'GET',headers:{},redirect:'follow'};
+        const expect = async (value, code='INVALID_INPUT') => {
+          const result = await post(typeof value === 'string' ? value : JSON.stringify(value));
+          if(result.error?.code !== code) throw Error('Expected '+code+', got '+JSON.stringify(result));
+        };
+        await expect('not JSON');
+        await expect(message('http','early',{request}));
+        await expect(message('ready','wrong'));
+        await expect(message('ready','ready',{request}));
+        if((await post(JSON.stringify(message('ready','ready')))).error) throw Error('Ready rejected');
+        await expect(message('ready','ready'));
+        await expect(message('http','foreign-session',{session:'foreign',request}));
+        await expect(message('http','foreign-operation',{operation:'foreign',request}));
+        await expect(message('http','unknown-field',{request,extra:true}));
+        await expect(message('http','unknown-request-field',{request:{...request,extra:true}}));
+        await expect(message('http','malformed',{request:{...request,headers:[]}}));
+        await expect(message('http','x'.repeat(129),{request}));
+        await expect(message('abortHTTP','unknown'));
+        const first = await post(JSON.stringify(message('http','once',{request})));
+        if(first.status !== 200) throw Error('Initial request failed');
+        await expect(message('http','once',{request}));
+        await expect(message('abortHTTP','once',{request}));
+        if((await post(JSON.stringify(message('abortHTTP','once')))).error) throw Error('Completed request cancellation rejected');
+        const denied = {...request,url:'http://127.0.0.1:18765/denied'};
+        await expect(message('http','denied',{request:denied}),'PERMISSION_DENIED');
+        await expect(message('http','denied',{request:denied}));
+        return 'passed';
+        """, arguments: arguments, timeoutMs: 15000)
+        XCTAssertEqual(result, "passed")
+        bridge.finish()
+        // Even if an old message reaches a page with a still-held bridge reference, the native operation has ended.
+        let latePage = try SourceWebPage(script: "", bridge: bridge)
+        bridge.page = latePage
+        let late = try await latePage.perform("""
+        const value = await window.webkit.messageHandlers.sourceHost.postMessage(JSON.stringify({session,operation,id:'late',method:'http',
+          request:{url:origin+'/health?marker='+marker,method:'GET',headers:{},redirect:'follow'}}));
+        return JSON.parse(value).error.code;
+        """, arguments: arguments, timeoutMs: 2000)
+        XCTAssertEqual(late, "INVALID_INPUT")
+        let (data, _) = try await URLSession.shared.data(from: URL(string: origin + "/diagnostics")!)
+        let diagnostics = try object(String(decoding: data, as: UTF8.self))
+        let requests = try XCTUnwrap(diagnostics["requests"] as? [[String: Any]])
+        XCTAssertEqual(requests.filter { ($0["path"] as? String ?? "").contains(marker) }.count, 1)
+    }
+
+    func testFailedRequestsConsumeBudgetAndNextOperationStartsFresh() async throws {
+        let snapshot = try await source("""
+        for(let index=0;index<64;index++) {
+          try { await ctx.http.fetch('http://127.0.0.1:18765/denied'); throw Error('Denied origin accepted'); }
+          catch(e) { if(e.code !== 'PERMISSION_DENIED') throw e; }
+        }
+        try { await ctx.http.fetch('\(origin)/health'); throw Error('Failed requests did not consume budget'); }
+        catch(e) { if(e.code !== 'RESOURCE_LIMIT') throw e; }
+        return {items:[],nextCursor:null};
+        """)
+        _ = try await run(snapshot)
+        let good = try await source("const r=await ctx.http.fetch('\(origin)/health'); if(!r.ok) throw Error('Fresh budget failed'); return {items:[],nextCursor:null};")
+        _ = try await run(good)
+    }
+
+    func testConfigurationDefaultsRemainTypedFrozenAndFresh() async throws {
+        let snapshot = try await source("""
+        if(!Object.isFrozen(ctx.config)) throw Error('Mutable config');
+        if(ctx.config.label !== '' || ctx.config.enabled !== false || ctx.config.count !== 0 || ctx.config.mode !== 'slow') throw Error('Default values changed');
+        try { ctx.config.count=99; } catch {}
+        if(ctx.config.count !== 0) throw Error('Configuration mutation leaked');
+        for(const work of [()=>ctx.storage.get('x'),()=>ctx.storage.set('x','y'),()=>ctx.storage.remove('x')]) {
+          try { await work(); throw Error('Storage unexpectedly available'); } catch(e) { if(e.code !== 'UNSUPPORTED') throw e; }
+        }
+        return {items:[],nextCursor:null};
+        """, settings: """
+        {label:{type:'text',label:'Label',default:'',maxLength:20},enabled:{type:'boolean',label:'Enabled',default:false},
+         count:{type:'number',label:'Count',default:0,minimum:0,maximum:10},
+         mode:{type:'enum',label:'Mode',default:'slow',options:[{value:'fast',label:'Fast'},{value:'slow',label:'Slow'}]}}
+        """)
+        for _ in 0..<2 { _ = try await run(snapshot) }
+    }
+
+    func testErrorHelpersAndRetryDelaySurviveNativeBoundary() async throws {
+        let snapshot = try await source("""
+        for(const [status,code] of [[401,'AUTH_REQUIRED'],[403,'HTTP'],[429,'RATE_LIMITED'],[503,'HTTP']]) {
+          if(ctx.errors.http({status}).code !== code) throw Error('Wrong status mapping');
+        }
+        for(const details of [{status:0},{status:600},{status:429,retryAfterMs:-1},{status:429,retryAfterMs:1.5},{status:429,retryAfterMs:86400001}]) {
+          if(ctx.errors.http(details).code !== 'INVALID_INPUT') throw Error('Invalid error metadata accepted');
+        }
+        if(ctx.errors.parse({field:'body',message:'Missing'}).message !== 'body: Missing') throw Error('Lost parse field');
+        if(ctx.errors.authRequired().code !== 'AUTH_REQUIRED') throw Error('Wrong authentication code');
+        const response=await ctx.http.fetch('\(origin)/failure/rate-limited');
+        throw ctx.errors.http({status:response.status,retryAfterMs:Number(response.headers['retry-after'])*1000});
+        """)
+        do { _ = try await run(snapshot); XCTFail("Expected rate limit") }
+        catch let error as SourceFailure {
+            XCTAssertEqual(error.code, "RATE_LIMITED")
+            XCTAssertEqual(error.message, "HTTP 429")
+            XCTAssertEqual(error.retryAfterMs, 3000)
+        }
+    }
+
+    func testMalformedThrownValuesBecomeBoundedScriptErrors() async throws {
+        let snapshot = try await source("""
+        if(input.query === 'unknown') throw {code:'AUTHOR_CUSTOM',message:'Unknown error',retryAfterMs:Infinity};
+        if(input.query === 'getter') throw {get code(){throw Error('getter')},toString(){throw Error('toString')}};
+        throw {code:'PARSE',message:'x'.repeat(3000),retryAfterMs:-1};
+        """)
+        for query in ["unknown", "getter", "long"] {
+            do {
+                _ = try await SourceRuntime().run(.search, inputJSON: json(["query":query]), snapshot: snapshot)
+                XCTFail("Expected error")
+            } catch let error as SourceFailure {
+                XCTAssertEqual(error.code, query == "long" ? "PARSE" : "SCRIPT_ERROR")
+                XCTAssertFalse(error.message.isEmpty)
+                XCTAssertLessThanOrEqual(error.message.utf16.count, 2048)
+                XCTAssertNil(error.retryAfterMs)
+            }
+        }
+    }
+
+    func testNativeTransportTimeoutRemainsDistinctFromNetworkFailure() async throws {
+        let policy = SourceHTTPPolicy(origins: [origin], allowLoopbackHTTP: true, maximumBytes: 1024,
+                                      maximumRedirects: 0, timeout: 0.1)
+        for (path, code) in [("/failure/slow?ms=2000", "TIMEOUT"), ("/failure/disconnect", "NETWORK")] {
+            do {
+                _ = try await SourceHTTP.fetch(.init(url: origin + path, method: "GET", headers: [:], body: nil, redirect: "error"), policy: policy)
+                XCTFail("Expected \(code)")
+            } catch let error as SourceFailure { XCTAssertEqual(error.code, code) }
+        }
+        let recovered = try await SourceHTTP.fetch(.init(url: origin + "/health", method: "GET", headers: [:], body: nil, redirect: "error"),
+                                                   policy: .init(origins: [origin], allowLoopbackHTTP: true, maximumBytes: 1024, maximumRedirects: 0, timeout: 5))
+        XCTAssertEqual(recovered.status, 200)
     }
 }

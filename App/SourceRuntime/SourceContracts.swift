@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import LegadoCore
 
 /// P1 candidate data only. No Legado rules or engine objects cross this boundary.
 struct SourceFailure: Error, Codable, Sendable, LocalizedError {
@@ -57,7 +58,15 @@ struct SourceInspection: Decodable, Sendable {
         let name: String
         let version: String
         let origins: [String]
-        struct Setting: Decodable, Sendable { let `default`: SourceSettingValue }
+        struct Setting: Decodable, Sendable {
+            struct Option: Decodable, Sendable { let value: String }
+            let type: String
+            let `default`: SourceSettingValue
+            let maxLength: Int?
+            let minimum: Double?
+            let maximum: Double?
+            let options: [Option]?
+        }
         let settings: [String: Setting]?
     }
     let metadata: Metadata
@@ -71,6 +80,33 @@ struct SourceSnapshot: Sendable {
     let source: String
     let sha256: String
     let inspection: SourceInspection
+    func configuration(overrides: SourceJSON? = nil) throws -> SourceJSON {
+        let settings = inspection.metadata.settings ?? [:]
+        var values: [String: SourceJSON] = [:]
+        for (key, setting) in settings {
+            values[key] = try SourceCoding.decode(SourceJSON.self, from: SourceCoding.encode(setting.default))
+        }
+        if let overrides {
+            guard case .object(let supplied) = overrides, Set(supplied.keys).isSubset(of: Set(settings.keys)) else {
+                throw SourceFailure(code: "INVALID_INPUT", message: "Unknown configuration fields")
+            }
+            for (key, value) in supplied { values[key] = value }
+        }
+        for (key, setting) in settings {
+            let valid: Bool
+            switch (setting.type, values[key]) {
+            case ("text", .some(.string(let value))): valid = value.unicodeScalars.count <= (setting.maxLength ?? 0)
+            case ("boolean", .some(.bool(_))): valid = true
+            case ("enum", .some(.string(let value))): valid = setting.options?.contains(where: { $0.value == value }) == true
+            case ("number", .some(.number(let value))): valid = value.isFinite && value >= (setting.minimum ?? .infinity) && value <= (setting.maximum ?? -.infinity)
+            default: valid = false
+            }
+            guard valid else { throw SourceFailure(code: "INVALID_INPUT", message: "Invalid configuration value: \(key)") }
+        }
+        let configuration = SourceJSON.object(values)
+        _ = try configuration.validatedData(maximumBytes: 65_536)
+        return configuration
+    }
     fileprivate init(source: String, inspection: SourceInspection) {
         self.source = source
         self.inspection = inspection

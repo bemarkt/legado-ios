@@ -78,12 +78,12 @@ const SourceRunner = (() => {
     used = true;
     let ended = false;
     let sequence = 0;
-    const send = async (method, id, request) => {
+    const send = async (method, id, request, state) => {
       if (ended) throw failure('CANCELLED', 'Operation ended');
-      const raw = await post(stringify({ session, operation: operationID, method, id, ...(request ? { request } : {}) }));
+      const raw = await post(stringify({ session, operation: operationID, method, id, ...(request ? { request } : {}), ...(state ? { state } : {}) }));
       if (ended) throw failure('CANCELLED', 'Operation ended');
       const result = parse(raw);
-      if (result.error) throw failure(result.error.code, result.error.message, result.error.retryAfterMs);
+      if (result?.error) throw failure(result.error.code, result.error.message, result.error.retryAfterMs);
       return result;
     };
     const errors = freeze({
@@ -97,11 +97,51 @@ const SourceRunner = (() => {
           'HTTP ' + status, retryAfterMs);
       }
     });
-    const unsupported = async () => { throw failure('UNSUPPORTED', 'Persistent source storage is not implemented in the P1 prototype'); };
+    const storageCall = async (method, key, extra = {}) => {
+      if (typeof key !== 'string' || !key || [...key].length > 128 || key.includes('\0')) throw failure('INVALID_INPUT', 'Invalid storage key');
+      return send(method, String(++sequence), undefined, { key, ...extra });
+    };
+    const condition = options => {
+      if (options === undefined) return {};
+      if (!options || typeof options !== 'object' || Object.keys(options).some(key => key !== 'ifRevision') ||
+          !Object.hasOwn(options, 'ifRevision') || (options.ifRevision !== null && typeof options.ifRevision !== 'string')) {
+        throw failure('INVALID_INPUT', 'Invalid storage revision condition');
+      }
+      return { ifRevision: options.ifRevision };
+    };
+    const storageValue = value => {
+      const seen = new Set(); let nodes = 0;
+      const visit = (value, depth) => {
+        if (++nodes > 100000 || depth > 32) throw failure('RESOURCE_LIMIT', 'Storage JSON structure budget exceeded');
+        if (value === null || typeof value === 'boolean' || typeof value === 'string') return;
+        if (typeof value === 'number' && Number.isFinite(value) && (!Number.isInteger(value) || Number.isSafeInteger(value))) return;
+        if (!value || typeof value !== 'object' || seen.has(value)) throw failure('INVALID_INPUT', 'Storage needs finite, acyclic JSON');
+        seen.add(value);
+        const array = Array.isArray(value);
+        if (!array && ![Object.prototype, null].includes(Object.getPrototypeOf(value))) throw failure('INVALID_INPUT', 'Storage needs plain JSON objects');
+        const descriptors = Object.getOwnPropertyDescriptors(value);
+        const keys = Reflect.ownKeys(descriptors).filter(key => !(array && key === 'length'));
+        if (array && keys.length !== value.length) throw failure('INVALID_INPUT', 'Sparse storage array');
+        for (const key of keys) {
+          const descriptor = descriptors[key];
+          if (typeof key !== 'string' || ['__proto__','prototype','constructor'].includes(key) || !descriptor.enumerable || !Object.hasOwn(descriptor,'value') ||
+              (array && !/^(0|[1-9][0-9]*)$/.test(key))) throw failure('INVALID_INPUT', 'Unsupported storage property');
+          visit(descriptor.value, depth + 1);
+        }
+      };
+      visit(value, 0);
+      const json = stringify(value);
+      if (encode.encode(json).length > 65536) throw failure('RESOURCE_LIMIT', 'Storage value byte budget exceeded');
+      return parse(json);
+    };
     const context = freeze({
       signal: controller.signal,
       config: freeze(parse(configJSON)),
-      storage: freeze({ get: unsupported, set: unsupported, remove: unsupported }),
+      storage: freeze({
+        get: key => storageCall('storageGet', key),
+        set: (key, value, options) => storageCall('storageSet', key, { value: storageValue(value), ...condition(options) }),
+        remove: async (key, options) => { await storageCall('storageRemove', key, condition(options)); }
+      }),
       errors,
       // Prototype logs are deliberately not persisted. No credentials enter this page.
       log: freeze({ debug() {}, info() {}, warn() {}, error() {} }),

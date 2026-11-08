@@ -1,0 +1,173 @@
+import Foundation
+import CryptoKit
+
+/// JSON values cross the provider boundary; no engine or legacy rule objects do.
+public indirect enum SourceJSON: Codable, Sendable, Equatable, Hashable {
+    case null, bool(Bool), number(Double), string(String), array([SourceJSON]), object([String: SourceJSON])
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if container.decodeNil() { self = .null }
+        else if let value = try? container.decode(Bool.self) { self = .bool(value) }
+        else if let value = try? container.decode(String.self) { self = .string(value) }
+        else if let value = try? container.decode(Double.self) {
+            guard value.isFinite, abs(value) <= 9_007_199_254_740_991 else {
+                throw SourceDomainError(.invalidData, "JSON number exceeds the supported finite range")
+            }
+            self = .number(value)
+        } else if let value = try? container.decode([SourceJSON].self) { self = .array(value) }
+        else { self = .object(try container.decode([String: SourceJSON].self)) }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .null: try container.encodeNil()
+        case .bool(let value): try container.encode(value)
+        case .number(let value):
+            guard value.isFinite, abs(value) <= 9_007_199_254_740_991 else {
+                throw SourceDomainError(.invalidData, "JSON number exceeds the supported finite range")
+            }
+            try container.encode(value)
+        case .string(let value): try container.encode(value)
+        case .array(let value): try container.encode(value)
+        case .object(let value): try container.encode(value)
+        }
+    }
+
+    public func validatedData(maximumBytes: Int = 16_384) throws -> Data {
+        var nodes = 0
+        func visit(_ value: SourceJSON, depth: Int) throws {
+            nodes += 1
+            guard depth <= 32, nodes <= 100_000 else { throw SourceDomainError(.resourceLimit, "JSON structure budget exceeded") }
+            switch value {
+            case .array(let values): for child in values { try visit(child, depth: depth + 1) }
+            case .object(let values):
+                guard !values.keys.contains(where: { ["__proto__", "prototype", "constructor"].contains($0) }) else {
+                    throw SourceDomainError(.invalidData, "Reserved JSON key")
+                }
+                for child in values.values { try visit(child, depth: depth + 1) }
+            default: break
+            }
+        }
+        try visit(self, depth: 0)
+        let data = try SourceCoding.encode(self)
+        guard data.count <= maximumBytes else { throw SourceDomainError(.resourceLimit, "JSON byte budget exceeded") }
+        return data
+    }
+}
+
+public enum SourceCoding {
+    public static func encode<T: Encodable>(_ value: T) throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        return try encoder.encode(value)
+    }
+    public static func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
+        try JSONDecoder().decode(type, from: data)
+    }
+    public static func digest(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+public struct SourceDomainError: Error, Sendable, LocalizedError, Equatable {
+    public enum Code: String, Codable, Sendable {
+        case invalidInput = "INVALID_INPUT", invalidData = "INVALID_DATA", resourceLimit = "RESOURCE_LIMIT"
+        case cancelled = "CANCELLED", stale = "STALE_SNAPSHOT", catalogChanged = "CATALOG_CHANGED"
+        case storageConflict = "STORAGE_CONFLICT", notDownloaded = "NOT_DOWNLOADED", unavailable = "UNAVAILABLE"
+    }
+    public let code: Code
+    public let message: String
+    public init(_ code: Code, _ message: String) { self.code = code; self.message = message }
+    public var errorDescription: String? { "\(code.rawValue): \(message)" }
+}
+
+extension SourceWire {
+    public enum Body: Codable, Sendable, Equatable {
+        case text(TextBody), html(HTMLBody)
+        private enum Keys: String, CodingKey { case kind }
+        public init(from decoder: Decoder) throws {
+            let kind = try decoder.container(keyedBy: Keys.self).decode(String.self, forKey: .kind)
+            switch kind {
+            case "text": self = .text(try TextBody(from: decoder))
+            case "html": self = .html(try HTMLBody(from: decoder))
+            default: throw SourceDomainError(.invalidData, "Unknown chapter body kind")
+            }
+        }
+        public func encode(to encoder: Encoder) throws {
+            switch self {
+            case .text(let value): try value.encode(to: encoder)
+            case .html(let value): try value.encode(to: encoder)
+            }
+        }
+    }
+}
+
+/// Installation identity is host-issued. Account "guest" is an explicit independent scope.
+public struct SourceScope: Codable, Hashable, Sendable {
+    public let installationID: UUID
+    public let accountID: String
+    public init(installationID: UUID, accountID: String = "guest") throws {
+        guard !accountID.isEmpty, accountID.utf8.count <= 128, !accountID.contains("\0") else {
+            throw SourceDomainError(.invalidInput, "Invalid account scope")
+        }
+        self.installationID = installationID; self.accountID = accountID
+    }
+}
+
+public struct SourceExecutionIdentity: Codable, Hashable, Sendable {
+    public let scope: SourceScope
+    public let sourceDigest: String
+    public let configurationDigest: String
+    public init(scope: SourceScope, sourceDigest: String, configuration: SourceJSON) throws {
+        guard sourceDigest.count == 64, sourceDigest.allSatisfy({ $0.isHexDigit }) else {
+            throw SourceDomainError(.invalidInput, "Invalid source digest")
+        }
+        self.scope = scope
+        self.sourceDigest = sourceDigest
+        configurationDigest = SourceCoding.digest(try configuration.validatedData(maximumBytes: 65_536))
+    }
+}
+
+public struct SourceBookKey: Codable, Hashable, Sendable {
+    public let scope: SourceScope
+    public let bookID: String
+    public init(scope: SourceScope, bookID: String) throws {
+        try Self.validateID(bookID)
+        self.scope = scope; self.bookID = bookID
+    }
+    static func validateID(_ value: String) throws {
+        guard !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              value.unicodeScalars.count <= 1024, !value.contains("\0") else {
+            throw SourceDomainError(.invalidInput, "Invalid stable identity")
+        }
+    }
+}
+
+public struct SourceChapterKey: Codable, Hashable, Sendable {
+    public let book: SourceBookKey
+    public let chapterID: String
+    public init(book: SourceBookKey, chapterID: String) throws {
+        try SourceBookKey.validateID(chapterID)
+        self.book = book; self.chapterID = chapterID
+    }
+}
+
+public struct SourceProviderDescriptor: Sendable {
+    public let identity: SourceExecutionIdentity
+    public let name: String
+    public let supportsSearch: Bool
+    public init(identity: SourceExecutionIdentity, name: String, supportsSearch: Bool = true) {
+        self.identity = identity; self.name = name; self.supportsSearch = supportsSearch
+    }
+}
+
+/// Each provider instance pins source, account and configuration for the complete catalog flow.
+public protocol SourceProvider: Sendable {
+    var descriptor: SourceProviderDescriptor { get }
+    func search(_ input: SourceWire.SearchInput) async throws -> SourceWire.SearchPage
+    func book(_ input: SourceWire.BookInput) async throws -> SourceWire.BookDetails
+    func chapters(_ input: SourceWire.ChaptersInput) async throws -> SourceWire.ChapterPage
+    func content(_ input: SourceWire.ContentInput) async throws -> SourceWire.ChapterContent
+}

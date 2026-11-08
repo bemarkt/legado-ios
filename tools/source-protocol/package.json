@@ -10,8 +10,8 @@
     "test": "node --test --test-concurrency=1",
     "validate": "node cli.mjs",
     "fixtures": "node fixture-server.mjs",
-    "generate": "node generate-types.mjs",
-    "check": "node generate-types.mjs --check && node build-browser.mjs --check && node --test --test-concurrency=1",
+    "generate": "node generate-types.mjs && node generate-swift.mjs",
+    "check": "node generate-types.mjs --check && node generate-swift.mjs --check && node build-browser.mjs --check && node --test --test-concurrency=1",
     "bundle": "node build-browser.mjs"
   },
   "dependencies": {

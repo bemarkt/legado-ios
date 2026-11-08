@@ -6,6 +6,8 @@ on:
     paths:
       - 'protocols/source-v1/**'
       - 'tools/source-protocol/**'
+      - 'Sources/LegadoCore/SourceDomain/**'
+      - 'Tests/LegadoCoreTests/Fixtures/SourceProtocol/**'
       - 'App/Resources/SourceRuntime/**'
       - 'scripts/source-protocol-baseline.py'
       - 'Sources/LegadoCore/Persistence/LegadoDatabase.swift'
@@ -14,6 +16,8 @@ on:
     paths:
       - 'protocols/source-v1/**'
       - 'tools/source-protocol/**'
+      - 'Sources/LegadoCore/SourceDomain/**'
+      - 'Tests/LegadoCoreTests/Fixtures/SourceProtocol/**'
       - 'App/Resources/SourceRuntime/**'
       - 'scripts/source-protocol-baseline.py'
       - 'Sources/LegadoCore/Persistence/LegadoDatabase.swift'

@@ -9,3 +9,6 @@
 /App/SourceRuntime/** text eol=lf
 /Tests/LegadoReaderTests/SourceRuntimeTests.swift text eol=lf
 /.github/workflows/source-runtime-ci.yml text eol=lf
+
+/Sources/LegadoCore/SourceDomain/** text eol=lf
+/Tests/LegadoCoreTests/Fixtures/SourceProtocol/** text eol=lf

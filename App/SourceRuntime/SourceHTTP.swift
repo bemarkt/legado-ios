@@ -1,4 +1,5 @@
 import Foundation
+import LegadoCore
 
 struct SourceHTTPRequest: Decodable, Sendable {
     let url: String
@@ -83,7 +84,17 @@ private final class SourceRedirectDelegate: NSObject, URLSessionTaskDelegate, @u
 }
 
 enum SourceHTTP {
+    private static let scheduler = SourceWorkScheduler(globalLimit: 4, perOriginLimit: 2)
     static func fetch(_ input: SourceHTTPRequest, policy: SourceHTTPPolicy) async throws -> SourceHTTPResponse {
+        let url = try policy.validate(input.url)
+        do {
+            return try await scheduler.withPermit(origin: SourceHTTPPolicy.origin(url) ?? "", deadline: Date().addingTimeInterval(policy.timeout)) {
+                try await perform(input, policy: policy)
+            }
+        } catch is CancellationError { throw SourceFailure(code: "CANCELLED", message: "HTTP request cancelled in queue") }
+        catch let error as SourceDomainError { throw SourceFailure(code: "TIMEOUT", message: error.message) }
+    }
+    private static func perform(_ input: SourceHTTPRequest, policy: SourceHTTPPolicy) async throws -> SourceHTTPResponse {
         let url = try policy.validate(input.url)
         guard ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"].contains(input.method),
               ["follow", "error"].contains(input.redirect),

@@ -1,23 +1,8 @@
 name: Source Runtime WebKit
 
 on:
+  # Run at a validated implementation milestone, not on every intermediate push.
   workflow_dispatch:
-  push:
-    paths:
-      - 'App/**'
-      - 'Tests/LegadoReaderTests/**'
-      - 'protocols/source-v1/**'
-      - 'tools/source-protocol/**'
-      - 'Legado.xcodeproj/**'
-      - '.github/workflows/source-runtime-ci.yml'
-  pull_request:
-    paths:
-      - 'App/**'
-      - 'Tests/LegadoReaderTests/**'
-      - 'protocols/source-v1/**'
-      - 'tools/source-protocol/**'
-      - 'Legado.xcodeproj/**'
-      - '.github/workflows/source-runtime-ci.yml'
 
 permissions:
   contents: read

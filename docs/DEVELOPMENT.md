@@ -173,3 +173,10 @@ npm run validate -- ../../docs/examples/example.source.js
 在仓库根目录执行 `python scripts/source-protocol-baseline.py` 可检查合成旧库的静态 SQL 与结构。Node/SQLite 结果不能替代 Swift 构建、WebKit 或真机验收；进度与缺口见 [P0 阶段报告](reports/SOURCE_PROTOCOL_P0_REPORT.md)。
 
 P1 的原生验收由 `.github/workflows/source-runtime-ci.yml` 执行：选择 iOS 26 模拟器，启动 loopback fixture 服务，并实际运行 `LegadoReaderTests/SourceRuntimeTests`。不能把 `xcodebuild build` 当成 WebKit 执行结果。使用当前仓库 `bemarkt/legado-ios` 触发和查看 CI，Windows 本机不尝试 Xcode。内嵌 parser 修改后执行 `npm --prefix tools/source-protocol run bundle`，再运行 `check` 并提交生成文件。详情与未完成项见 [P1 报告](reports/SOURCE_PROTOCOL_P1_REPORT.md)。
+
+
+### 自有书源迭代的 CI 节奏
+
+`Source Protocol Candidate` 和 `JavaScript Engine CI` 继续用于提交后的合同、Swift 核心与 App 编译回归。`Source Runtime WebKit` 改为仅 `workflow_dispatch`：桥接、生命周期或完整操作链收敛到可验收节点时手动运行。`Build Unsigned IPA` 原本就是手动构建，通常在该节点确认后统一生成。中间实现提交不重复启动慢的 WebKit/IPA 作业。
+
+P2 的领域核心、独立原生源数据库与适配器可以在 G1 设备测量开放期间按实验范围开发；这不关闭 G1，也不替换现有 Legado/TXT/EPUB 数据或默认阅读路径。最终验收仍需对应原生测试、WebKit 执行和设备记录。

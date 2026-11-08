@@ -1,0 +1,46 @@
+{
+  "status": "expected-only-not-executed",
+  "fixtures": [
+    {
+      "name": "paragraph-and-break",
+      "html": "<p>First<br>line</p><p>Second</p>",
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "text": "First\nline"
+        },
+        {
+          "kind": "paragraph",
+          "text": "Second"
+        }
+      ]
+    },
+    {
+      "name": "drop-active-subtree",
+      "html": "<p>safe<script>bad()</script><style>hidden</style><iframe>frame</iframe><img src=\"https://unexpected.example/x\">text</p>",
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "text": "safetext"
+        }
+      ]
+    },
+    {
+      "name": "unknown-inline-and-emphasis",
+      "html": "<p>A<span>B</span><strong>C</strong></p>",
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "text": "ABC",
+          "marks": [
+            {
+              "kind": "strong",
+              "startUTF16": 2,
+              "endUTF16": 3
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

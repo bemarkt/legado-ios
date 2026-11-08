@@ -26,7 +26,15 @@ public struct SourceCatalog: Codable, Sendable, Equatable {
     public let fetchedAt: Date
     /// Host-owned invalidation epoch, absent in archives written before revision-aware caching.
     /// Reused only for an identical catalog with an explicit, unchanged provider revision.
-    var cacheEpoch: UUID?
+    var cacheEpoch: UUID? { didSet { archiveDigest = nil } }
+    /// Memoized by the archive after decoding immutable catalog contents. Never serialized.
+    var archiveDigest: String?
+    private enum CodingKeys: String, CodingKey { case identity, book, chapters, revision, fetchedAt, cacheEpoch }
+
+    public static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.identity == rhs.identity && lhs.book == rhs.book && lhs.chapters == rhs.chapters &&
+            lhs.revision == rhs.revision && lhs.fetchedAt == rhs.fetchedAt && lhs.cacheEpoch == rhs.cacheEpoch
+    }
     public init(identity: SourceExecutionIdentity, book: SourceWire.SourceRef, chapters: [SourceWire.Chapter], revision: String?, fetchedAt: Date = Date()) {
         self.identity = identity; self.book = book; self.chapters = chapters; self.revision = revision; self.fetchedAt = fetchedAt
     }

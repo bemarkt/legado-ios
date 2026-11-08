@@ -89,6 +89,9 @@ struct NativeSourceLibraryView: View {
         }
         .onChange(of: query) { model.cancelSearch(clearResults: true); submittedQuery = "" }
         .task { await model.reload() }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)) { _ in
+            Task { await model.releaseCatalogMemory() }
+        }
         .onDisappear { model.cancelSearch() }
         .sheet(isPresented: $importing) { NativeSourceImportView(model: model) }
         .alert("提示", isPresented: Binding(get: { model.message != nil }, set: { if !$0 { model.message = nil } })) {

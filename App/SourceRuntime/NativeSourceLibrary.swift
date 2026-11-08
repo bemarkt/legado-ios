@@ -52,6 +52,7 @@ final class NativeSourceLibrary: ObservableObject {
         self.database = database; self.service = service
         return (database, service)
     }
+    func releaseCatalogMemory() async { await database?.clearCatalogMemoryCache() }
     func reload() async {
         do {
             let (archive, _) = try services()

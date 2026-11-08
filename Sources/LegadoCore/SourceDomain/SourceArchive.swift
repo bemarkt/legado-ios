@@ -72,14 +72,46 @@ public struct SourceCachedChapter: Codable, Sendable, Equatable {
     }
 }
 
+public struct SourceCatalogCacheLimits: Sendable {
+    public let maximumCatalogs: Int
+    public let maximumChapters: Int
+    /// Serialized bytes are an accounting bound, not a measurement of Swift heap usage.
+    public let maximumEncodedBytes: Int
+    public init(maximumCatalogs: Int = 4, maximumChapters: Int = 100_000, maximumEncodedBytes: Int = 32 * 1024 * 1024) {
+        self.maximumCatalogs = max(0, maximumCatalogs)
+        self.maximumChapters = max(0, maximumChapters)
+        self.maximumEncodedBytes = max(0, maximumEncodedBytes)
+    }
+}
+
+struct SourceCatalogCacheStatistics: Sendable {
+    let catalogs: Int
+    let chapters: Int
+    let encodedBytes: Int
+    let decodes: Int
+}
+
 /// Separate database while the native protocol remains experimental. Existing Legado/TXT/EPUB data is untouched.
 /// Actor isolation and BEGIN IMMEDIATE protect compare-and-set across multiple repository instances.
 public actor SourceArchive {
     nonisolated(unsafe) private let handle: OpaquePointer
     private static let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
     private let stateLimit: Int
-    public init(url: URL, stateLimit: Int = 1_048_576) throws {
+    private let catalogCacheLimits: SourceCatalogCacheLimits
+    private struct CatalogIndex {
+        let catalog: SourceCatalog
+        let recordVersion: String
+        let digest: String
+        let references: [String: SourceWire.SourceRef]
+        let encodedBytes: Int
+        var epoch: String { catalog.cacheEpoch?.uuidString ?? digest }
+    }
+    private var catalogCache: [SourceBookKey: CatalogIndex] = [:]
+    private var catalogOrder: [SourceBookKey] = []
+    private var catalogDecodes = 0
+    public init(url: URL, stateLimit: Int = 1_048_576, catalogCacheLimits: SourceCatalogCacheLimits = .init()) throws {
         self.stateLimit = stateLimit
+        self.catalogCacheLimits = catalogCacheLimits
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         var raw: OpaquePointer?
         guard sqlite3_open_v2(url.path, &raw, SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK, let raw else {
@@ -90,6 +122,7 @@ public actor SourceArchive {
         sqlite3_busy_timeout(raw, 5000)
         do {
             try Self.execute(raw, "PRAGMA journal_mode=WAL")
+            try Self.execute(raw, "BEGIN IMMEDIATE")
             var query: OpaquePointer?
             guard sqlite3_prepare_v2(raw, "PRAGMA user_version", -1, &query, nil) == SQLITE_OK, let query else {
                 throw SourceDomainError(.unavailable, "Cannot read native source database version")
@@ -98,14 +131,27 @@ public actor SourceArchive {
             if sqlite3_step(query) == SQLITE_ROW { version = sqlite3_column_int(query, 0) }
             else { sqlite3_finalize(query); throw SourceDomainError(.unavailable, "Missing database version") }
             sqlite3_finalize(query)
-            guard version <= 1 else { throw SourceDomainError(.unavailable, "Native source database is newer than this app") }
+            guard version <= 2 else { throw SourceDomainError(.unavailable, "Native source database is newer than this app") }
             try Self.execute(raw, """
-                BEGIN IMMEDIATE;
                 CREATE TABLE IF NOT EXISTS records(namespace TEXT NOT NULL, scope TEXT NOT NULL, key TEXT NOT NULL, payload BLOB NOT NULL, PRIMARY KEY(namespace,scope,key));
                 CREATE TABLE IF NOT EXISTS source_state(scope TEXT NOT NULL, key TEXT NOT NULL, payload BLOB NOT NULL, revision TEXT NOT NULL, PRIMARY KEY(scope,key));
-                PRAGMA user_version=1;
-                COMMIT;
                 """)
+            if version < 2 {
+                try Self.execute(raw, """
+                    ALTER TABLE records ADD COLUMN record_version TEXT NOT NULL DEFAULT '';
+                    UPDATE records SET record_version=lower(hex(randomblob(16)));
+                    CREATE TRIGGER records_version_insert AFTER INSERT ON records BEGIN
+                        UPDATE records SET record_version=lower(hex(randomblob(16)))
+                        WHERE namespace=NEW.namespace AND scope=NEW.scope AND key=NEW.key;
+                    END;
+                    CREATE TRIGGER records_version_update AFTER UPDATE OF payload,namespace,scope,key ON records BEGIN
+                        UPDATE records SET record_version=lower(hex(randomblob(16)))
+                        WHERE namespace=NEW.namespace AND scope=NEW.scope AND key=NEW.key;
+                    END;
+                    PRAGMA user_version=2;
+                    """)
+            }
+            try Self.execute(raw, "COMMIT")
         } catch { try? Self.execute(raw, "ROLLBACK"); sqlite3_close(raw); throw error }
     }
     deinit { sqlite3_close(handle) }
@@ -168,12 +214,76 @@ public actor SourceArchive {
         guard value.key.bookID == value.details.ref.id else { throw SourceDomainError(.invalidInput, "Book identity mismatch") }
         try put("book", scope: scopeKey(value.key.scope), key: value.key.bookID, value: value)
     }
-    public func catalog(book: SourceBookKey) throws -> SourceCatalog? { try record("catalog", scope: scopeKey(book.scope), key: book.bookID) }
+    public func catalog(book: SourceBookKey) throws -> SourceCatalog? {
+        try transaction { try catalogIndex(book: book)?.catalog }
+    }
+
+    /// Only called within a transaction. A small per-record version lookup avoids reading a
+    /// whole catalog after unrelated chapter/anchor writes, including on another connection.
+    private func catalogIndex(book: SourceBookKey) throws -> CatalogIndex? {
+        let fields = try ["catalog", scopeKey(book.scope), book.bookID]
+        let versionQuery = try prepare("SELECT record_version FROM records WHERE namespace=? AND scope=? AND key=?", strings: fields)
+        defer { sqlite3_finalize(versionQuery) }
+        let version: String
+        switch sqlite3_step(versionQuery) {
+        case SQLITE_DONE: removeCatalogIndex(book); return nil
+        case SQLITE_ROW: version = string(versionQuery, column: 0)
+        default: throw databaseError()
+        }
+        guard !version.isEmpty else { throw SourceDomainError(.invalidData, "Catalog record version is missing") }
+        if let cached = catalogCache[book], cached.recordVersion == version {
+            catalogOrder.removeAll { $0 == book }; catalogOrder.append(book)
+            return cached
+        }
+        removeCatalogIndex(book)
+        let query = try prepare("SELECT payload FROM records WHERE namespace=? AND scope=? AND key=?", strings: fields)
+        defer { sqlite3_finalize(query) }
+        guard sqlite3_step(query) == SQLITE_ROW else { throw databaseError() }
+        let payload = data(query, column: 0)
+        var catalog = try SourceCoding.decode(SourceCatalog.self, from: payload)
+        catalogDecodes += 1
+        guard catalog.identity.scope == book.scope, catalog.book.id == book.bookID else {
+            throw SourceDomainError(.invalidData, "Corrupt catalog identity")
+        }
+        let fingerprint = SourceCoding.digest(try SourceCoding.encode(catalog))
+        catalog.archiveDigest = fingerprint
+        var references: [String: SourceWire.SourceRef] = [:]
+        references.reserveCapacity(catalog.chapters.count)
+        for chapter in catalog.chapters {
+            guard references.updateValue(chapter.ref, forKey: chapter.ref.id) == nil else {
+                throw SourceDomainError(.invalidData, "Repeated chapter identity in stored catalog")
+            }
+        }
+        let index = CatalogIndex(catalog: catalog, recordVersion: version, digest: fingerprint,
+                                 references: references, encodedBytes: payload.count)
+        if catalogCacheLimits.maximumCatalogs > 0,
+           index.references.count <= catalogCacheLimits.maximumChapters,
+           index.encodedBytes <= catalogCacheLimits.maximumEncodedBytes {
+            while !catalogOrder.isEmpty {
+                let usage = catalogCacheStatistics()
+                if usage.catalogs < catalogCacheLimits.maximumCatalogs &&
+                    usage.chapters + index.references.count <= catalogCacheLimits.maximumChapters &&
+                    usage.encodedBytes + index.encodedBytes <= catalogCacheLimits.maximumEncodedBytes { break }
+                removeCatalogIndex(catalogOrder[0])
+            }
+            catalogCache[book] = index; catalogOrder.append(book)
+        }
+        return index
+    }
+    private func removeCatalogIndex(_ key: SourceBookKey) {
+        catalogCache.removeValue(forKey: key); catalogOrder.removeAll { $0 == key }
+    }
+    /// May be called on memory pressure; it never removes persisted catalogs or chapters.
+    public func clearCatalogMemoryCache() { catalogCache.removeAll(); catalogOrder.removeAll() }
+    func catalogCacheStatistics() -> SourceCatalogCacheStatistics {
+        .init(catalogs: catalogCache.count, chapters: catalogCache.values.reduce(0) { $0 + $1.references.count },
+              encodedBytes: catalogCache.values.reduce(0) { $0 + $1.encodedBytes }, decodes: catalogDecodes)
+    }
     @discardableResult
     public func saveCatalog(_ value: SourceCatalog, gate: SourceCommitGate? = nil) throws -> SourceCatalog {
         try transaction(gate: gate) {
             let key = try SourceBookKey(scope: value.identity.scope, bookID: value.book.id)
-            let previous = try catalog(book: key)
+            let previous = try catalogIndex(book: key)?.catalog
             var saved = value
             if let previous, let revision = value.revision, !revision.isEmpty,
                previous.identity == value.identity, previous.book == value.book,
@@ -182,7 +292,8 @@ public actor SourceArchive {
                 saved.cacheEpoch = epoch
             } else { saved.cacheEpoch = UUID() }
             try put("catalog", scope: scopeKey(key.scope), key: key.bookID, value: saved)
-            return saved
+            guard let persisted = try catalogIndex(book: key)?.catalog else { throw databaseError() }
+            return persisted
         }
     }
 
@@ -194,7 +305,7 @@ public actor SourceArchive {
             guard let cached = try storedChapter(key) else { return nil }
             if !allowPreviousExtraction {
                 guard cached.identity == identity, let provenance = cached.provenance,
-                      try matchesCatalog(provenance, identity: identity, catalog: catalog(book: key.book)) else { return nil }
+                      try matchesCatalog(provenance, identity: identity, index: catalogIndex(book: key.book)) else { return nil }
             }
             return try normalizeCachedChapter(cached)
         }
@@ -204,14 +315,15 @@ public actor SourceArchive {
                         expectedCatalog: SourceCatalog?, reload: Bool, gate: SourceCommitGate) throws -> SourceChapterPreparation {
         let key = try SourceChapterKey(book: .init(scope: identity.scope, bookID: book.id), chapterID: chapter.id)
         return try transaction(gate: gate) {
-            let current = try catalog(book: key.book)
+            let current = try catalogIndex(book: key.book)
             if let expectedCatalog {
-                guard try digest(expectedCatalog) == digest(current) else {
+                let expectedDigest = try expectedCatalog.archiveDigest ?? SourceCoding.digest(SourceCoding.encode(expectedCatalog))
+                guard expectedDigest == current?.digest else {
                     throw SourceDomainError(.catalogChanged, "目录已更新，请返回书籍详情重新打开章节。")
                 }
             }
-            let provenance = SourceChapterProvenance(book: book, chapter: chapter, catalogEpoch: try epoch(current))
-            guard try matchesCatalog(provenance, identity: identity, catalog: current) else {
+            let provenance = SourceChapterProvenance(book: book, chapter: chapter, catalogEpoch: current?.epoch)
+            guard matchesCatalog(provenance, identity: identity, index: current) else {
                 throw SourceDomainError(.catalogChanged, "书源、目录或章节引用已改变，请刷新目录后重试。")
             }
             let cached = try storedChapter(key)
@@ -219,7 +331,7 @@ public actor SourceArchive {
                 return .cached(try normalizeCachedChapter(cached))
             }
             return .fetch(SourceChapterRequest(key: key, identity: identity, provenance: provenance,
-                                               catalogDigest: try digest(current), previousCacheDigest: try digest(cached)))
+                                               catalogDigest: current?.digest, previousCacheDigest: try digest(cached)))
         }
     }
 
@@ -229,7 +341,7 @@ public actor SourceArchive {
         guard value.key == request.key, value.identity == request.identity, value.provenance == request.provenance,
               value.key.book.scope == value.identity.scope else { throw SourceDomainError(.invalidInput, "Chapter request identity mismatch") }
         try transaction(gate: gate) {
-            guard try digest(catalog(book: value.key.book)) == request.catalogDigest else {
+            guard try catalogIndex(book: value.key.book)?.digest == request.catalogDigest else {
                 throw SourceDomainError(.catalogChanged, "读取期间目录已更新，请重新打开章节。")
             }
             guard try digest(storedChapter(value.key)) == request.previousCacheDigest else {
@@ -247,14 +359,10 @@ public actor SourceArchive {
     private func digest<T: Encodable>(_ value: T?) throws -> String? {
         try value.map { SourceCoding.digest(try SourceCoding.encode($0)) }
     }
-    private func epoch(_ catalog: SourceCatalog?) throws -> String? {
-        guard let catalog else { return nil }
-        return try catalog.cacheEpoch?.uuidString ?? digest(catalog)
-    }
-    private func matchesCatalog(_ provenance: SourceChapterProvenance, identity: SourceExecutionIdentity, catalog: SourceCatalog?) throws -> Bool {
-        guard let catalog else { return provenance.catalogEpoch == nil }
-        return try catalog.identity == identity && catalog.book == provenance.book && epoch(catalog) == provenance.catalogEpoch &&
-            catalog.chapters.contains(where: { $0.ref == provenance.chapter })
+    private func matchesCatalog(_ provenance: SourceChapterProvenance, identity: SourceExecutionIdentity, index: CatalogIndex?) -> Bool {
+        guard let index else { return provenance.catalogEpoch == nil }
+        return index.catalog.identity == identity && index.catalog.book == provenance.book && index.epoch == provenance.catalogEpoch &&
+            index.references[provenance.chapter.id] == provenance.chapter
     }
     private func normalizeCachedChapter(_ value: SourceCachedChapter) throws -> SourceCachedChapter {
         guard value.document.normalizationVersion != ChapterDocument.currentVersion else { return value }

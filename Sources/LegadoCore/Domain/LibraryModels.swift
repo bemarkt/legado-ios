@@ -26,6 +26,16 @@ public struct Book: Codable, Hashable, Identifiable, Sendable {
     public var durVolumeIndex: Int
     public var chapterInVolumeIndex: Int
     public var durChapterPos: Int
+    /// 章内页号存档（0 基），与 InkShelf `ReaderPageLocation.pageIndex` 同构。
+    ///
+    /// 阅读进度历来只存字符偏移（`durChapterPos`）。重进阅读时必须靠
+    /// 「偏移 → 页首字符表 → 页号」反推，而首帧滚动尚未发生、`contentOffset` 还是 0，
+    /// 反查必然吃时序，于是总是落回章首页。多存一份页号之后，重进就是一次坐标命中，
+    /// 与 InkShelf 的 `catalog.index(of: location)` 完全同构。
+    public var durChapterPage: Int
+    /// 存下 `durChapterPage` 时那一章的页数：页数变了说明版面变了（字号 / 视口 /
+    /// 设计标题），旧页号随即作废，退回字符偏移换算。
+    public var durChapterPageCount: Int
     public var durChapterTime: Int64
     public var wordCount: String?
     public var canUpdate: Bool
@@ -63,6 +73,8 @@ public struct Book: Codable, Hashable, Identifiable, Sendable {
         durVolumeIndex = 0
         chapterInVolumeIndex = 0
         durChapterPos = 0
+        durChapterPage = 0
+        durChapterPageCount = 0
         durChapterTime = 0
         wordCount = nil
         canUpdate = true
@@ -77,7 +89,8 @@ public struct Book: Codable, Hashable, Identifiable, Sendable {
         case bookUrl, tocUrl, origin, originName, name, author, kind, customTag, coverUrl, customCoverUrl
         case intro, customIntro, charset, type, group, latestChapterTitle, latestChapterTime, lastCheckTime
         case lastCheckCount, totalChapterNum, durChapterTitle, durChapterIndex, durVolumeIndex
-        case chapterInVolumeIndex, durChapterPos, durChapterTime, wordCount, canUpdate, order, originOrder
+        case chapterInVolumeIndex, durChapterPos, durChapterPage, durChapterPageCount, durChapterTime
+        case wordCount, canUpdate, order, originOrder
         case variable, readConfig, syncTime
     }
 
@@ -108,6 +121,8 @@ public struct Book: Codable, Hashable, Identifiable, Sendable {
         durVolumeIndex = try value.decodeIfPresent(Int.self, forKey: .durVolumeIndex) ?? 0
         chapterInVolumeIndex = try value.decodeIfPresent(Int.self, forKey: .chapterInVolumeIndex) ?? 0
         durChapterPos = try value.decodeIfPresent(Int.self, forKey: .durChapterPos) ?? 0
+        durChapterPage = try value.decodeIfPresent(Int.self, forKey: .durChapterPage) ?? 0
+        durChapterPageCount = try value.decodeIfPresent(Int.self, forKey: .durChapterPageCount) ?? 0
         durChapterTime = try value.decodeIfPresent(Int64.self, forKey: .durChapterTime) ?? 0
         wordCount = try value.decodeIfPresent(String.self, forKey: .wordCount)
         canUpdate = try value.decodeIfPresent(Bool.self, forKey: .canUpdate) ?? true

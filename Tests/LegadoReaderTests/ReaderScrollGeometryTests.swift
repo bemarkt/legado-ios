@@ -322,18 +322,261 @@ final class ReaderScrollGeometryTests: XCTestCase {
 
     private func configuration(fontSize: Double = 20) -> ReaderTextView {
         .init(text: "", title: "", previousTitle: nil, previousText: "", isPreviousReady: false,
-              continuationTitle: nil, continuationText: "", isContinuationReady: false, isVolume: false,
+              continuationTitle: nil, continuationText: "", isContinuationReady: false, chapterIndex: 0, isVolume: false,
               fontSize: fontSize, fontPath: "", letterSpacing: 0, lineSpacing: 8, paragraphSpacing: 12,
               paragraphIndent: "　　", paddingLeft: 20, paddingRight: 20, paddingTop: 16, paddingBottom: 16,
-              headerInset: 0, footerInset: 0, fontWeight: 0, titleMode: 0, titleSize: 4,
-              titleTopSpacing: 16, titleBottomSpacing: 24, underlineMode: 0, isSelectable: false,
+              headerInset: 0, footerInset: 0, headerBar: nil, footerBar: nil, fontWeight: 0, titleMode: 0, titleSize: 4,
+              titleTopSpacing: 16, titleBottomSpacing: 24, underlineMode: 0,
+              justifyLastPage: false, punctuationKinsoku: true, smartParagraphs: false,
+              chineseConversion: 0, underlinePattern: 0, paragraphSeparatorLines: 0,
+              titleHTMLTemplate: "", titleProjectJSON: "", titleCanvasHeight: 0, isSelectable: false,
               fullJustify: true, pageAnimation: 3, isEInkMode: false, clickActions: Array(repeating: 0, count: 9),
-              backgroundColor: .white, foregroundColor: .black, requestedPosition: 0, jumpPosition: nil,
+              backgroundColor: .white, backgroundImage: nil, foregroundColor: .black, requestedPosition: 0, jumpPosition: nil,
               renderRevision: 0, readerPosition: .constant(0), pageRanges: .constant([]),
               currentPage: .constant(1), totalPages: .constant(1), isAutoReading: false,
               isAutoReadPaused: false, isLoadingNextChapter: false, secondsPerScreen: 10,
               onReachedEnd: { _ in }, onReachedStart: { _ in }, onEnteredPrevious: { _ in },
               onEnteredContinuation: { _ in }, onDeferredRender: {}, onCancelNextLoading: {},
-              onPageChanged: {}, onTapAction: { _ in })
+              onPageChanged: {}, onTapAction: { _ in }, onCurlPublished: { _ in })
+    }
+}
+
+
+@MainActor
+private final class CurlRegressionWindow: UIWindow {
+    override var safeAreaInsets: UIEdgeInsets {
+        UIEdgeInsets(top: 62, left: 0, bottom: 34, right: 0)
+    }
+}
+
+@MainActor
+final class ReaderCurlProgressTests: XCTestCase {
+    @MainActor
+    private final class State {
+        var position = 0
+        var progress: [ReaderPageProgress] = []
+        var enteredPrevious: Int?
+        var pageChanges = 0
+    }
+
+    @MainActor
+    private struct Fixture {
+        let window: UIWindow
+        let host: UIViewController
+        let textView: UITextView
+        let coordinator: ReaderTextView.Coordinator
+        let state: State
+
+        func close() {
+            coordinator.invalidate()
+            window.isHidden = true
+        }
+    }
+
+    private var content: String {
+        (0..<80).map { "第\($0)段。" + String(repeating: "测试原文坐标与退出重新进入后的页码。", count: 8) }
+            .joined(separator: "\r\n\r\n")
+    }
+
+    private func fixture(height: CGFloat, position: Int, text: String? = nil, previous: Bool = false, chapterIndex: Int = 4) -> Fixture {
+        let state = State()
+        state.position = position
+        let body = text ?? content
+        let reader = ReaderTextView(
+            text: body, title: "当前章", previousTitle: previous ? "上一章" : nil,
+            previousText: previous ? content : "", isPreviousReady: previous,
+            continuationTitle: nil, continuationText: "", isContinuationReady: false,
+            chapterIndex: chapterIndex, isVolume: false, fontSize: 22, fontPath: "",
+            letterSpacing: 0, lineSpacing: 4, paragraphSpacing: 8, paragraphIndent: "　　",
+            paddingLeft: 18, paddingRight: 18, paddingTop: 6, paddingBottom: 31,
+            headerInset: 0, footerInset: 0, headerBar: nil, footerBar: nil,
+            fontWeight: 0, titleMode: 2, titleSize: 26, titleTopSpacing: 0, titleBottomSpacing: 0,
+            underlineMode: 0, justifyLastPage: false, punctuationKinsoku: true,
+            smartParagraphs: true, chineseConversion: 0, underlinePattern: 0, paragraphSeparatorLines: 0,
+            titleHTMLTemplate: "", titleProjectJSON: "", titleCanvasHeight: 0,
+            isSelectable: false, fullJustify: false, pageAnimation: 2, isEInkMode: false,
+            clickActions: [], backgroundColor: .white, backgroundImage: nil, foregroundColor: .black,
+            requestedPosition: position, requestedPage: 15, requestedPageCount: 17,
+            jumpPosition: nil, renderRevision: 0,
+            readerPosition: Binding(get: { state.position }, set: { state.position = $0 }),
+            pageRanges: .constant([]), currentPage: .constant(1), totalPages: .constant(1),
+            isAutoReading: false, isAutoReadPaused: false, isLoadingNextChapter: false, secondsPerScreen: 10,
+            onReachedEnd: { _ in }, onReachedStart: { _ in },
+            onEnteredPrevious: { state.enteredPrevious = $0 }, onEnteredContinuation: { _ in },
+            onDeferredRender: {}, onCancelNextLoading: {}, onPageChanged: { state.pageChanges += 1 },
+            onPageSettled: { state.progress.append($0); state.position = $0.position },
+            onTapAction: { _ in }, onCurlPublished: { _ in }
+        )
+        let coordinator = reader.makeCoordinator()
+        let window = CurlRegressionWindow(frame: CGRect(x: 0, y: 0, width: 440, height: 956))
+        let host = UIViewController()
+        window.rootViewController = host
+        window.isHidden = false
+        host.view.frame = window.bounds
+        let textView = UITextView(usingTextLayoutManager: false)
+        textView.frame = CGRect(x: 0, y: 62, width: 440, height: height)
+        textView.textContainerInset = UIEdgeInsets(top: 6, left: 18, bottom: 31, right: 18)
+        textView.text = body
+        host.view.addSubview(textView)
+        return Fixture(window: window, host: host, textView: textView, coordinator: coordinator, state: state)
+    }
+
+    private func drainMainQueue() async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            DispatchQueue.main.async { continuation.resume() }
+        }
+    }
+
+    func testEntryAndReentryUseTheSamePageDespiteTransientTextViewHeight() async throws {
+        let first = fixture(height: 811, position: 4200, previous: true)
+        defer { first.close() }
+        first.coordinator.syncNativeCurl(in: first.textView)
+        await drainMainQueue()
+        let saved = try XCTUnwrap(first.state.progress.last)
+        XCTAssertGreaterThan(saved.pageIndex, 0)
+        first.textView.frame.size.height = 860
+        first.coordinator.syncNativeCurl(in: first.textView)
+        await drainMainQueue()
+        XCTAssertEqual(first.state.progress.last, saved)
+        first.close()
+
+        let reopened = fixture(height: 860, position: saved.position, previous: true)
+        defer { reopened.close() }
+        reopened.coordinator.syncNativeCurl(in: reopened.textView)
+        await drainMainQueue()
+        XCTAssertEqual(reopened.state.progress.last, saved)
+    }
+
+    func testHiddenTextCannotWriteProgressBeforeMountOrAfterTeardown() async {
+        let reader = fixture(height: 811, position: 4200)
+        defer { reader.close() }
+        reader.textView.contentOffset.y = 400
+        reader.coordinator.scrollViewDidScroll(reader.textView)
+        await drainMainQueue()
+        XCTAssertEqual(reader.state.position, 4200)
+        XCTAssertEqual(reader.state.pageChanges, 0)
+        reader.coordinator.syncNativeCurl(in: reader.textView)
+        await drainMainQueue()
+        let saved = reader.state.position
+        reader.close()
+        reader.textView.contentOffset.y = 0
+        reader.coordinator.scrollViewDidScroll(reader.textView)
+        await drainMainQueue()
+        XCTAssertEqual(reader.state.position, saved)
+    }
+
+    func testCompletedTurnPersistsTheNewPageBeforeExitAndReentry() async throws {
+        let reader = fixture(height: 860, position: 4200)
+        defer { reader.close() }
+        reader.coordinator.syncNativeCurl(in: reader.textView)
+        await drainMainQueue()
+        let initial = try XCTUnwrap(reader.state.progress.last)
+        let controller = try XCTUnwrap(reader.host.children.compactMap { $0 as? ReaderNativeCurlController }.first)
+        XCTAssertTrue(controller.turn(forward: true, animated: false))
+        await drainMainQueue()
+        let saved = try XCTUnwrap(reader.state.progress.last)
+        XCTAssertEqual(saved.pageIndex, initial.pageIndex + 1)
+        XCTAssertGreaterThan(saved.position, initial.position)
+        reader.close()
+        let reopened = fixture(height: 811, position: saved.position)
+        defer { reopened.close() }
+        reopened.coordinator.syncNativeCurl(in: reopened.textView)
+        await drainMainQueue()
+        XCTAssertEqual(reopened.state.progress.last, saved)
+    }
+
+    func testSinglePageEntryIgnoresStaleStoredPageNumber() async throws {
+        let reader = fixture(height: 811, position: 0, text: "只有一页的正文。")
+        defer { reader.close() }
+        reader.coordinator.syncNativeCurl(in: reader.textView)
+        await drainMainQueue()
+        let saved = try XCTUnwrap(reader.state.progress.last)
+        XCTAssertEqual(saved, ReaderPageProgress(chapterIndex: 4, pageIndex: 0, pageCount: 1, position: 0))
+    }
+
+    func testCancelledTurnDoesNotCommitAndCrossChapterTurnSavesActualLastPage() async throws {
+        let reader = fixture(height: 860, position: 0, previous: true)
+        defer { reader.close() }
+        reader.coordinator.syncNativeCurl(in: reader.textView)
+        await drainMainQueue()
+        let controller = try XCTUnwrap(reader.host.children.compactMap { $0 as? ReaderNativeCurlController }.first)
+        let initial = reader.state.progress.last
+        controller.pageViewController(controller, willTransitionTo: controller.viewControllers ?? [])
+        reader.coordinator.syncNativeCurl(in: reader.textView)
+        controller.pageViewController(controller, didFinishAnimating: true, previousViewControllers: [], transitionCompleted: false)
+        await drainMainQueue()
+        XCTAssertEqual(reader.state.progress.last, initial)
+        XCTAssertNil(reader.state.enteredPrevious)
+
+        XCTAssertTrue(controller.turn(forward: false, animated: false))
+        await drainMainQueue()
+        let saved = try XCTUnwrap(reader.state.progress.last)
+        XCTAssertEqual(saved.chapterIndex, 3)
+        XCTAssertEqual(saved.pageIndex, saved.pageCount - 1)
+        XCTAssertGreaterThan(saved.position, 0)
+        XCTAssertEqual(reader.state.enteredPrevious, saved.position)
+        reader.close()
+        let reopened = fixture(height: 811, position: saved.position, chapterIndex: saved.chapterIndex)
+        defer { reopened.close() }
+        reopened.coordinator.syncNativeCurl(in: reopened.textView)
+        await drainMainQueue()
+        XCTAssertEqual(reopened.state.progress.last, saved)
+    }
+
+    func testViewportPaginationAndDrawingHaveIdenticalContentHeight() {
+        let viewport = ReaderCurlViewport(
+            windowBounds: CGRect(x: 0, y: 0, width: 440, height: 956),
+            safeAreaInsets: UIEdgeInsets(top: 62, left: 0, bottom: 34, right: 0), maximumWidth: 760
+        )
+        let padding = UIEdgeInsets(top: 6, left: 18, bottom: 31, right: 18)
+        let insets = viewport.contentInsets(padding: padding)
+        XCTAssertEqual(viewport.rect.height, 860)
+        XCTAssertEqual(insets.top, 68)
+        XCTAssertEqual(insets.bottom, 65)
+        XCTAssertEqual(viewport.rect.height - padding.top - padding.bottom, 956 - insets.top - insets.bottom)
+        let tablet = ReaderCurlViewport(
+            windowBounds: CGRect(x: 0, y: 0, width: 1024, height: 1366),
+            safeAreaInsets: .zero, maximumWidth: 760
+        )
+        XCTAssertEqual(tablet.rect.width, 760)
+        XCTAssertEqual(tablet.rect.minX, 132)
+    }
+
+    func testEveryPageStartPointsAtItsDisplayedFirstLineInTheOriginalText() {
+        let layout = ReaderPaginationLayout(
+            containerSize: CGSize(width: 440, height: 860), fontSize: 22,
+            lineSpacing: 4, letterSpacing: 0, firstLineIndent: 2, paragraphSpacing: 8,
+            weightLevel: 1, fontPostScriptName: "PingFangSC-Regular", fontBoldPostScriptName: "",
+            punctuationKinsoku: true, headerEnabled: false, footerEnabled: false,
+            headerOffset: 0, footerOffset: 0, paddingTop: 6, paddingBottom: 31,
+            paddingLeft: 18, paddingRight: 18, chapterTitleScale: 1, titleHidden: true
+        )
+        let text = "\r\n\r\n" + content
+        let built = ReaderCurlPageBuilder.build(ReaderCurlPageBuildInput(
+            blocks: ReaderCurlPageBuilder.blocks(from: text, smartParagraphs: true),
+            title: nil, layout: layout, alignment: .leading, underline: false, underlineColor: nil,
+            textColor: .black, backgroundColor: .white, backgroundImage: nil,
+            contentInsets: UIEdgeInsets(top: 68, left: 18, bottom: 65, right: 18),
+            contentWidth: CGFloat(layout.usableWidth), header: nil, footer: nil
+        ))
+        XCTAssertGreaterThan(built.sheets.count, 2)
+        XCTAssertEqual(built.startCharacters.count, built.sheets.count)
+        let source = text as NSString
+        for page in 1..<built.sheets.count {
+            guard let firstLine = built.sheets[page].lines.first else { XCTFail("Empty page"); continue }
+            let start = built.startCharacters[page]
+            XCTAssertEqual(source.substring(with: NSRange(location: start, length: firstLine.utf16.count)), firstLine)
+            XCTAssertEqual(ReaderPositionResolver.pageIndex(position: start, startCharacters: built.startCharacters), page)
+        }
+    }
+
+    func testBlocksPreserveOriginalUTF16OffsetsAcrossBlankLinesAndSmartSplits() {
+        let text = "\r\n  \r\n第一段😀。\r\n\r\n" + String(repeating: "第二段内容😀。", count: 60)
+        let source = text as NSString
+        let blocks = ReaderCurlPageBuilder.blocks(from: text, smartParagraphs: true)
+        XCTAssertGreaterThan(blocks.count, 2)
+        for block in blocks {
+            XCTAssertEqual(source.substring(with: NSRange(location: block.charStart, length: block.text.utf16.count)), block.text)
+        }
     }
 }

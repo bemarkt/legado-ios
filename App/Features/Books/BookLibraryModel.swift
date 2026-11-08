@@ -174,7 +174,16 @@ final class BookLibraryModel: ObservableObject {
         }
     }
 
-    func updateProgress(for book: Book, chapter: BookChapter, position: Int = 0, epubLocation: String? = nil) async {
+
+
+    func updateProgress(
+        for book: Book,
+        chapter: BookChapter,
+        position: Int = 0,
+        epubLocation: String? = nil,
+        page: Int? = nil,
+        pageCount: Int? = nil
+    ) async {
         guard let index = books.firstIndex(where: { $0.bookUrl == book.bookUrl }) else {
             var reading = book
             if epubLocation != nil, reading.readConfig == nil { reading.readConfig = BookReadConfig() }
@@ -182,6 +191,12 @@ final class BookLibraryModel: ObservableObject {
             reading.durChapterIndex = chapter.index
             reading.durChapterTitle = chapter.title
             reading.durChapterPos = max(position, 0)
+            // 页坐标存档（照 InkShelf `NovelBook.currentPage`）：只在真的知道当前页时写入。
+            // 打开章节那条只带字符偏移的调用不会传 page，于是已存的页号不会被冲成 0。
+            if let page, let pageCount, pageCount > 0 {
+                reading.durChapterPage = min(max(page, 0), pageCount - 1)
+                reading.durChapterPageCount = pageCount
+            }
             reading.durChapterTime = Int64(Date().timeIntervalSince1970 * 1_000)
             pendingProgress[book.bookUrl] = BookProgress(book: reading)
             persistPendingProgress()
@@ -193,6 +208,10 @@ final class BookLibraryModel: ObservableObject {
         updated[index].durChapterIndex = chapter.index
         updated[index].durChapterTitle = chapter.title
         updated[index].durChapterPos = max(position, 0)
+        if let page, let pageCount, pageCount > 0 {
+            updated[index].durChapterPage = min(max(page, 0), pageCount - 1)
+            updated[index].durChapterPageCount = pageCount
+        }
         updated[index].durChapterTime = Int64(Date().timeIntervalSince1970 * 1_000)
         updated[index].lastCheckCount = 0
         updated[index].totalChapterNum = max(updated[index].totalChapterNum, chapter.index + 1)
@@ -205,6 +224,8 @@ final class BookLibraryModel: ObservableObject {
         book.durChapterIndex = progress.durChapterIndex
         book.durChapterTitle = progress.durChapterTitle
         book.durChapterPos = progress.durChapterPos
+        book.durChapterPage = max(progress.durChapterPage ?? 0, 0)
+        book.durChapterPageCount = max(progress.durChapterPageCount ?? 0, 0)
         book.durChapterTime = progress.durChapterTime
     }
 

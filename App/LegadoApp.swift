@@ -13,6 +13,7 @@ struct LegadoApp: App {
     init() {
         AppDiagnostics.shared.start()
         SourceWebViewExecutorRegistry.shared.register(WKSourceWebViewExecutor())
+        ReaderFontStore.bootstrap()
         let demo = ProcessInfo.processInfo.arguments.contains("-uiDemo")
         _sourceLibrary = StateObject(wrappedValue: demo
             ? SourceLibraryModel.demo(sources: DemoContent.sources)

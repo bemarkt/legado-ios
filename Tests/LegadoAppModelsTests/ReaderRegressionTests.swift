@@ -451,3 +451,25 @@ private actor SuspendedReaderChapterLoader: ChapterContentLoading {
         pending = nil
     }
 }
+
+
+struct ReaderCurlPositionRegressionTests {
+    @Test func pageStartRoundTripsIncludingChapterStartAndLastPage() {
+        let starts = [0, 184, 379, 602, 825]
+        for (page, position) in starts.enumerated() {
+            #expect(ReaderPositionResolver.pageIndex(position: position, startCharacters: starts) == page)
+        }
+        #expect(ReaderPositionResolver.pageIndex(position: 0, startCharacters: starts) == 0)
+        #expect(ReaderPositionResolver.pageIndex(position: 183, startCharacters: starts) == 0)
+        #expect(ReaderPositionResolver.pageIndex(position: Int.max, startCharacters: starts) == 4)
+    }
+
+    @Test func repaginationUsesTheCharacterAnchorInsteadOfThePreviousPageIndex() {
+        let oldStarts = [0, 100, 200, 300, 400, 500]
+        let newStarts = [0, 160, 320, 480]
+        let position = oldStarts[4]
+        #expect(ReaderPositionResolver.pageIndex(position: position, startCharacters: newStarts) == 2)
+        #expect(ReaderPositionResolver.pageIndex(position: 0, startCharacters: [0]) == 0)
+        #expect(ReaderPositionResolver.pageIndex(position: 100, startCharacters: []) == 0)
+    }
+}

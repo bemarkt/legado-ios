@@ -5,6 +5,7 @@ struct OtherSettingsView: View {
     @AppStorage("auto_refresh") private var autoRefresh = false
     @AppStorage("onlyUpdateRead") private var onlyUpdateRead = false
     @AppStorage("defaultHomePage") private var defaultHomePage = "bookshelf"
+    @AppStorage("readerDebugOverlay") private var debugContentOverlay = false
     @State private var settings = ApplicationSettingsStore.shared.settings
     @State private var maintenance: Maintenance?
     @State private var isWorking = false
@@ -53,6 +54,7 @@ struct OtherSettingsView: View {
                 NavigationLink {
                     DiagnosticLogView()
                 } label: { Label("日志与诊断", systemImage: "doc.text.magnifyingglass") }
+                Toggle("正文几何 debug", isOn: $debugContentOverlay)
             } header: { Text("诊断") } footer: {
                 Text("日志仅保存在本机，最多保留 500 条。网络日志不记录请求正文与 Header，URL 查询参数和常见凭据会隐藏。")
             }

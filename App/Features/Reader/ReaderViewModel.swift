@@ -15,7 +15,21 @@ struct ReaderScrollChapter: Identifiable, Equatable {
     var error: String? = nil
 }
 
+/// 落地时一次性提交，避免页号与字符位置来自不同的布局回调。
+struct ReaderPageProgress: Equatable, Sendable {
+    let chapterIndex: Int
+    let pageIndex: Int
+    let pageCount: Int
+    let position: Int
+}
+
 enum ReaderPositionResolver {
+    static func pageIndex(position: Int, startCharacters: [Int]) -> Int {
+        // 0 是有效的章首位置；不能因它落在第 1 页就改信旧存档页号。
+        let position = max(position, 0)
+        return startCharacters.lastIndex(where: { $0 <= position }) ?? 0
+    }
+
     static func renderedLocation(position: Int, prefixLength: Int, renderedLength: Int) -> Int {
         let lastLocation = max(renderedLength, 1) - 1
         let prefix = min(max(prefixLength, 0), lastLocation)
@@ -33,6 +47,10 @@ final class ReaderViewModel: ObservableObject {
     @Published private(set) var chapterLoadGeneration = 0
     @Published private(set) var paragraphs: [ReaderParagraph] = []
     @Published private(set) var requestedPosition: Int
+    /// 保留存档页号供诊断；位置恢复始终按正文 UTF-16 坐标计算。
+    @Published private(set) var requestedPage: Int = 0
+    /// 存下 `requestedPage` 时那一章的页数：与当前分页页数不一致即视为版面变了，旧页号作废。
+    @Published private(set) var requestedPageCount: Int = 0
     @Published private(set) var loadedFromCache = false
     @Published private(set) var hasLoadedCurrentChapter = false
     @Published private(set) var previousTitle = ""
@@ -178,7 +196,17 @@ final class ReaderViewModel: ObservableObject {
         self.source = source
         localService = .init()
         contentCoordinator = .init(loader: service, cache: cache)
-        requestedPosition = resolvedIndex == book.durChapterIndex ? max(book.durChapterPos, 0) : 0
+        // 照 InkShelf `ReaderPageLocation(chapterIndex:pageIndex:)`：进度除了字符偏移，
+        // 还带一份「章内页号 + 该章页数指纹」。重进时按页号直接命中，不再靠偏移反查。
+        if resolvedIndex == book.durChapterIndex {
+            requestedPosition = max(book.durChapterPos, 0)
+            requestedPage = max(book.durChapterPage, 0)
+            requestedPageCount = max(book.durChapterPageCount, 0)
+        } else {
+            requestedPosition = 0
+            requestedPage = 0
+            requestedPageCount = 0
+        }
         title = chapters.indices.contains(resolvedIndex) ? chapters[resolvedIndex].title : book.name
     }
 
@@ -204,7 +232,17 @@ final class ReaderViewModel: ObservableObject {
         source = nil
         self.localService = localService
         contentCoordinator = .init(cache: cache)
-        requestedPosition = resolvedIndex == book.durChapterIndex ? max(book.durChapterPos, 0) : 0
+        // 照 InkShelf `ReaderPageLocation(chapterIndex:pageIndex:)`：进度除了字符偏移，
+        // 还带一份「章内页号 + 该章页数指纹」。重进时按页号直接命中，不再靠偏移反查。
+        if resolvedIndex == book.durChapterIndex {
+            requestedPosition = max(book.durChapterPos, 0)
+            requestedPage = max(book.durChapterPage, 0)
+            requestedPageCount = max(book.durChapterPageCount, 0)
+        } else {
+            requestedPosition = 0
+            requestedPage = 0
+            requestedPageCount = 0
+        }
         title = chapters.indices.contains(resolvedIndex) ? chapters[resolvedIndex].title : book.name
     }
 
@@ -486,7 +524,8 @@ final class ReaderViewModel: ObservableObject {
     func goPrevious(position: Int = 0) { if let value = navigationIndex(direction: -1) { select(index: value, position: position) } }
     func goNext(position: Int = 0) { if let value = navigationIndex(direction: 1) { select(index: value, position: position) } }
 
-    func promoteContinuation(position: Int) {
+
+    func promoteContinuation(position: Int, page: Int? = nil, pageCount: Int? = nil) {
         guard let value = navigationIndex(direction: 1), hasContinuationWindow else {
             return
         }
@@ -500,6 +539,11 @@ final class ReaderViewModel: ObservableObject {
         paragraphs = Self.makeParagraphs(continuationContent)
         diagnostics = []
         requestedPosition = max(position, 0)
+        // 照 InkShelf：晋升把页坐标一路带下去，绝不在这里清零。
+        // 「翻到上一章尾页再退出落回章首」就是清零造成的：日志 (11) 第 59 行存档是
+        // 「第 18 章第 1 页」，而读者实际停在第 18 章第 15 页。
+        requestedPage = max(page ?? 0, 0)
+        requestedPageCount = max(pageCount ?? 0, 0)
         loadedFromCache = promotedContentResolved
         hasLoadedCurrentChapter = promotedContentResolved
         previousLoadedIndex = oldIndex
@@ -514,7 +558,7 @@ final class ReaderViewModel: ObservableObject {
         chapterLoadGeneration &+= 1
     }
 
-    func promotePrevious(position: Int) {
+    func promotePrevious(position: Int, page: Int? = nil, pageCount: Int? = nil) {
         guard let value = navigationIndex(direction: -1), hasPreviousWindow else { return }
         let oldIndex = currentIndex
         let oldTitle = title
@@ -526,6 +570,9 @@ final class ReaderViewModel: ObservableObject {
         paragraphs = Self.makeParagraphs(previousContent)
         diagnostics = []
         requestedPosition = max(position, 0)
+        // 同上：晋升必须带着页坐标走，清零就等于把「读者停在哪一页」丢掉。
+        requestedPage = max(page ?? 0, 0)
+        requestedPageCount = max(pageCount ?? 0, 0)
         loadedFromCache = promotedContentResolved
         hasLoadedCurrentChapter = promotedContentResolved
         continuationLoadedIndex = oldIndex
@@ -549,6 +596,9 @@ final class ReaderViewModel: ObservableObject {
         paragraphs = []
         diagnostics = []
         requestedPosition = max(position, 0)
+        // 换了落点，存档页号随即失效：页号只对「重进时那一次入座」有意义。
+        requestedPage = 0
+        requestedPageCount = 0
         loadedFromCache = false
         hasLoadedCurrentChapter = false
         clearAdjacentChapters()
@@ -595,7 +645,10 @@ final class ReaderViewModel: ObservableObject {
     }
 
     private func schedulePreload(after index: Int, source: BookSource) {
-        let count = ApplicationSettingsStore.shared.settings.prefetchChapters
+        // 页序把「上一章 + 本章 + 下一章」拼在一起，晋升一次就要立刻重排一整章。
+        // 只预取 1 章时，连翻两下会在第二下撞上「正文还没到」的空白帧；窗口至少 2 章，
+        // 晋升那一刻新邻章的正文已经在缓存里。设置里的上限仍然生效。
+        let count = max(ApplicationSettingsStore.shared.settings.prefetchChapters, 2)
         let jobs = ChapterCachePlanner.plan(chapters: chapters, startIndex: index + 1, limit: count)
         guard index + 1 < chapters.count, !jobs.isEmpty else { return }
         Task { [book, contentCoordinator] in

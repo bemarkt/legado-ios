@@ -214,6 +214,12 @@ public struct BookProgress: Codable, Hashable, Sendable {
     public var author: String
     public var durChapterIndex: Int
     public var durChapterPos: Int
+    /// 章内页号 + 该页数指纹（照 InkShelf `ReaderPageLocation.pageIndex`）。
+    ///
+    /// 用 `Int?` 而不是 `Int`：这份快照是 JSON 存进 UserDefaults 的，老版本写下的数据
+    /// 没有这两个键，非可选字段会让整份快照解码失败、把待写进度丢掉。
+    public var durChapterPage: Int?
+    public var durChapterPageCount: Int?
     public var durChapterTime: Int64
     public var durChapterTitle: String?
 
@@ -223,6 +229,8 @@ public struct BookProgress: Codable, Hashable, Sendable {
         author = book.author
         durChapterIndex = book.durChapterIndex
         durChapterPos = book.durChapterPos
+        durChapterPage = book.durChapterPage
+        durChapterPageCount = book.durChapterPageCount
         durChapterTime = book.durChapterTime
         durChapterTitle = book.durChapterTitle
     }

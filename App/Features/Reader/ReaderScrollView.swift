@@ -565,9 +565,9 @@ struct ReaderTypography {
             .foregroundColor: c.foregroundColor, .paragraphStyle: paragraph
         ]
         if c.underlineMode != 0 {
-            var underline = NSUnderlineStyle.single
-            if c.underlineMode == 2 { underline.insert(.patternDash) }
-            body[.underlineStyle] = underline.rawValue
+            // 线型走设置里的四种（实线 / 点线 / 虚线 / 点划线），与 CoreText 那层同值，
+            // 免得滚动模式是虚线、翻页模式却是实线，同一本书两套观感。
+            body[.underlineStyle] = ReaderUnderlinePattern.pattern(for: c.underlinePattern).nsUnderlineStyle
             body[.underlineColor] = c.foregroundColor
         }
         bodyAttributes = body
@@ -583,6 +583,6 @@ struct ReaderTypography {
 
 extension ReaderTextView {
     var scrollTypographyKey: String {
-        "\(fontSize)|\(fontPath)|\(letterSpacing)|\(lineSpacing)|\(paragraphSpacing)|\(paragraphIndent)|\(paddingLeft)|\(paddingRight)|\(paddingTop)|\(paddingBottom)|\(fontWeight)|\(titleMode)|\(titleSize)|\(titleTopSpacing)|\(titleBottomSpacing)|\(underlineMode)|\(fullJustify)|\(foregroundColor.hash)"
+        "\(fontSize)|\(fontPath)|\(letterSpacing)|\(lineSpacing)|\(paragraphSpacing)|\(paragraphIndent)|\(paddingLeft)|\(paddingRight)|\(paddingTop)|\(paddingBottom)|\(fontWeight)|\(titleMode)|\(titleSize)|\(titleTopSpacing)|\(titleBottomSpacing)|\(underlineMode)|\(underlinePattern)|\(fullJustify)|\(foregroundColor.hash)"
     }
 }

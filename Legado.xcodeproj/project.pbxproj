@@ -26,6 +26,18 @@
 		A10000000000000000000021 /* ReaderAppearance.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000028 /* ReaderAppearance.swift */; };
 		A10000000000000000000022 /* ReaderSpeechController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000029 /* ReaderSpeechController.swift */; };
 		A10000000000000000000023 /* ReaderTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000002A /* ReaderTextView.swift */; };
+		CA1FF000000000000000FF01 /* ReaderNativeCurlPager.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA2FF000000000000000FF01 /* ReaderNativeCurlPager.swift */; };
+		CB1FF000000000000000FF01 /* ReaderCoreTextLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB2FF000000000000000FF01 /* ReaderCoreTextLayout.swift */; };
+		CC1FF000000000000000FF01 /* ReaderCoreTextPageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC2FF000000000000000FF01 /* ReaderCoreTextPageView.swift */; };
+		CF1FF000000000000000FF01 /* ReaderPaginator.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF2FF000000000000000FF01 /* ReaderPaginator.swift */; };
+		D11FF000000000000000FF01 /* PaginatedTextPageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D12FF000000000000000FF01 /* PaginatedTextPageView.swift */; };
+		D21FF000000000000000FF01 /* ReaderFontFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = D22FF000000000000000FF01 /* ReaderFontFactory.swift */; };
+		DA1FF000000000000000FF01 /* ReaderCurlPageBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA2FF000000000000000FF01 /* ReaderCurlPageBuilder.swift */; };
+		DB1FF000000000000000FF01 /* ReaderChapterTrace.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB2FF000000000000000FF01 /* ReaderChapterTrace.swift */; };
+		C1AFF000000000000000FF01 /* ReaderBarContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2AFF000000000000000FF01 /* ReaderBarContent.swift */; };
+		C1BFF000000000000000FF01 /* ReaderTextTransform.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2BFF000000000000000FF01 /* ReaderTextTransform.swift */; };
+		CD1FF000000000000000FF01 /* ReaderChapterTitleDesigner.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD2FF000000000000000FF01 /* ReaderChapterTitleDesigner.swift */; };
+		CE1FF000000000000000FF01 /* ChapterTitleDesigner in Resources */ = {isa = PBXBuildFile; fileRef = CE2FF000000000000000FF01 /* ChapterTitleDesigner */; };
 		A10000000000000000000024 /* ReaderSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000002B /* ReaderSupport.swift */; };
 		A10000000000000000000025 /* ReaderViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000002C /* ReaderViewModel.swift */; };
 		A10000000000000000000026 /* ReadingStatisticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000002D /* ReadingStatisticsView.swift */; };
@@ -80,6 +92,7 @@
 		C10000000000000000000017 /* BookSourceDebugger.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000017 /* BookSourceDebugger.swift */; };
 		C10000000000000000000018 /* LocalBookService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000018 /* LocalBookService.swift */; };
 		C10000000000000000000019 /* ContentSanitizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000019 /* ContentSanitizer.swift */; };
+		CE1FF000000000000000FF02 /* PageDeck.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE2FF000000000000000FF02 /* PageDeck.swift */; };
 		C1000000000000000000001A /* ReplaceRuleRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000001A /* ReplaceRuleRepository.swift */; };
 		C1000000000000000000001B /* ReadingActivityRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000001B /* ReadingActivityRepository.swift */; };
 		C1000000000000000000001C /* ChapterContentCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000001C /* ChapterContentCache.swift */; };
@@ -173,6 +186,18 @@
 		A20000000000000000000028 /* ReaderAppearance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderAppearance.swift; sourceTree = "<group>"; };
 		A20000000000000000000029 /* ReaderSpeechController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderSpeechController.swift; sourceTree = "<group>"; };
 		A2000000000000000000002A /* ReaderTextView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderTextView.swift; sourceTree = "<group>"; };
+		CA2FF000000000000000FF01 /* ReaderNativeCurlPager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderNativeCurlPager.swift; sourceTree = "<group>"; };
+		CB2FF000000000000000FF01 /* ReaderCoreTextLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderCoreTextLayout.swift; sourceTree = "<group>"; };
+		CC2FF000000000000000FF01 /* ReaderCoreTextPageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderCoreTextPageView.swift; sourceTree = "<group>"; };
+		CF2FF000000000000000FF01 /* ReaderPaginator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderPaginator.swift; sourceTree = "<group>"; };
+		D12FF000000000000000FF01 /* PaginatedTextPageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaginatedTextPageView.swift; sourceTree = "<group>"; };
+		D22FF000000000000000FF01 /* ReaderFontFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderFontFactory.swift; sourceTree = "<group>"; };
+		DA2FF000000000000000FF01 /* ReaderCurlPageBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderCurlPageBuilder.swift; sourceTree = "<group>"; };
+		DB2FF000000000000000FF01 /* ReaderChapterTrace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderChapterTrace.swift; sourceTree = "<group>"; };
+		C2AFF000000000000000FF01 /* ReaderBarContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderBarContent.swift; sourceTree = "<group>"; };
+		C2BFF000000000000000FF01 /* ReaderTextTransform.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderTextTransform.swift; sourceTree = "<group>"; };
+		CD2FF000000000000000FF01 /* ReaderChapterTitleDesigner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderChapterTitleDesigner.swift; sourceTree = "<group>"; };
+		CE2FF000000000000000FF01 /* ChapterTitleDesigner */ = {isa = PBXFileReference; lastKnownFileType = folder; name = ChapterTitleDesigner; path = App/Resources/ChapterTitleDesigner; sourceTree = SOURCE_ROOT; };
 		A2000000000000000000002B /* ReaderSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderSupport.swift; sourceTree = "<group>"; };
 		A2000000000000000000002C /* ReaderViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderViewModel.swift; sourceTree = "<group>"; };
 		A2000000000000000000002D /* ReadingStatisticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingStatisticsView.swift; sourceTree = "<group>"; };
@@ -227,6 +252,7 @@
 		C20000000000000000000017 /* BookSourceDebugger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookSourceDebugger.swift; sourceTree = "<group>"; };
 		C20000000000000000000018 /* LocalBookService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalBookService.swift; sourceTree = "<group>"; };
 		C20000000000000000000019 /* ContentSanitizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentSanitizer.swift; sourceTree = "<group>"; };
+		CE2FF000000000000000FF02 /* PageDeck.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/LegadoCore/Reader/PageDeck.swift; sourceTree = SOURCE_ROOT; };
 		C2000000000000000000001A /* ReplaceRuleRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReplaceRuleRepository.swift; sourceTree = "<group>"; };
 		C2000000000000000000001B /* ReadingActivityRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingActivityRepository.swift; sourceTree = "<group>"; };
 		C2000000000000000000001C /* ChapterContentCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChapterContentCache.swift; sourceTree = "<group>"; };
@@ -404,6 +430,17 @@
                 ED2000000000000000000001 /* EPUBReaderView.swift */,
 				A2000000000000000000002C /* ReaderViewModel.swift */,
 				A2000000000000000000002A /* ReaderTextView.swift */,
+				CA2FF000000000000000FF01 /* ReaderNativeCurlPager.swift */,
+				CB2FF000000000000000FF01 /* ReaderCoreTextLayout.swift */,
+				CC2FF000000000000000FF01 /* ReaderCoreTextPageView.swift */,
+				CF2FF000000000000000FF01 /* ReaderPaginator.swift */,
+				D12FF000000000000000FF01 /* PaginatedTextPageView.swift */,
+				D22FF000000000000000FF01 /* ReaderFontFactory.swift */,
+				DA2FF000000000000000FF01 /* ReaderCurlPageBuilder.swift */,
+				DB2FF000000000000000FF01 /* ReaderChapterTrace.swift */,
+				C2AFF000000000000000FF01 /* ReaderBarContent.swift */,
+				C2BFF000000000000000FF01 /* ReaderTextTransform.swift */,
+				CD2FF000000000000000FF01 /* ReaderChapterTitleDesigner.swift */,
 				B20000000000000000000029 /* ReaderScrollView.swift */,
 				A20000000000000000000029 /* ReaderSpeechController.swift */,
 				A20000000000000000000028 /* ReaderAppearance.swift */,
@@ -468,6 +505,7 @@
 				C3000000000000000000000B /* LocalBook */,
 				C3000000000000000000000C /* RSS */,
 				C3000000000000000000000D /* TTS */,
+				CE2FF000000000000000FF02 /* PageDeck.swift */,
 			);
 			path = Sources/LegadoCore;
 			sourceTree = "<group>";
@@ -665,6 +703,7 @@
 				E2000000000000000000000A /* Kanna-LICENSE.txt */,
 				EB2000000000000000000002 /* ZIPFoundation-LICENSE.txt */,
                 ED2000000000000000000002 /* Readium-LICENSE.txt */,
+				CE2FF000000000000000FF01 /* ChapterTitleDesigner */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -764,6 +803,7 @@
 				EB1000000000000000000002 /* ZIPFoundation-LICENSE.txt in Resources */,
                 ED1000000000000000000002 /* Readium-LICENSE.txt in Resources */,
 				A1000000000000000000001E /* httpTTS.json in Resources */,
+				CE1FF000000000000000FF01 /* ChapterTitleDesigner in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -804,6 +844,17 @@
 				A10000000000000000000021 /* ReaderAppearance.swift in Sources */,
 				A10000000000000000000022 /* ReaderSpeechController.swift in Sources */,
 				A10000000000000000000023 /* ReaderTextView.swift in Sources */,
+				CA1FF000000000000000FF01 /* ReaderNativeCurlPager.swift in Sources */,
+				CB1FF000000000000000FF01 /* ReaderCoreTextLayout.swift in Sources */,
+				CC1FF000000000000000FF01 /* ReaderCoreTextPageView.swift in Sources */,
+				CF1FF000000000000000FF01 /* ReaderPaginator.swift in Sources */,
+				D11FF000000000000000FF01 /* PaginatedTextPageView.swift in Sources */,
+				D21FF000000000000000FF01 /* ReaderFontFactory.swift in Sources */,
+				DA1FF000000000000000FF01 /* ReaderCurlPageBuilder.swift in Sources */,
+				DB1FF000000000000000FF01 /* ReaderChapterTrace.swift in Sources */,
+				C1AFF000000000000000FF01 /* ReaderBarContent.swift in Sources */,
+				C1BFF000000000000000FF01 /* ReaderTextTransform.swift in Sources */,
+				CD1FF000000000000000FF01 /* ReaderChapterTitleDesigner.swift in Sources */,
 				B10000000000000000000029 /* ReaderScrollView.swift in Sources */,
 				A10000000000000000000024 /* ReaderSupport.swift in Sources */,
 				A10000000000000000000025 /* ReaderViewModel.swift in Sources */,
@@ -877,6 +928,7 @@
 				EB1000000000000000000003 /* EPUBIllustrationsView.swift in Sources */,
 				EB1000000000000000000001 /* EPUBBook.swift in Sources */,
 				C10000000000000000000019 /* ContentSanitizer.swift in Sources */,
+				CE1FF000000000000000FF02 /* PageDeck.swift in Sources */,
 				C1000000000000000000001A /* ReplaceRuleRepository.swift in Sources */,
 				C1000000000000000000001B /* ReadingActivityRepository.swift in Sources */,
 				C1000000000000000000001C /* ChapterContentCache.swift in Sources */,

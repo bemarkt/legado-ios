@@ -138,10 +138,16 @@ struct SourceCredentialTests {
         #expect(try await session.headers(for: URL(string: origin)!)["Cookie"] == "session=secret")
     }
     @Test func browserCookieRoundTripPreservesHTTPOnlySecureAndExpiry() throws {
-        let value = try cookie(expires: Date(timeIntervalSince1970: 2_000_000_000))
+        // Keep this expiry within the platform cookie lifetime limit.
+        let expiry = Date(timeIntervalSince1970: floor(Date().timeIntervalSince1970) + 86_400)
+        let value = try cookie(expires: expiry)
         let browser = try #require(value.browserCookie())
         #expect(browser.isHTTPOnly && browser.isSecure)
-        #expect(try SourceCredentialCookie.capture(browser, origin: origin) == value)
+        let restored = try #require(SourceCredentialCookie.capture(browser, origin: origin))
+        #expect(restored.origin == value.origin)
+        #expect(restored.name == value.name && restored.value == value.value && restored.path == value.path)
+        #expect(restored.secure == value.secure && restored.httpOnly == value.httpOnly)
+        #expect(restored.expiresAt == expiry)
         #expect(try SourceCredentialCookie.capture(browser, origin: other) == nil)
     }
     @Test func parentRevocationRejectsDatabaseStateAndBookCommits() async throws {

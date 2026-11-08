@@ -260,7 +260,8 @@ public struct SourceHostHTTPClient: Sendable {
             for (name, value) in response.allHeaderFields {
                 let name = String(describing: name).lowercased()
                 if !["set-cookie", "set-cookie2"].contains(name) { headers[name] = String(describing: value) }
-                else if captureCookies { cookieHeaders[name] = String(describing: value) }
+                // Foundation’s cookie parser expects canonical field names on Darwin.
+                else if captureCookies { cookieHeaders[name == "set-cookie" ? "Set-Cookie" : "Set-Cookie2"] = String(describing: value) }
             }
             let cookies: [SourceCredentialCookie]
             if captureCookies, let origin = SourceHostHTTPPolicy.origin(url) {

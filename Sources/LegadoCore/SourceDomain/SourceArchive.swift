@@ -409,8 +409,10 @@ public actor SourceArchive {
                 throw SourceDomainError(.resourceLimit, "离线正文空间已满，请在缓存与下载中清理后重试。")
             }
         }
+        // prepare(strings:) binds text; scalar MAX has no column affinity for parameters.
+        // Cast before comparing so touching a download never demotes its retention flag.
         try Self.execute(handle, "UPDATE chapter_usage SET access_clock=access_clock+1 WHERE id=1")
-        let update = try prepare("UPDATE chapter_storage SET last_access=(SELECT access_clock FROM chapter_usage WHERE id=1),retained=MAX(retained,?) WHERE scope=? AND key=?",
+        let update = try prepare("UPDATE chapter_storage SET last_access=(SELECT access_clock FROM chapter_usage WHERE id=1),retained=MAX(retained,CAST(? AS INTEGER)) WHERE scope=? AND key=?",
                                  strings: [retainOffline ? "1" : "0", scopeKey(key.book.scope), chapterKey(key)])
         defer { sqlite3_finalize(update) }
         try done(update)

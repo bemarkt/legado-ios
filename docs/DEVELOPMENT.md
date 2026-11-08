@@ -180,3 +180,13 @@ P1 的原生验收由 `.github/workflows/source-runtime-ci.yml` 执行：选择 
 `Source Protocol Candidate` 和 `JavaScript Engine CI` 继续用于提交后的合同、Swift 核心与 App 编译回归。`Source Runtime WebKit` 改为仅 `workflow_dispatch`：桥接、生命周期或完整操作链收敛到可验收节点时手动运行。`Build Unsigned IPA` 原本就是手动构建，通常在该节点确认后统一生成。中间实现提交不重复启动慢的 WebKit/IPA 作业。
 
 P2 的领域核心、独立原生源数据库与适配器可以在 G1 设备测量开放期间按实验范围开发；这不关闭 G1，也不替换现有 Legado/TXT/EPUB 数据或默认阅读路径。最终验收仍需对应原生测试、WebKit 执行和设备记录。
+
+### 原生书源阅读预览
+
+入口为「设置 → 其他设置 → 原生书源阅读」。添加 `.source.js` 文件、粘贴源码、下载 HTTPS 原始文本或载入离线示例，静态检查后审核名称/版本/声明网站，再保存。搜索后加入独立书架，在书籍详情加载目录、下载章节和打开阅读。仅离线模式读取已下载内容，缺章明确报错；重新打开 App 可读取书架、目录和文本锚点。
+
+数据库位于 `Application Support/Legado/native-sources.sqlite3`，使用安装 UUID 和账号 scope，未迁移旧 Legado 数据。当前界面只开放 guest；账号隔离已有核心测试，不意味着登录服务已经实现。源码或配置改变会使在线缓存失配；显式离线可读以前下载的版本，界面会提示。设置改变后重新打开书籍以使用新配置。
+
+新 Swift 核心文件必须同时登记到 `Legado.xcodeproj/project.pbxproj`。SwiftPM 会发现文件，App target 不会；通过 SwiftPM 不等于通过 App 编译。见 [P2 实施与验收报告](reports/SOURCE_PROTOCOL_P2_REPORT.md)。
+
+书源设置可查看/修改/导出源码、获取原地址候选更新、审阅访问范围并恢复历史源码（最多 8 个）。替换需摘要一致且 publisher ID 相同；本地草稿替换有确认，源码回滚要求确认已有 state 兼容，不能确认时另存新安装。来源下载当前只允许同 origin 重定向。

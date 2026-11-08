@@ -90,14 +90,14 @@ settings 提供 text/boolean/enum/number，默认值必须有效。text 限长�
 
 ## 7. 正文规范化候选
 
-纯文本：去掉开头 BOM，CRLF/CR 转 LF，去 NUL，每行删除尾部空格/tab/全角空格，删除首尾空行，保留行首缩进、内部空行和 Unicode 序列；不擅自 NFC 化。`fixtures/text-normalization.json` 是共同预期。本轮只有纯文本规范化已实现和测试。
+纯文本：去掉开头 BOM，CRLF/CR 转 LF，去 NUL，每行删除尾部空格/tab/全角空格，删除首尾空行，保留行首缩进、内部空行和 Unicode 序列；不擅自 NFC 化。`fixtures/text-normalization.json` 是共同预期。纯文本和 HTML 的共享样本均已在 Swift 核心测试执行，详见 [P2 报告](../../docs/reports/SOURCE_PROTOCOL_P2_REPORT.md)。
 
-HTML：使用 DOM 解析片段，不执行其中代码。初版候选保留 p/div 的段落边界、br 换行、h1–h6 标题、strong/b、em/i；普通未知行内容器保留文本，script/style/iframe/object/embed/template 的子树丢弃，img/media 不加载。属性仅提取到有限内部 mark，不保留事件、CSS 或导航。pre 暂按保留换行文本降级；a 只留文本。标题层级和空白合并还需设备样本定稿，不能宣称已实现 sanitizer。
+HTML：使用 DOM 解析片段，不执行其中代码。初版候选保留 p/div 的段落边界、br 换行、h1–h6 标题、strong/b、em/i；普通未知行内容器保留文本，script/style/iframe/object/embed/template 的子树丢弃，img/media 不加载。属性仅提取到有限内部 mark，不保留事件、CSS 或导航。pre 暂按保留换行文本降级；a 只留文本。SwiftSoup 已将 HTML 转换为有限内部文档，阅读界面不渲染网站 HTML；标题、强调和空白保留规则仍是候选，真实设备显示需要另外验收。这不是输出可执行 HTML 的通用 sanitizer。
 
-内部文档由顺序 block 和 UTF-16 范围的强调 mark 组成；此结构不要求源作者手工构造。保存抽取结果、规范化版本与文本锚点。EPUB 的 publication/locator 不进入该简化合同。`html-normalization.expected.json` 当前是待实现预期，未计为通过的测试。
+内部文档由顺序 block 和 UTF-16 范围的强调 mark 组成；此结构不要求源作者手工构造。保存抽取结果、规范化版本与文本锚点。EPUB 的 publication/locator 不进入该简化合同。`html-normalization.expected.json` 已被 Swift 共享样本测试读取并比对，不表示所有 HTML 或设备渲染场景已验收。
 
 ## 8. 基础能力与尚未验收内容
 
 候选基础：Promise、URL/URLSearchParams、DOMParser 与基础 CSS 选择器、TextEncoder/TextDecoder、AbortSignal、Uint8Array、JSON、有限计时器。编码列表、计时器的结束清理和受控页面的 secure context 要在 iOS 26 验证；WebCrypto、XPath、真实浏览器导航、媒体、认证、explore 目前没有已开放扩展。
 
-静态允许 JS 语法并不授权动态代码、worker、脚本标签、全局网络或跨源 UI。运行时必须验证这些入口的策略。P1 已实现实验性的受控执行页和无账号原生 HTTP；不承诺完整沙箱隔离。原生 storage、HTML sanitizer、账号及 App 安装更新仍未实现。当前放行的编码和资源边界见 [P1 报告](../../docs/reports/SOURCE_PROTOCOL_P1_REPORT.md)，D01–D10 尚未最终关闭。
+静态允许 JS 语法并不授权动态代码、worker、脚本标签、全局网络或跨源 UI。运行时必须验证这些入口的策略。P1 已实现实验性的受控执行页和无账号原生 HTTP；不承诺完整沙箱隔离。实验版已接入安装实例隔离的 SQLite storage、有限配置、HTML 文档转换、文件/粘贴/HTTPS 安装、源码编辑导出与历史恢复和原生阅读预览。实验室单次执行没有安装作用域，storage 仍返回 UNSUPPORTED。账号登录与凭据、完整更新故障验收和旧库迁移尚未实现。当前放行的编码和资源边界见 [P1 报告](../../docs/reports/SOURCE_PROTOCOL_P1_REPORT.md)，D01–D10 尚未最终关闭。

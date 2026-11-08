@@ -1,5 +1,5 @@
 {
-  "status": "expected-only-not-executed",
+  "status": "swift-shared-fixture-tests-executed",
   "fixtures": [
     {
       "name": "paragraph-and-break",

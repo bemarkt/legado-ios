@@ -556,4 +556,36 @@ final class SourceRuntimeTests: XCTestCase {
     }
     private func descendants(_ view: UIView) -> [UIView] { view.subviews.flatMap { [$0] + descendants($0) } }
 
+    func testNativeSearchReplacementDoesNotPublishOldResults() async throws {
+        let model = NativeSourceLibrary(databaseURL: FileManager.default.temporaryDirectory.appendingPathComponent("source-search-\(UUID().uuidString)/native.sqlite3"))
+        let snapshot = try await source("""
+        if(input.query === 'old') {
+          await ctx.storage.set('old-started',true);
+          await new Promise(resolve=>setTimeout(resolve,2000));
+        }
+        return {items:[{ref:{id:input.query},title:input.query}],nextCursor:null};
+        """)
+        try await model.install(snapshot)
+        let installation = try XCTUnwrap(model.installations.first)
+        let scope = try SourceScope(installationID: installation.id)
+        let archive = try model.services().0
+        model.search("old")
+        var started = false
+        for _ in 0..<150 {
+            if try await archive.state(scope: scope, key: "old-started") != nil { started = true; break }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        XCTAssertTrue(started)
+        model.search("new")
+        for _ in 0..<150 {
+            if !model.searching { break }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        XCTAssertFalse(model.searching)
+        XCTAssertEqual(model.results.map(\.book.title), ["new"])
+        try await Task.sleep(for: .milliseconds(2100))
+        XCTAssertEqual(model.results.map(\.book.title), ["new"])
+        XCTAssertTrue(model.searchFailures.isEmpty)
+    }
+
 }

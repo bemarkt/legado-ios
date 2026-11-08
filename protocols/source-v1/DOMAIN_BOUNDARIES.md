@@ -1,6 +1,6 @@
 # P0 原生领域接口草图
 
-状态：设计草图，没有加入 Swift target。作者数据类型见 schema.json；这里定义宿主内部边界，不扩大书源 API。
+状态：职责草图，已有实验性 Swift 实现；映射和限制见文末。作者数据类型见 schema.json；这里定义宿主内部边界，不扩大书源 API。
 
 ## 身份和值类型
 
@@ -57,4 +57,6 @@ ReaderDocumentLoader
 
 依赖方向：App 装配 → Library/Reader → SourceContracts；适配器和运行时实现 SourceContracts 并调用 HostNetwork/StateStore。TXT/EPUB 使用独立本地加载路径，复用通用书架和阅读位置存储，不强制实现搜索操作。
 
-P2 再把这些职责落实为 Swift 类型与协议，避免在 G1 之前创建未验证的全套 Package。数据 shape 从 Schema 生成的 Swift 映射也在该阶段交付。
+当前实验实现位于 `Sources/LegadoCore/SourceDomain`：`SourceProvider`、`SourceWire`、`SourceArchive`、`SourceLibraryService`、`ChapterDocument` 与 `SourceWorkScheduler`。Swift wire 类型从 Schema 生成，保留 null 与缺失值的区别。下方接口草图是职责说明，Swift 实际签名以这些文件为准。
+
+`App/SourceRuntime/WebKitSourceProvider`（定义于 `SourceRuntime.swift`）把原生域接到 WebKit。原生阅读预览不依赖旧 `BookSource`，独立 SQLite 不改动旧数据库。当前 Xcode App target 直接编译核心文件，SwiftPM 使用 `LegadoCore`；尚未拆成上述同名独立 Package。G1 仍缺真机资源证据，实验实现不等于正式迁移获准；参见 [P2 报告](../../docs/reports/SOURCE_PROTOCOL_P2_REPORT.md)。

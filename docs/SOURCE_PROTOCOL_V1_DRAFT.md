@@ -1,6 +1,6 @@
 # 自有阅读书源协议 v1：候选设计
 
-日期：2026-11-08。状态：设计草案，尚未在 App 实现；此处的名称、API 与示例不是已发布接口。P0 已增加 [可执行候选合同与细则](../protocols/source-v1/README.md)、共享样本和 Node 静态导入原型；结果见 [首轮报告](reports/SOURCE_PROTOCOL_P0_REPORT.md)。
+日期：2026-11-08。状态：设计草案；P2 已有实验性 App 接入和原生领域实现，但此处名称、API 与示例仍不是已发布接口。P0 已增加 [可执行候选合同与细则](../protocols/source-v1/README.md)、共享样本和 Node 静态导入原型；结果见 [首轮报告](reports/SOURCE_PROTOCOL_P0_REPORT.md)。
 
 本草案将 Rex/Forward 的轻量数据插件、Swipt 的类型与生命周期管理、代理 App 的 Web 运行环境经验收敛为阅读器需要的小型协议。架构依据和来源见 [架构提案](ARCHITECTURE_SOURCE_PROTOCOL_PROPOSAL.md)，后续工作包、顺序和验收条件见 [实施流程](SOURCE_PROTOCOL_IMPLEMENTATION_PLAN.md)。
 

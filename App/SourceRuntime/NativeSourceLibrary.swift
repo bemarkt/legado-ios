@@ -3,9 +3,16 @@ import SwiftUI
 
 @MainActor
 final class NativeSourceLibrary: ObservableObject {
+    private struct SearchDelivery: Sendable {
+        let installation: SourceInstallation
+        let page: SourceWire.SearchPage?
+        let error: String?
+        var identity: SourceExecutionIdentity? = nil
+    }
     struct SearchHit: Identifiable {
         let installation: SourceInstallation
         let book: SourceWire.BookSummary
+        let identity: SourceExecutionIdentity
         var id: String { installation.id.uuidString + ":" + book.ref.id }
     }
     struct ShelfBook: Identifiable {
@@ -76,7 +83,7 @@ final class NativeSourceLibrary: ObservableObject {
         let snapshot = try await inspect(installation.source)
         let value = try snapshot.configuration(overrides: configuration)
         try await services().0.saveConfiguration(value, scope: .init(installationID: installation.id), expectedSourceDigest: installation.digest)
-        cancelSearch()
+        cancelSearch(clearResults: true)
     }
     func replace(_ installation: SourceInstallation, with snapshot: SourceSnapshot, resetConfiguration: Bool,
                  originURL: String?, locallyModified: Bool) async throws {
@@ -112,23 +119,35 @@ final class NativeSourceLibrary: ObservableObject {
         searching = true; results = []; searchFailures = []
         searchTask = Task {
             defer { if searchGeneration == generation { searching = false; searchTask = nil } }
-            var providers: [any SourceProvider] = []
             let sources = installations
-            for installation in sources {
-                do { providers.append(try await provider(installation)) }
-                catch { if searchGeneration == generation { searchFailures.append(installation.name + ": " + error.localizedDescription) } }
-                if Task.isCancelled || searchGeneration != generation { return }
-            }
-            for await update in SourceSearchService.search(query, providers: providers) {
-                guard !Task.isCancelled, searchGeneration == generation else { return }
-                guard let installation = sources.first(where: { $0.id == update.descriptor.identity.scope.installationID }) else { continue }
-                if let page = update.page {
-                    for book in page.items {
-                        let hit = SearchHit(installation: installation, book: book)
-                        if !results.contains(where: { $0.id == hit.id }) { results.append(hit) }
+            // Inspect and query each source inside the bounded pool so one cold/broken import does not delay all results.
+            await withTaskGroup(of: SearchDelivery.self) { group in
+                var next = 0
+                func enqueue(_ installation: SourceInstallation) {
+                    group.addTask {
+                        do {
+                            try Task.checkCancellation()
+                            let provider = try await self.provider(installation)
+                            guard provider.descriptor.supportsSearch else { return SearchDelivery(installation: installation, page: nil, error: nil) }
+                            let page = try await provider.search(.init(query: query))
+                            try Task.checkCancellation()
+                            return SearchDelivery(installation: installation, page: page, error: nil, identity: provider.descriptor.identity)
+                        } catch is CancellationError { return SearchDelivery(installation: installation, page: nil, error: nil) }
+                        catch { return SearchDelivery(installation: installation, page: nil, error: error.localizedDescription) }
                     }
                 }
-                if let error = update.error { searchFailures.append(installation.name + ": " + error) }
+                while next < min(2, sources.count) { enqueue(sources[next]); next += 1 }
+                for await update in group {
+                    guard !Task.isCancelled, searchGeneration == generation else { group.cancelAll(); return }
+                    if let page = update.page, let identity = update.identity {
+                        for book in page.items {
+                            let hit = SearchHit(installation: update.installation, book: book, identity: identity)
+                            if !results.contains(where: { $0.id == hit.id }) { results.append(hit) }
+                        }
+                    }
+                    if let error = update.error { searchFailures.append(update.installation.name + ": " + error) }
+                    if next < sources.count { enqueue(sources[next]); next += 1 }
+                }
             }
         }
     }
@@ -151,8 +170,8 @@ final class NativeSourceLibrary: ObservableObject {
     func pendingPositionWrites() async { await anchorWrite?.value }
     func add(_ hit: SearchHit) async throws {
         let provider = try await provider(hit.installation)
-        guard provider.descriptor.identity.sourceDigest == hit.installation.digest else {
-            throw SourceDomainError(.stale, "书源已经更新，请重新搜索后加入书架")
+        guard provider.descriptor.identity == hit.identity else {
+            throw SourceDomainError(.stale, "书源或选项已经更新，请重新搜索后加入书架")
         }
         _ = try await services().1.addBook(provider: provider, ref: hit.book.ref)
         await reload()

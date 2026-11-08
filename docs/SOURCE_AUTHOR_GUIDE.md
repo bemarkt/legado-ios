@@ -28,7 +28,13 @@ npm run build-source -- ../../docs/examples/source-project/index.ts ../../build/
 npm run validate -- ../../build/built-offline.source.js
 ```
 
-若输出已存在，构建默认拒绝覆盖。确认要替换该构建产物时在最后添加 `--replace`。入口和任何依赖文件都不能用作输出。构建使用锁定的 esbuild，保留可读格式、依赖内的许可证注释，不生成 source map，也不加载作者自定义 JavaScript 构建插件。它转换 TypeScript 语法，不代替 `tsc --noEmit` 类型检查。
+若输出已存在，构建默认拒绝覆盖。确认要替换时，在工具目录直接调用 Node（此命令也已在 Windows PowerShell 验证）：
+
+```sh
+node build-source.mjs ../../docs/examples/source-project/index.ts ../../build/built-offline.source.js --replace
+```
+
+入口和任何依赖文件都不能用作输出。构建使用锁定的 esbuild，保留可读格式、依赖内的许可证注释，不生成 source map，也不加载作者自定义 JavaScript 构建插件。它转换 TypeScript 语法，不代替 `tsc --noEmit` 类型检查。
 
 构建器将 metadata 保留为文件顶部可直接编辑的唯一静态字面量；内部代码引用同一个对象。所有实现和静态依赖内联在一个局部作用域中，以固定的 async 操作导出。动态导入、远程模块、外置资源、未知导出和同步操作会被拒绝；输出最后通过与 App 一致的静态合同检查。构建器不执行源初始化或用户函数；固定项目样本的执行测试不等于运行任意用户源码的调试器。
 

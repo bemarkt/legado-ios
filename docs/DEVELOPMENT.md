@@ -190,3 +190,5 @@ P2 的领域核心、独立原生源数据库与适配器可以在 G1 设备测�
 新 Swift 核心文件必须同时登记到 `Legado.xcodeproj/project.pbxproj`。SwiftPM 会发现文件，App target 不会；通过 SwiftPM 不等于通过 App 编译。见 [P2 实施与验收报告](reports/SOURCE_PROTOCOL_P2_REPORT.md)。
 
 书源设置可查看/修改/导出源码、获取原地址候选更新、审阅访问范围并恢复历史源码（最多 8 个）。替换需摘要一致且 publisher ID 相同；本地草稿替换有确认，源码回滚要求确认已有 state 兼容，不能确认时另存新安装。来源下载当前只允许同 origin 重定向。
+
+手动 WebKit 工作流的 `suite=runtime` 执行完整原生套件；`suite=reader-layout` 只验证阅读布局并导出截图，适用于完整运行时已经通过且只修改截图/布局之后。后者不能替代桥接、网络、状态或操作变化所需的完整测试。

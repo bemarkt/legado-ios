@@ -3,6 +3,14 @@ name: Source Runtime WebKit
 on:
   # Run at a validated implementation milestone, not on every intermediate push.
   workflow_dispatch:
+    inputs:
+      suite:
+        description: 'Validation scope (layout-only is for snapshot fixes after a full runtime pass)'
+        type: choice
+        default: runtime
+        options:
+          - runtime
+          - reader-layout
 
 permissions:
   contents: read
@@ -52,6 +60,8 @@ jobs:
           path: SourcePackages
           key: macos-26-spm-${{ hashFiles('Legado.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved', 'Package.resolved') }}
       - name: Run actual WebKit protocol tests on simulator
+        env:
+          SOURCE_TEST_SUITE: ${{ inputs.suite || 'runtime' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -66,12 +76,16 @@ jobs:
           curl --fail http://127.0.0.1:18764/health
           xcrun simctl boot "$SOURCE_SIMULATOR" || true
           xcrun simctl bootstatus "$SOURCE_SIMULATOR" -b
+          TEST_SELECTOR='LegadoReaderTests/SourceRuntimeTests'
+          if [ "$SOURCE_TEST_SUITE" = 'reader-layout' ]; then
+            TEST_SELECTOR="$TEST_SELECTOR/testNativeReaderRendersOfflineAtPhoneAndTabletWidths"
+          fi
           xcodebuild test \
             -project Legado.xcodeproj -scheme LegadoReaderTests -configuration Debug \
             -destination "platform=iOS Simulator,id=$SOURCE_SIMULATOR" \
             -derivedDataPath build/SourceRuntimeDerivedData -clonedSourcePackagesDirPath SourcePackages \
             -skipPackagePluginValidation -skipMacroValidation \
-            -only-testing:LegadoReaderTests/SourceRuntimeTests \
+            -only-testing:"$TEST_SELECTOR" \
             -parallel-testing-enabled NO -maximum-concurrent-test-simulator-destinations 1 \
             -resultBundlePath build/SourceRuntime.xcresult \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY='' \

@@ -5,7 +5,7 @@ import { buildSource } from './lib/build-source.mjs';
 
 const [entry, output, ...flags] = process.argv.slice(2);
 try {
-  if (!entry || !output || flags.some(flag => flag !== '--replace')) throw new Error('Usage: npm run build-source -- entry.ts output.source.js [--replace]');
+  if (!entry || !output || flags.some(flag => flag !== '--replace')) throw new Error('Usage: node build-source.mjs entry.ts output.source.js [--replace]');
   if (!output.endsWith('.source.js')) throw new Error('Output must end with .source.js');
   if (path.resolve(entry) === path.resolve(output)) throw new Error('Output must not replace the source entry');
   const { source, inspection, inputs } = await buildSource(entry);

@@ -13,16 +13,21 @@ name: JavaScript Engine CI
 # 只跑其中一条会漏掉另一条路径的一半问题。
 on:
   workflow_dispatch:
+  # 编译与测试验证：push 与 PR 都跑（公开仓库 macOS runner 不额外计费）。
   push:
     paths:
+      - 'App/**'
       - 'Sources/LegadoCore/**'
       - 'Tests/LegadoCoreTests/**'
       - 'Vendor/QuickJS/**'
       - 'Package.swift'
       - 'Legado.xcodeproj/**'
       - '.github/workflows/javascript-engine-ci.yml'
+  # draft PR 由 job 级 if 跳过，故保留 ready_for_review 以便转正时补跑。
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
+      - 'App/**'
       - 'Sources/LegadoCore/**'
       - 'Tests/LegadoCoreTests/**'
       - 'Vendor/QuickJS/**'
@@ -39,6 +44,7 @@ concurrency:
 jobs:
   swiftpm:
     name: SwiftPM build + LegadoCore tests
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: macos-26
     timeout-minutes: 60
     steps:
@@ -98,6 +104,7 @@ jobs:
 
   xcode-app:
     name: Xcode app build (iOS simulator)
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: macos-26
     timeout-minutes: 90
     steps:

@@ -28,3 +28,5 @@ __pycache__/
 *.aab
 .dsh/
 Temps/
+# 构建产物：CI 下载的 IPA / dSYM / 回滚补丁 / DerivedData，一律不入库
+/build/

@@ -91,7 +91,7 @@ final class SourceWebPage: NSObject, WKNavigationDelegate {
         guard !finished, !evaluated else { return }
         evaluated = true
         resetDeadline(milliseconds: executionTimeoutMs, code: executionTimeoutCode)
-        webView.callAsyncJavaScript(body, arguments: arguments, in: nil, contentWorld: .page) { [weak self] result in
+        webView.callAsyncJavaScript(body, arguments: arguments, in: nil, in: .page) { [weak self] result in
             guard let self, !self.finished else { return }
             switch result {
             case .success(let value):

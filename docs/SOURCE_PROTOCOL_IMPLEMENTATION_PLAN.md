@@ -489,17 +489,17 @@ xcodebuild -project Legado.xcodeproj -scheme Legado \
 
 ## 13. 首轮实际开工清单
 
-首轮状态更新于 2026-11-08，详细证据见 [P0 报告](reports/SOURCE_PROTOCOL_P0_REPORT.md)。已勾选项仅表示括号内范围完成：
+状态更新于 2026-11-08，历史基线见 [P0 报告](reports/SOURCE_PROTOCOL_P0_REPORT.md)，原型进度见 [P1 报告](reports/SOURCE_PROTOCOL_P1_REPORT.md)。已勾选项仅表示括号内范围完成：
 
 - [x] P0-01（静态盘点）：列出现有功能和用户数据的完整去留表。
-- [ ] P0-02：提交/锁文件、Node/合成 SQLite 已记录；待 Swift 回归和真实脱敏样本。
+- [ ] P0-02：提交/锁文件、Node/合成 SQLite 已记录；GitHub Swift 回归已通过；真实脱敏样本仍缺。
 - [x] P0-03（候选合同）：补齐 Schema、错误、HTTP、storage、分页和规范化语义。
 - [x] P0-04（接口草图）：定义不携带 Legado/WKWebView 类型的领域接口草图。
 - [x] P0-05（本机 fixture）：准备 HTML/JSON 两个确定性源，以及状态、变化和故障响应。
-- [ ] P0-06：已明确 Windows 11 本地开发、GitHub CI 编译；待 CI 验证记录及 iOS 26 真机、iPad、Android 对照证据。
+- [ ] P0-06：已明确 Windows 11 本地开发、GitHub CI 编译；CI 基线已通过；iOS 26 真机、iPad、Android 对照证据仍缺。
 - [x] P0-07：登记 D01–D10，建立基线和阶段报告。
 - [x] G0（进入原型，设备证据另验收）：审阅最小合同与样本，记录可启动原型的结论。
-- [ ] P1-01～P1-04：Node 静态导入原型已通过；待 App 侧解析、受控 ESM 和带取消的原生 HTTP。
-- [ ] P1-05～P1-07：运行完整操作、故障注入和设备测量，形成 G1 决策。
+- [ ] P1-01～P1-04：App 静态导入、受控 ESM、类型化桥和带取消的无账号 HTTP 原型已实现；自动化与设备验收范围见 P1 报告。
+- [ ] P1-05～P1-07：已加入 HTML/JSON 完整操作和故障恢复的模拟器测试；真机硬终止、资源/延迟测量和 G1 决策仍待完成。
 
 首个可演示里程碑应是：**在 iOS 26 真机导入一个可读的单文件源，完成搜索、详情、分页目录与正文；取消和故障后还能继续正常运行，并有请求、结果和资源报告。** 这个里程碑完成后，再扩展到正式阅读器、作者体验、兼容与迁移。

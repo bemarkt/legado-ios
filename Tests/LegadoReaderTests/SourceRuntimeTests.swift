@@ -29,7 +29,7 @@ final class SourceRuntimeTests: XCTestCase {
         return try await SourceInspector().inspect(Data(source.utf8))
     }
     private func run(_ snapshot: SourceSnapshot, timeoutMs: Int? = nil) async throws -> String {
-        try await SourceRuntime().run(.search, inputJSON: #"{"query":"fixture"}"#, snapshot: snapshot,
+        try await SourceRuntime().run(.search, inputJSON: #"{"query":"demo"}"#, snapshot: snapshot,
                                       allowLoopbackHTTP: true, timeoutMs: timeoutMs)
     }
     private func expectFailure(_ code: String, _ operation: () async throws -> String,
@@ -60,7 +60,7 @@ final class SourceRuntimeTests: XCTestCase {
         for name in ["html.source.js", "json.source.js"] {
             let snapshot = try await SourceInspector().inspect(fixture(name))
             let runtime = try SourceRuntime()
-            let search = try object(await runtime.run(.search, inputJSON: #"{"query":"fixture"}"#, snapshot: snapshot, allowLoopbackHTTP: true))
+            let search = try object(await runtime.run(.search, inputJSON: #"{"query":"demo"}"#, snapshot: snapshot, allowLoopbackHTTP: true))
             let books = try XCTUnwrap(search["items"] as? [[String: Any]])
             XCTAssertEqual(books.first?["title"] as? String, "Fixture Book")
             let ref = try XCTUnwrap(books.first?["ref"] as? [String: Any])

@@ -64,14 +64,16 @@ P1 运行时已按此区分 403 与 401。`retryAfterMs` 只接受 0–86,400,00
 - 方法为 GET/HEAD/POST/PUT/PATCH/DELETE；GET/HEAD 不允许 body。body 是字符串或字节；JSON、表单由作者明确编码并声明 Content-Type，不进行猜测转换。
 - 请求 headers 名称不区分大小写；拒绝 CR/LF、Host、Content-Length、Cookie、Connection、Transfer-Encoding 等由宿主管理的字段。Cookie/认证由账号范围的凭据服务注入；源不能导出或写入其他账号凭据。
 - `redirect` 为 follow/error，默认 follow；没有伪造的 opaque/manual Response。候选上限为 5 跳；301/302 的 POST 与 303 转 GET 并去除 body，307/308 保持方法/body。跨 origin 去掉敏感请求头，再重新检查授权。
-- 非 2xx 仍返回 Response，不默认抛出或重试。Response 有 status/ok/url/小写 headers/bodyUsed，以及 text/json/bytes；不向脚本暴露 Set-Cookie。
+- 非 2xx 经下述有限传输重试后仍返回 Response，不默认抛出。Response 有 status/ok/url/小写 headers/bodyUsed，以及 text/json/bytes；不向脚本暴露 Set-Cookie。
 - 响应体只消费一次，text/json/bytes 互斥；已消费再读返回 INVALID_INPUT。首次消费后即标记 bodyUsed，即使解析失败也不恢复。
 - bytes 是原始响应体字节；text 使用显式 charset（首版候选 UTF-8/UTF-16LE/UTF-16BE/GB18030，必须通过设备编码语料后放行），无声明默认 UTF-8；不静默把未知 charset 当 UTF-8。json 固定 UTF-8 JSON；错误字节/非法 JSON 返回 PARSE。字节数组桥接格式待 P1 验证。
 - body、解压后体积、跨桥消息与操作总请求数都有上限；收到响应头后与读流期间都检查，避免只信 Content-Length。
 - 操作结束/取消/deadline 到达后禁止新请求，取消已有请求，丢弃迟到响应。作者提供 signal 只会增加取消条件。
-- 初版 `ctx.http.fetch` 不自动重试。原生调度可对已声明可安全重试的任务有限重试，遵守剩余 deadline、Retry-After 和总预算。POST 等潜在副作用不默认重放。
+- 2026-11-09 原生候选策略：GET/HEAD 遇到 429/503 或连接中断可额外尝试 1 次；同次 fetch 的所有跳转共享这一个重试额度。POST/PUT/PATCH/DELETE 不自动重放，包括先被 303 改成 GET 的原写请求。
+- Retry-After 支持秒数和 HTTP 日期。等待超过宿主上限 2 秒或剩余 deadline 时返回原 HTTP 响应，不能缩短服务端要求后提前重试；没有该头时等待 250 ms。错误格式不重试，等待期间不占网络并发名额。
+- 每次实际原生尝试（含重定向和重试）消耗同一操作的 64 次预算。每跳按实际目标 origin 取得许可，释放前一跳后再排队。排队/传输/重试使用同一单调时钟截止时间，桥接沿用从 operation ready 开始的总截止时间。
 
-这些是待宿主实现与实测的合同。本轮 fixture 的 Node fetch 仅模拟成功网络往返，不代表上述全部语义已实现。
+这些规则由原生 `SourceHostHTTPClient` 执行，完成范围以 P2 报告中的测试证据为准。fixture 的 Node fetch 仅模拟网络往返，不代表全部原生语义已实现；真实设备资源与完整 WebKit 集成仍需分别验证。
 
 ## 6. storage、配置和生命周期
 

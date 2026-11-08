@@ -38,6 +38,8 @@ final class SourceHostBridge: NSObject, WKScriptMessageHandlerWithReply {
     weak var page: SourceWebPage?
     private let profile: SourceProfile
     private let policy: SourceHTTPPolicy
+    private let networkBudget: SourceHTTPRequestBudget
+    private var operationDeadline: ContinuousClock.Instant?
     private let stateBinding: SourceStateBinding?
     private let priority: SourceWorkScheduler.Priority
     private let stateGate = SourceCommitGate()
@@ -51,6 +53,7 @@ final class SourceHostBridge: NSObject, WKScriptMessageHandlerWithReply {
 
     init(snapshot: SourceSnapshot, profile: SourceProfile, allowLoopbackHTTP: Bool, timeoutMs: Int, state: SourceStateBinding? = nil, priority: SourceWorkScheduler.Priority = .reading) {
         self.profile = profile
+        networkBudget = SourceHTTPRequestBudget(maximumRequests: profile.limits.operationHTTPRequests)
         stateBinding = state
         self.priority = priority
         policy = SourceHTTPPolicy(origins: Set(snapshot.inspection.metadata.origins), allowLoopbackHTTP: allowLoopbackHTTP,
@@ -96,6 +99,7 @@ final class SourceHostBridge: NSObject, WKScriptMessageHandlerWithReply {
                     throw SourceFailure(code: "INVALID_INPUT", message: "Invalid or repeated module initialization")
                 }
                 ready = true
+                operationDeadline = ContinuousClock.now.advanced(by: .seconds(policy.timeout))
                 page?.resetDeadline(milliseconds: Int(policy.timeout * 1000))
                 replyHandler("{}", nil)
                 return
@@ -165,9 +169,9 @@ final class SourceHostBridge: NSObject, WKScriptMessageHandlerWithReply {
             count += 1
             seen.insert(envelope.id)
             replies[envelope.id] = replyHandler
-            tasks[envelope.id] = Task { [weak self, policy, priority] in
+            tasks[envelope.id] = Task { [weak self, policy, priority, networkBudget, deadline = operationDeadline] in
                 let response: String
-                do { response = String(decoding: try JSONEncoder().encode(await SourceHTTP.fetch(request, policy: policy, priority: priority)), as: UTF8.self) }
+                do { response = String(decoding: try JSONEncoder().encode(await SourceHTTP.fetch(request, policy: policy, priority: priority, deadline: deadline, budget: networkBudget)), as: UTF8.self) }
                 catch { response = Self.errorJSON(error as? SourceFailure ?? .init(code: "NETWORK", message: "HTTP request failed")) }
                 guard let self, self.active, let reply = self.replies.removeValue(forKey: envelope.id) else { return }
                 self.tasks.removeValue(forKey: envelope.id)

@@ -77,3 +77,11 @@ ReaderDocumentLoader
 `SourceSearchPager` 为一次查询绑定一个不可变 provider 和游标 envelope；游标不从 UI 传回作者，UI 只请求下一页。成功的有效页才消费游标，空页和跨页重复项仍可向后推进；重复游标、revision 不一致和预算超限结束会话。没有 revision 时保留首次稳定 ID 结果，不能宣称网站分页是原子快照。
 
 App 以有限并发协调各安装的 pager，网络错误可手动重试；取消或查询/配置变更丢弃会话。取消后不恢复可能已经消费但尚未显示的游标。书架添加检查搜索时的执行身份，避免把旧查询的 ref 交给更新后的书源。
+
+## 原生 HTTP 策略（2026-11-09）
+
+`SourceHostHTTPClient` 位于原生核心；App 的 `SourceHTTP` 只共享客户端实例并将错误转换为运行时封套，源码导入和书源站点请求复用它。JS 不参与许可计数、重试或截止时间管理。
+
+每跳响应在释放网络许可前关闭，目标经过 origins 校验后重新排队；不持有 A 的许可等待 B。`SourceWorkScheduler` 内部采用 `ContinuousClock`，保留 Date 入参的单次转换兼容入口。客户端把队列、每跳传输及重试等待纳入同一截止时间，慢速持续响应也不能续期；到期主动取消 URLSession。
+
+操作级 `SourceHTTPRequestBudget` 覆盖 fetch、重定向和重试；每次取得许可后消耗一次，JS 的桥接调用数限制仍保留。GET/HEAD 有限重试、Retry-After、跨 origin 头部处理和字节限制见 [HTTP 候选语义](README.md#5-http-候选语义)。登录、账号凭据和封面请求接入仍是后续工作，不从客户端抽取完成推断这些入口已统一。

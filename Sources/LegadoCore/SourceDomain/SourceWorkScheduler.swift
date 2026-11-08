@@ -8,7 +8,7 @@ public actor SourceWorkScheduler {
         let origin: String
         let priority: Priority
         let continuation: CheckedContinuation<UUID, Error>
-        let deadline: Date
+        let deadline: ContinuousClock.Instant
         let timer: Task<Void, Never>
     }
     private let globalLimit: Int
@@ -20,22 +20,28 @@ public actor SourceWorkScheduler {
     }
     public func withPermit<T: Sendable>(origin: String, priority: Priority = .reading, deadline: Date,
                                         work: @Sendable () async throws -> T) async throws -> T {
+        let interval = deadline.timeIntervalSinceNow
+        guard interval.isFinite, interval > 0 else { throw SourceDomainError(.unavailable, "Request deadline expired") }
+        let monotonic = ContinuousClock.now.advanced(by: .seconds(interval))
+        return try await withPermit(origin: origin, priority: priority, deadline: monotonic, work: work)
+    }
+    public func withPermit<T: Sendable>(origin: String, priority: Priority = .reading, deadline: ContinuousClock.Instant,
+                                        work: @Sendable () async throws -> T) async throws -> T {
         let id = try await acquire(origin: origin, priority: priority, deadline: deadline)
         defer { release(id) }
         try Task.checkCancellation()
-        guard deadline > Date() else { throw SourceDomainError(.unavailable, "Request deadline expired in queue") }
+        guard deadline > ContinuousClock.now else { throw SourceDomainError(.unavailable, "Request deadline expired in queue") }
         return try await work()
     }
     public var counts: (active: Int, waiting: Int) { (active.count, waiting.count) }
-    private func acquire(origin: String, priority: Priority, deadline: Date) async throws -> UUID {
+    private func acquire(origin: String, priority: Priority, deadline: ContinuousClock.Instant) async throws -> UUID {
         try Task.checkCancellation()
         let id = UUID()
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
-                let delay = deadline.timeIntervalSinceNow
-                guard delay > 0 else { continuation.resume(throwing: SourceDomainError(.unavailable, "Request deadline expired")); return }
+                guard deadline > ContinuousClock.now else { continuation.resume(throwing: SourceDomainError(.unavailable, "Request deadline expired")); return }
                 let timer = Task {
-                    do { try await Task.sleep(for: .seconds(min(delay, 86_400))) } catch { return }
+                    do { try await ContinuousClock().sleep(until: deadline) } catch { return }
                     self.expire(id)
                 }
                 waiting.append(Pending(id: id, origin: origin, priority: priority, continuation: continuation, deadline: deadline, timer: timer))
@@ -66,7 +72,7 @@ public actor SourceWorkScheduler {
             guard let index = candidate else { return }
             let request = waiting.remove(at: index)
             request.timer.cancel()
-            if request.deadline <= Date() { request.continuation.resume(throwing: SourceDomainError(.unavailable, "Request deadline expired in queue")); continue }
+            if request.deadline <= ContinuousClock.now { request.continuation.resume(throwing: SourceDomainError(.unavailable, "Request deadline expired in queue")); continue }
             active[request.id] = request.origin
             request.continuation.resume(returning: request.id)
         }

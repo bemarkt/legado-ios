@@ -40,3 +40,9 @@
 测试中的规则样本仅用于兼容验证，不打包为 App 默认书源。具体说明见 [测试样本说明](Tests/LegadoCoreTests/Fixtures/README.md)。演示模式使用虚构书籍元数据和项目内演示文本；发布截图不使用个人书架、登录信息或付费章节。
 
 第三方材料继续遵循其各自许可。GPL 覆盖软件的使用和分发，不提供第三方网站、书籍、封面或服务的内容授权。
+
+## 自有书源协议开发工具
+
+`tools/source-protocol` 的 Node 原型使用 Acorn 8.19.0（MIT）解析 ECMAScript AST，使用 Ajv 8.20.0（MIT）校验 JSON Schema。精确版本、下载来源和 integrity 记录在该目录的 `package-lock.json`，各依赖的版权/许可随 npm 包保留。传递依赖 fast-deep-equal、json-schema-traverse、require-from-string 使用 MIT 许可；fast-uri 使用 BSD-3-Clause 许可，完整声明随各 npm 包保留。
+
+这些依赖当前只用于开发工具，没有加入 App 或复制到 App 资源；将来嵌入 App 时必须同步收录实际分发版本的完整版权与许可。协议 fixture 与合成旧库 seed 由本项目构造，不含真实站点正文或个人数据。

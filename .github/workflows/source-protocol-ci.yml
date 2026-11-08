@@ -1,0 +1,44 @@
+name: Source Protocol Candidate
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'protocols/source-v1/**'
+      - 'tools/source-protocol/**'
+      - 'scripts/source-protocol-baseline.py'
+      - 'Sources/LegadoCore/Persistence/LegadoDatabase.swift'
+      - '.github/workflows/source-protocol-ci.yml'
+  pull_request:
+    paths:
+      - 'protocols/source-v1/**'
+      - 'tools/source-protocol/**'
+      - 'scripts/source-protocol-baseline.py'
+      - 'Sources/LegadoCore/Persistence/LegadoDatabase.swift'
+      - '.github/workflows/source-protocol-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: tools/source-protocol/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install locked development dependencies
+        working-directory: tools/source-protocol
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Validate candidate types and fixtures
+        working-directory: tools/source-protocol
+        run: npm run check
+      - name: Verify synthetic legacy SQL baseline
+        run: python scripts/source-protocol-baseline.py

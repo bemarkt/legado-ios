@@ -1,0 +1,647 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:legado-ios:source-contract:candidate-2026-11-08",
+  "$comment": "P0 candidate; not a published or App-implemented protocol. Resource limits and semantic checks are in profile.json and README.md.",
+  "$defs": {
+    "Json": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Json"
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/Json"
+          }
+        }
+      ]
+    },
+    "SourceRef": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "url": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8192,
+          "pattern": "^https?://"
+        },
+        "state": {
+          "$ref": "#/$defs/Json"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "additionalProperties": false
+    },
+    "Cover": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8192,
+          "pattern": "^https?://"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "additionalProperties": false
+    },
+    "BookSummary": {
+      "type": "object",
+      "properties": {
+        "ref": {
+          "$ref": "#/$defs/SourceRef"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        },
+        "author": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "cover": {
+          "$ref": "#/$defs/Cover"
+        }
+      },
+      "required": [
+        "ref",
+        "title"
+      ],
+      "additionalProperties": false
+    },
+    "BookDetails": {
+      "type": "object",
+      "properties": {
+        "ref": {
+          "$ref": "#/$defs/SourceRef"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        },
+        "author": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "cover": {
+          "$ref": "#/$defs/Cover"
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 65536
+        },
+        "status": {
+          "enum": [
+            "ongoing",
+            "completed",
+            "unknown"
+          ]
+        }
+      },
+      "required": [
+        "ref",
+        "title"
+      ],
+      "additionalProperties": false
+    },
+    "Volume": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        }
+      },
+      "required": [
+        "id",
+        "title"
+      ],
+      "additionalProperties": false
+    },
+    "Chapter": {
+      "type": "object",
+      "properties": {
+        "ref": {
+          "$ref": "#/$defs/SourceRef"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        },
+        "volume": {
+          "$ref": "#/$defs/Volume"
+        }
+      },
+      "required": [
+        "ref",
+        "title"
+      ],
+      "additionalProperties": false
+    },
+    "SearchPage": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 1000,
+          "items": {
+            "$ref": "#/$defs/BookSummary"
+          }
+        },
+        "nextCursor": {
+          "$ref": "#/$defs/Json"
+        },
+        "revision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        }
+      },
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "additionalProperties": false
+    },
+    "ChapterPage": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 1000,
+          "items": {
+            "$ref": "#/$defs/Chapter"
+          }
+        },
+        "nextCursor": {
+          "$ref": "#/$defs/Json"
+        },
+        "revision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        }
+      },
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "additionalProperties": false
+    },
+    "TextBody": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "text"
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 4194304
+        }
+      },
+      "required": [
+        "kind",
+        "text"
+      ],
+      "additionalProperties": false
+    },
+    "HTMLBody": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "html"
+        },
+        "html": {
+          "type": "string",
+          "maxLength": 4194304
+        },
+        "baseURL": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8192,
+          "pattern": "^https?://"
+        }
+      },
+      "required": [
+        "kind",
+        "html",
+        "baseURL"
+      ],
+      "additionalProperties": false
+    },
+    "ChapterContent": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        },
+        "revision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "body": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/TextBody"
+            },
+            {
+              "$ref": "#/$defs/HTMLBody"
+            }
+          ]
+        }
+      },
+      "required": [
+        "body"
+      ],
+      "additionalProperties": false
+    },
+    "SearchInput": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "cursor": {
+          "$ref": "#/$defs/Json"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "additionalProperties": false
+    },
+    "BookInput": {
+      "type": "object",
+      "properties": {
+        "ref": {
+          "$ref": "#/$defs/SourceRef"
+        }
+      },
+      "required": [
+        "ref"
+      ],
+      "additionalProperties": false
+    },
+    "ChaptersInput": {
+      "type": "object",
+      "properties": {
+        "book": {
+          "$ref": "#/$defs/SourceRef"
+        },
+        "cursor": {
+          "$ref": "#/$defs/Json"
+        }
+      },
+      "required": [
+        "book"
+      ],
+      "additionalProperties": false
+    },
+    "ContentInput": {
+      "type": "object",
+      "properties": {
+        "book": {
+          "$ref": "#/$defs/SourceRef"
+        },
+        "chapter": {
+          "$ref": "#/$defs/SourceRef"
+        }
+      },
+      "required": [
+        "book",
+        "chapter"
+      ],
+      "additionalProperties": false
+    },
+    "TextSetting": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "text"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "default": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "maxLength": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096
+        }
+      },
+      "required": [
+        "type",
+        "label",
+        "default",
+        "maxLength"
+      ],
+      "additionalProperties": false
+    },
+    "BooleanSetting": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "boolean"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "default": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "type",
+        "label",
+        "default"
+      ],
+      "additionalProperties": false
+    },
+    "EnumChoice": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "required": [
+        "value",
+        "label"
+      ],
+      "additionalProperties": false
+    },
+    "EnumSetting": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "enum"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "default": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "options": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/EnumChoice"
+          }
+        }
+      },
+      "required": [
+        "type",
+        "label",
+        "default",
+        "options"
+      ],
+      "additionalProperties": false
+    },
+    "NumberSetting": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "number"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "default": {
+          "type": "number"
+        },
+        "minimum": {
+          "type": "number"
+        },
+        "maximum": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "type",
+        "label",
+        "default",
+        "minimum",
+        "maximum"
+      ],
+      "additionalProperties": false
+    },
+    "Setting": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/TextSetting"
+        },
+        {
+          "$ref": "#/$defs/BooleanSetting"
+        },
+        {
+          "$ref": "#/$defs/EnumSetting"
+        },
+        {
+          "$ref": "#/$defs/NumberSetting"
+        }
+      ]
+    },
+    "Metadata": {
+      "type": "object",
+      "properties": {
+        "apiVersion": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+        },
+        "origins": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 8192,
+            "pattern": "^https?://"
+          }
+        },
+        "requires": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[a-z][a-z0-9.-]*@[1-9][0-9]*$"
+          }
+        },
+        "author": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "homepage": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8192,
+          "pattern": "^https?://"
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "settings": {
+          "type": "object",
+          "maxProperties": 32,
+          "propertyNames": {
+            "pattern": "^[A-Za-z][A-Za-z0-9_]{0,63}$"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/Setting"
+          }
+        }
+      },
+      "required": [
+        "apiVersion",
+        "id",
+        "name",
+        "version",
+        "origins"
+      ],
+      "additionalProperties": false
+    },
+    "ErrorCode": {
+      "enum": [
+        "INVALID_INPUT",
+        "INVALID_RESULT",
+        "NETWORK",
+        "HTTP",
+        "RATE_LIMITED",
+        "AUTH_REQUIRED",
+        "PARSE",
+        "UNSUPPORTED",
+        "TIMEOUT",
+        "CANCELLED",
+        "RESOURCE_LIMIT",
+        "PERMISSION_DENIED",
+        "STORAGE_CONFLICT"
+      ]
+    },
+    "SourceError": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/ErrorCode"
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        },
+        "details": {
+          "$ref": "#/$defs/Json"
+        },
+        "retryAfterMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 86400000
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "additionalProperties": false
+    },
+    "StorageEntry": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "$ref": "#/$defs/Json"
+        },
+        "revision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "required": [
+        "value",
+        "revision"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

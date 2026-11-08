@@ -1,0 +1,130 @@
+[
+  {
+    "name": "simple",
+    "source": "export const metadata = { apiVersion: 1, id: \"org.example.test\", name: \"Test\", version: \"1.0.0\", origins: [\"https://example.org\"] };\nexport async function book() {}\nexport async function chapters() {}\nexport async function content() {}",
+    "valid": true
+  },
+  {
+    "name": "comments-and-trailing-comma",
+    "source": "export const metadata = { apiVersion: 1, id: \"org.example.test\", /*comment*/ name: \"Test\", version: \"1.0.0\", origins: [\"https://example.org\",], };\nexport async function book() {}\nexport async function chapters() {}\nexport async function content() {}",
+    "valid": true
+  },
+  {
+    "name": "never-execute-top-level",
+    "source": "throw new Error(\"DO NOT EXECUTE\");\nwhile (true) {}\nexport const metadata = { apiVersion: 1, id: \"org.example.test\", name: \"Test\", version: \"1.0.0\", origins: [\"https://example.org\"] };\nexport async function book() {}\nexport async function chapters() {}\nexport async function content() {}",
+    "valid": true
+  },
+  {
+    "name": "local-operation-alias",
+    "source": "export const metadata = { apiVersion: 1, id: \"org.example.test\", name: \"Test\", version: \"1.0.0\", origins: [\"https://example.org\"] };\nasync function fetchBook() {}\nexport { fetchBook as book };\nexport async function chapters() {}\nexport async function content() {}",
+    "valid": true
+  },
+  {
+    "name": "metadata-call",
+    "source": "export const metadata = { apiVersion: 1, id: \"org.example.test\", name: dangerous(), version: \"1.0.0\", origins: [\"https://example.org\"] };\nexport async function book() {}\nexport async function chapters() {}\nexport async function content() {}",
+    "code": "METADATA_NOT_STATIC"
+  },
+  {
+    "name": "metadata-getter",
+    "source": "export const metadata = { apiVersion: 1, id: \"org.example.test\", get name() { throw new Error(\"never\"); }, version: \"1.0.0\", origins: [\"https://example.org\"] };\nexport async function book() {}\nexport async function chapters() {}\nexport async function content() {}",
+    "code": "METADATA_NOT_STATIC"
+  },
+  {
+    "name": "metadata-spread",
+    "source": "export const metadata = { apiVersion: 1, id: \"org.example.test\", ...extra, name: \"Test\", version: \"1.0.0\", origins: [\"https://example.org\"] };\nexport async function book() {}\nexport async function chapters() {}\nexport async function content() {}",
+    "code": "METADATA_NOT_STATIC"
+  },
+  {
+    "name": "duplicate-key",
+    "source": "export const metadata = { apiVersion: 1, id: \"org.example.test\", name: \"First\", name: \"Test\", version: \"1.0.0\", origins: [\"https://example.org\"] };\nexport async function book() {}\nexport async function chapters() {}\nexport async function content() {}",
+    "code": "DUPLICATE_KEY"
+  },
+  {
+    "name": "computed-key",
+    "source": "export const metadata = { apiVersion: 1, id: \"org.example.test\", [\"name\"]: \"Test\", version: \"1.0.0\", origins: [\"https://example.org\"] };\nexport async function book() {}\nexport async function chapters() {}\nexport async function content() {}",
+    "code": "METADATA_NOT_STATIC"
+  },
+  {
+    "name": "prototype-key",
+    "source": "export const metadata = { apiVersion: 1, id: \"org.example.test\", __proto__: null, name: \"Test\", version: \"1.0.0\", origins: [\"https://example.org\"] };\nexport async function book() {}\nexport async function chapters() {}\nexport async function content() {}",
+    "code": "METADATA_NOT_STATIC"
+  },
+  {
+    "name": "metadata-alias",
+    "source": "const metadata = { apiVersion: 1, id: \"org.example.test\", name: \"Test\", version: \"1.0.0\", origins: [\"https://example.org\"] };\nexport {metadata};\nexport async function book() {}\nexport async function chapters() {}\nexport async function content() {}",
+    "code": "MISSING_METADATA"
+  },
+  {
+    "name": "metadata-let",
+    "source": "export let metadata = { apiVersion: 1, id: \"org.example.test\", name: \"Test\", version: \"1.0.0\", origins: [\"https://example.org\"] };\nexport async function book() {}\nexport async function chapters() {}\nexport async function content() {}",
+    "code": "METADATA_NOT_STATIC"
+  },
+  {
+    "name": "metadata-expression-template",
+    "source": "export const metadata = { apiVersion: 1, id: \"org.example.test\", name: `Test ${1}`, version: \"1.0.0\", origins: [\"https://example.org\"] };\nexport async function book() {}\nexport async function chapters() {}\nexport async function content() {}",
+    "code": "METADATA_NOT_STATIC"
+  },
+  {
+    "name": "metadata-sparse-array",
+    "source": "export const metadata = { apiVersion: 1, id: \"org.example.test\", name: \"Test\", version: \"1.0.0\", origins: [\"https://example.org\",,] };\nexport async function book() {}\nexport async function chapters() {}\nexport async function content() {}",
+    "code": "METADATA_NOT_STATIC"
+  },
+  {
+    "name": "import-declaration",
+    "source": "import x from \"https://example.org/code.js\";\nexport const metadata = { apiVersion: 1, id: \"org.example.test\", name: \"Test\", version: \"1.0.0\", origins: [\"https://example.org\"] };\nexport async function book() {}\nexport async function chapters() {}\nexport async function content() {}",
+    "code": "EXTERNAL_MODULE"
+  },
+  {
+    "name": "dynamic-import",
+    "source": "export const metadata = { apiVersion: 1, id: \"org.example.test\", name: \"Test\", version: \"1.0.0\", origins: [\"https://example.org\"] };\nexport async function book() {}\nexport async function chapters() {}\nexport async function content() {}\nfunction later(){return import(\"https://example.org/code.js\")}",
+    "code": "EXTERNAL_MODULE"
+  },
+  {
+    "name": "export-star",
+    "source": "export const metadata = { apiVersion: 1, id: \"org.example.test\", name: \"Test\", version: \"1.0.0\", origins: [\"https://example.org\"] };\nexport async function book() {}\nexport async function chapters() {}\nexport async function content() {}\nexport * from \"./other.js\";",
+    "code": "EXTERNAL_MODULE"
+  },
+  {
+    "name": "top-level-await",
+    "source": "export const metadata = { apiVersion: 1, id: \"org.example.test\", name: \"Test\", version: \"1.0.0\", origins: [\"https://example.org\"] };\nexport async function book() {}\nexport async function chapters() {}\nexport async function content() {}\nawait Promise.resolve();",
+    "code": "TOP_LEVEL_AWAIT"
+  },
+  {
+    "name": "missing-operation",
+    "source": "export const metadata = { apiVersion: 1, id: \"org.example.test\", name: \"Test\", version: \"1.0.0\", origins: [\"https://example.org\"] };\nexport async function book() {}",
+    "code": "MISSING_OPERATION"
+  },
+  {
+    "name": "sync-operation",
+    "source": "export const metadata = { apiVersion: 1, id: \"org.example.test\", name: \"Test\", version: \"1.0.0\", origins: [\"https://example.org\"] };\nexport function book() {}\nexport async function chapters() {}\nexport async function content() {}",
+    "code": "INVALID_OPERATION"
+  },
+  {
+    "name": "async-generator-operation",
+    "source": "export const metadata = { apiVersion: 1, id: \"org.example.test\", name: \"Test\", version: \"1.0.0\", origins: [\"https://example.org\"] };\nexport async function* book() {}\nexport async function chapters() {}\nexport async function content() {}",
+    "code": "INVALID_OPERATION"
+  },
+  {
+    "name": "unknown-export",
+    "source": "export const metadata = { apiVersion: 1, id: \"org.example.test\", name: \"Test\", version: \"1.0.0\", origins: [\"https://example.org\"] };\nexport async function book() {}\nexport async function chapters() {}\nexport async function content() {}\nexport const other = 1;",
+    "code": "UNSUPPORTED_EXPORT"
+  },
+  {
+    "name": "unsupported-api-version",
+    "source": "export const metadata = { apiVersion: 2, id: \"org.example.test\", name: \"Test\", version: \"1.0.0\", origins: [\"https://example.org\"] };\nexport async function book() {}\nexport async function chapters() {}\nexport async function content() {}",
+    "code": "INVALID_DATA"
+  },
+  {
+    "name": "origin-path",
+    "source": "export const metadata = { apiVersion: 1, id: \"org.example.test\", name: \"Test\", version: \"1.0.0\", origins: [\"https://example.org/path\"] };\nexport async function book() {}\nexport async function chapters() {}\nexport async function content() {}",
+    "code": "INVALID_DATA"
+  },
+  {
+    "name": "future-extension",
+    "source": "export const metadata = { apiVersion: 1, id: \"org.example.test\", requires: [\"browser@1\"], name: \"Test\", version: \"1.0.0\", origins: [\"https://example.org\"] };\nexport async function book() {}\nexport async function chapters() {}\nexport async function content() {}",
+    "valid": true,
+    "unsupported": [
+      "browser@1"
+    ]
+  }
+]

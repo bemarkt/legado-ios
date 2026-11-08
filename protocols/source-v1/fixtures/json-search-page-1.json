@@ -1,0 +1,14 @@
+{
+  "items": [
+    {
+      "ref": {
+        "id": "fixture-book",
+        "url": "http://127.0.0.1:18764/api/book/fixture-book"
+      },
+      "title": "Fixture Book",
+      "author": "Example Author"
+    }
+  ],
+  "nextCursor": null,
+  "revision": "r1"
+}

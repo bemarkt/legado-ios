@@ -1,0 +1,22 @@
+[
+  {
+    "name": "crlf-indentation-and-controls",
+    "input": "﻿\r\n　First.  \r\n\r\nSecond.\t\u0000\n",
+    "expected": "　First.\n\nSecond."
+  },
+  {
+    "name": "internal-line-breaks",
+    "input": "a\nb\n\n\nc",
+    "expected": "a\nb\n\n\nc"
+  },
+  {
+    "name": "whitespace-only",
+    "input": "\r\n\t \n",
+    "expected": ""
+  },
+  {
+    "name": "unicode-preserved",
+    "input": "繁體 😀 é",
+    "expected": "繁體 😀 é"
+  }
+]

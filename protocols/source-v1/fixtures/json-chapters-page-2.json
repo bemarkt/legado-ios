@@ -1,0 +1,13 @@
+{
+  "items": [
+    {
+      "ref": {
+        "id": "ch-2",
+        "url": "http://127.0.0.1:18764/api/book/fixture-book/content/ch-2"
+      },
+      "title": "Chapter 2"
+    }
+  ],
+  "nextCursor": null,
+  "revision": "r1"
+}

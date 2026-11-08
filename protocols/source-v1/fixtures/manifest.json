@@ -1,0 +1,78 @@
+{
+  "fixtureVersion": 1,
+  "baseURL": "http://127.0.0.1:18764",
+  "resources": [
+    {
+      "method": "GET",
+      "route": "/html/search?q=demo&page=1",
+      "file": "html-search-page-1.html",
+      "contentType": "text/html; charset=utf-8"
+    },
+    {
+      "method": "GET",
+      "route": "/html/book/fixture-book",
+      "file": "html-book.html",
+      "contentType": "text/html; charset=utf-8"
+    },
+    {
+      "method": "GET",
+      "route": "/html/book/fixture-book/chapters?page=1",
+      "file": "html-chapters-page-1.html",
+      "contentType": "text/html; charset=utf-8"
+    },
+    {
+      "method": "GET",
+      "route": "/html/book/fixture-book/chapters?page=2",
+      "file": "html-chapters-page-2.html",
+      "contentType": "text/html; charset=utf-8"
+    },
+    {
+      "method": "GET",
+      "route": "/html/book/fixture-book/chapter/ch-1",
+      "file": "html-content-ch-1.html",
+      "contentType": "text/html; charset=utf-8"
+    },
+    {
+      "method": "GET",
+      "route": "/html/book/fixture-book/chapter/ch-2",
+      "file": "html-content-ch-2.html",
+      "contentType": "text/html; charset=utf-8"
+    },
+    {
+      "method": "GET",
+      "route": "/api/search?q=demo&page=1",
+      "file": "json-search-page-1.json",
+      "contentType": "application/json; charset=utf-8"
+    },
+    {
+      "method": "GET",
+      "route": "/api/book/fixture-book",
+      "file": "json-book.json",
+      "contentType": "application/json; charset=utf-8"
+    },
+    {
+      "method": "GET",
+      "route": "/api/book/fixture-book/chapters?page=1",
+      "file": "json-chapters-page-1.json",
+      "contentType": "application/json; charset=utf-8"
+    },
+    {
+      "method": "GET",
+      "route": "/api/book/fixture-book/chapters?page=2",
+      "file": "json-chapters-page-2.json",
+      "contentType": "application/json; charset=utf-8"
+    },
+    {
+      "method": "GET",
+      "route": "/api/book/fixture-book/content/ch-1",
+      "file": "json-content-ch-1.json",
+      "contentType": "application/json; charset=utf-8"
+    },
+    {
+      "method": "GET",
+      "route": "/api/book/fixture-book/content/ch-2",
+      "file": "json-content-ch-2.json",
+      "contentType": "application/json; charset=utf-8"
+    }
+  ]
+}

@@ -9,6 +9,19 @@
 | [贡献指南](../CONTRIBUTING.md) | 问题报告、代码贡献和验证要求 |
 | [第三方声明](../THIRD_PARTY_NOTICES.md) | 第三方材料的版权与许可 |
 
+## 架构与协议设计
+
+以下文档描述后续设计和实施计划，不表示相应能力已经在 App 中实现。
+
+| 文档 | 内容 |
+| --- | --- |
+| [架构与书源协议提案](ARCHITECTURE_SOURCE_PROTOCOL_PROPOSAL.md) | 现有架构分析、参考项目、运行环境与协议边界 |
+| [自有书源协议 v1 草案](SOURCE_PROTOCOL_V1_DRAFT.md) | 可读单文件、元数据、操作、结果、上下文与生命周期 |
+| [实施流程与验收计划](SOURCE_PROTOCOL_IMPLEMENTATION_PLAN.md) | P0–P6 工作包、阶段依赖、验收门槛、测试、迁移与发布流程 |
+| [单文件书源示例](examples/example.source.js) | 使用虚构站点的协议说明示例 |
+| [P0 首轮实施报告](reports/SOURCE_PROTOCOL_P0_REPORT.md) | 已交付合同/工具/样本、测试结果、环境缺口和 P1 接续 |
+| [可执行候选合同](../protocols/source-v1/README.md) | Schema、类型、profile、宿主语义与共享语料 |
+
 ## 开发与维护
 
 | 文档 | 内容 |

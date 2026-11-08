@@ -2,12 +2,13 @@
 
 ## 环境
 
-- macOS；支持 Swift 6 的 Xcode，当前开发环境为 Xcode 26.1。
+- 日常开发主机为 Windows 11。本地运行 Git、Node、Python 和静态检查；Swift 测试、Xcode 模拟器/设备编译与 IPA 打包通过 GitHub Actions 的 macOS runner 执行。
+- 当前工作流使用 `macos-26`；每次运行记录实际 Xcode/Swift/SDK 版本，不依赖开发主机安装 Xcode。
 - App 最低 iOS 26.0（`glassEffect` 一类 Liquid Glass API 属于 iOS 26 SDK，不设回落分支）；核心包也可在 macOS 14+ 测试。
 - Swift Package Manager 依赖由 `Package.resolved` 锁定，初次解析需要网络。
 - 运行脚本需 Python 3 和 `rg`（ripgrep）。
 
-在独立仓库根目录打开 `Legado.xcodeproj`，选择 `Legado` Scheme。真机运行需要自行设置签名团队；请勿将证书或描述文件提交到仓库。
+可选的 macOS 调试环境可在仓库根目录打开 `Legado.xcodeproj`，选择 `Legado` Scheme。日常编译使用下方 GitHub Actions；真机运行需要自行配置签名，证书或描述文件不提交到仓库。
 
 ## 代码结构
 
@@ -86,6 +87,8 @@ RSS 界面回归还验证正文的手动刷新确实重新请求网络。核心�
 2. 选择 `Release` 或 `Debug`，runner 使用 `macos-26`。
 3. 完成后下载 `Legado-Unsigned-IPA-<version>-<short_sha>` artifact。IPA 文件名包含版本、构建号和源码短 SHA，安装前自行签名。
 
+使用 GitHub CLI 时始终显式传入目标仓库，例如 `--repo bemarkt/legado-ios`，避免 fork 的默认仓库解析指向 upstream。对已推送的同一提交，运行协议 CI、JavaScript Engine CI 与 IPA 工作流，并记录 run ID/源码 SHA；IPA 的 `ref` 输入使用完整 SHA。
+
 工作流定义来自触发分支，`ref` 决定 checkout 的源码；调整 CI 后应使用包含新定义的分支发起新运行。重新运行旧 run 不会采用后来修改的工作流定义。
 
 编译、打包和 IPA 上传是必需步骤。dSYM 与构建日志用于排查问题，各设置三分钟超时并允许失败；摘要中的 `outcome` 保留实际结果。若 dSYM 上传失败，IPA 仍可能已经可下载，但该次构建的符号文件不保证可用。若 IPA 上传失败，整个 job 仍失败。
@@ -155,3 +158,16 @@ python3 -m unittest discover -s scripts/tests -v
 核心解析器按需读取 ZIP 资源，不解压到磁盘；单资源上限为 32 MiB。它用于导入、书架元数据和文字朗读。EPUB 原排版阅读由 Readium 3.8.0 的 Streamer / Navigator 处理，保留 XHTML、CSS、SVG 和内嵌插图；不接入 DRM 解密服务。原排版位置和书签使用 EPUB locator 保存，旧的文字进度仍兼容。
 
 `LegadoReaderTests/EPUBReaderIntegrationTests` 在 iOS 中实际渲染自造 EPUB，检查 SVG 封面、相对路径图片、外部 CSS、表格、目录跳转和字号变化后的续读。可通过 `xcodebuild -project Legado.xcodeproj -scheme LegadoReaderTests -destination 'platform=iOS Simulator,id=模拟器UUID' -only-testing:LegadoReaderTests/EPUBReaderIntegrationTests CODE_SIGNING_ALLOWED=NO test` 运行。真实书籍样例仅用于本机验证，不放进仓库。
+
+## 自有书源协议原型（P0/P1）
+
+协议工具位于 [tools/source-protocol](../tools/source-protocol/README.md)，候选合同与共享样本位于 [protocols/source-v1](../protocols/source-v1/README.md)。它们独立于当前 App 运行路径，可在 Windows/macOS/Linux 的 Node 22+ 环境验证。
+
+```sh
+cd tools/source-protocol
+npm ci --ignore-scripts
+npm run check
+npm run validate -- ../../docs/examples/example.source.js
+```
+
+在仓库根目录执行 `python scripts/source-protocol-baseline.py` 可检查合成旧库的静态 SQL 与结构。Node/SQLite 结果不能替代 Swift 构建、WebKit 或真机验收；进度与缺口见 [P0 阶段报告](reports/SOURCE_PROTOCOL_P0_REPORT.md)。

@@ -1,0 +1,107 @@
+{
+  "fixtureVersion": 1,
+  "synthetic": true,
+  "schemaVersion": 7,
+  "note": "Not exported from a user database. Swift decoding still requires macOS validation.",
+  "source": {
+    "bookSourceUrl": "https://legacy.example.org",
+    "bookSourceName": "Synthetic legacy source",
+    "enabled": true,
+    "ruleSearch": {
+      "bookList": ".book",
+      "name": ".title@text"
+    },
+    "customFixtureField": {
+      "preserve": true
+    }
+  },
+  "book": {
+    "bookUrl": "https://legacy.example.org/book?id=fixture&edition=a",
+    "tocUrl": "https://legacy.example.org/toc?id=fixture",
+    "origin": "https://legacy.example.org",
+    "originName": "Synthetic legacy source",
+    "name": "Fixture Book",
+    "author": "Example Author",
+    "type": 0,
+    "group": 0,
+    "latestChapterTime": 0,
+    "lastCheckTime": 0,
+    "lastCheckCount": 2,
+    "totalChapterNum": 2,
+    "durChapterTitle": "Repeated title",
+    "durChapterIndex": 1,
+    "durVolumeIndex": 0,
+    "chapterInVolumeIndex": 1,
+    "durChapterPos": 6,
+    "durChapterPage": 0,
+    "durChapterPageCount": 1,
+    "durChapterTime": 1794096000000,
+    "canUpdate": true,
+    "order": 0,
+    "originOrder": 0,
+    "syncTime": 0
+  },
+  "chapters": [
+    {
+      "url": "https://legacy.example.org/chapter?id=1&edition=a",
+      "title": "Repeated title",
+      "isVolume": false,
+      "baseUrl": "https://legacy.example.org",
+      "bookUrl": "https://legacy.example.org/book?id=fixture&edition=a",
+      "index": 0,
+      "isVip": false,
+      "isPay": false
+    },
+    {
+      "url": "https://legacy.example.org/chapter?id=2&edition=a",
+      "title": "Repeated title",
+      "isVolume": false,
+      "baseUrl": "https://legacy.example.org",
+      "bookUrl": "https://legacy.example.org/book?id=fixture&edition=a",
+      "index": 1,
+      "isVip": false,
+      "isPay": false
+    }
+  ],
+  "bookmark": {
+    "time": 1794096000000,
+    "bookName": "Fixture Book",
+    "bookAuthor": "Example Author",
+    "chapterIndex": 1,
+    "chapterPos": 6,
+    "chapterName": "Repeated title",
+    "bookText": "paragraph",
+    "content": "Synthetic note"
+  },
+  "record": {
+    "deviceId": "fixture-device",
+    "bookName": "Fixture Book",
+    "readTime": 60,
+    "lastRead": 1794096000000,
+    "dailyReadTimes": {
+      "2026-11-08": 60
+    }
+  },
+  "cacheEntries": {
+    "loginHeader_https://legacy.example.org": "{\"X-Fixture-Account\":\"fixture-a\"}",
+    "v_https://legacy.example.org_fixtureState": "saved",
+    "sourceCookies_https://legacy.example.org": "[]"
+  },
+  "cookie": {
+    "url": "https://legacy.example.org",
+    "cookie": "fixture_session=synthetic"
+  },
+  "externalState": {
+    "userDefaults": "not captured; construct from known keys before P5",
+    "localFiles": "not included; reuse existing TXT/EPUB fixtures",
+    "chapterCache": "logical references only; actual cache format needs Swift validation"
+  },
+  "expectations": {
+    "bookCount": 1,
+    "chapterCount": 2,
+    "bookmarkCount": 1,
+    "preserveURLQuery": true,
+    "duplicateTitlesRemainDistinct": true,
+    "unknownSourceFieldPreserved": true
+  }
+}

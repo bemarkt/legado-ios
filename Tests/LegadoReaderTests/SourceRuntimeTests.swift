@@ -921,7 +921,8 @@ extension SourceRuntimeTests {
             ("phone", CGSize(width: 390, height: 844), UIContentSizeCategory.large, false),
             ("accessibility", CGSize(width: 390, height: 844), UIContentSizeCategory.accessibilityExtraExtraExtraLarge, true)
         ] {
-            let screen = NavigationStack { NativeSourceAccountsView(model: model, initialInstallation: installation) }
+            let presentation = NativeSourceAccountPresentation()
+            let screen = NavigationStack { NativeSourceAccountsView(model: model, initialInstallation: installation, presentation: presentation) }
                 .environment(\.dynamicTypeSize, dark ? .accessibility5 : .large)
             let host = UIHostingController(rootView: screen)
             host.traitOverrides.preferredContentSizeCategory = category
@@ -933,7 +934,13 @@ extension SourceRuntimeTests {
             container.addChild(host); host.view.frame = CGRect(origin: .zero, size: size)
             container.view.addSubview(host.view); host.didMove(toParent: container)
             defer { window.isHidden = true; previous?.makeKeyAndVisible() }
-            try await Task.sleep(for: .milliseconds(600))
+            window.layoutIfNeeded(); host.view.layoutIfNeeded()
+            for _ in 0..<150 {
+                if presentation.settings?.selectedID == account.id { break }
+                try await Task.sleep(for: .milliseconds(100))
+            }
+            XCTAssertEqual(presentation.settings?.selectedID, account.id, "Account data must load before a screenshot counts as evidence")
+            try await Task.sleep(for: .milliseconds(300))
             window.layoutIfNeeded(); host.view.layoutIfNeeded()
             var rendered = false
             let image = UIGraphicsImageRenderer(size: size).image { _ in

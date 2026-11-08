@@ -12,12 +12,23 @@ struct NativeSourceLoginRequest: Identifiable {
     let origin: String
 }
 
+@MainActor
+final class NativeSourceAccountPresentation: ObservableObject {
+    @Published var settings: SourceAccountSettings?
+    @Published var status: SourceCredentialStatus?
+}
+
 struct NativeSourceAccountsView: View {
     @ObservedObject var model: NativeSourceLibrary
     let initialInstallation: SourceInstallation
     private var installation: SourceInstallation { model.installations.first { $0.id == initialInstallation.id } ?? initialInstallation }
-    @State private var settings: SourceAccountSettings?
-    @State private var status: SourceCredentialStatus?
+    @StateObject private var presentation: NativeSourceAccountPresentation
+    private var settings: SourceAccountSettings? { presentation.settings }
+    private var status: SourceCredentialStatus? { presentation.status }
+    init(model: NativeSourceLibrary, initialInstallation: SourceInstallation, presentation: NativeSourceAccountPresentation = .init()) {
+        self.model = model; self.initialInstallation = initialInstallation
+        _presentation = StateObject(wrappedValue: presentation)
+    }
     @State private var selectedOrigin = ""
     @State private var adding = false
     @State private var accountName = ""
@@ -124,7 +135,7 @@ struct NativeSourceAccountsView: View {
         try Task.checkCancellation()
         guard try await model.services().0.accountSettings(installationID: source.id).selectedID == next.selectedID else { return }
         try Task.checkCancellation()
-        self.settings = next; self.status = status
+        presentation.settings = next; presentation.status = status
         if !origins.contains(selectedOrigin) { selectedOrigin = origins.first ?? "" }
     }
     private func prepareLogin(isToken: Bool) {

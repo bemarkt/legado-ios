@@ -849,7 +849,12 @@ extension SourceRuntimeTests {
 
     func testCredentialPersistenceUsesActualSimulatorKeychain() async throws {
         let service = "org.example.source-tests.\(UUID().uuidString)"
-        defer { SecItemDelete([kSecClass: kSecClassGenericPassword, kSecAttrService: service] as CFDictionary) }
+        defer { SecItemDelete([kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service] as CFDictionary) }
+        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
+                                    kSecReturnData as String: true, kSecMatchLimit as String: kSecMatchLimitOne]
+        var probe: CFTypeRef?
+        let initialStatus = SecItemCopyMatching(query as CFDictionary, &probe)
+        XCTAssertEqual(initialStatus, errSecItemNotFound, "Simulator Keychain status: \(initialStatus). The test host needs a signed application identity.")
         let persistence = SourceKeychainCredentials(service: service)
         let scope = try SourceScope(installationID: UUID(), accountID: UUID().uuidString)
         let vault = SourceCredentialVault(persistence: persistence)

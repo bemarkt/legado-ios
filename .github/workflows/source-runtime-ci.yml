@@ -80,6 +80,17 @@ jobs:
           if [ "$SOURCE_TEST_SUITE" = 'reader-layout' ]; then
             TEST_SELECTOR="$TEST_SELECTOR/testNativeReaderRendersOfflineAtPhoneAndTabletWidths"
           fi
+          # The simulator host needs an ad-hoc identity for actual Keychain access.
+          # These synthetic entitlements are CI-only; the device IPA remains unsigned.
+          python3 - <<'PY'
+          import plistlib
+          with open('build/source-simulator.entitlements', 'wb') as file:
+              plistlib.dump({
+                  'application-identifier': 'SOURCECI01.com.epiboly.legado',
+                  'keychain-access-groups': ['SOURCECI01.com.epiboly.legado'],
+                  'get-task-allow': True,
+              }, file)
+          PY
           xcodebuild test \
             -project Legado.xcodeproj -scheme LegadoReaderTests -configuration Debug \
             -destination "platform=iOS Simulator,id=$SOURCE_SIMULATOR" \
@@ -88,8 +99,8 @@ jobs:
             -only-testing:"$TEST_SELECTOR" \
             -parallel-testing-enabled NO -maximum-concurrent-test-simulator-destinations 1 \
             -resultBundlePath build/SourceRuntime.xcresult \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY='' \
-            CODE_SIGN_ENTITLEMENTS='' DEVELOPMENT_TEAM='' \
+            CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_ENTITLEMENTS="$PWD/build/source-simulator.entitlements" DEVELOPMENT_TEAM='' \
             2>&1 | tee build/source-runtime-tests.log
       - name: Export native reader screenshots
         if: always()
@@ -105,6 +116,7 @@ jobs:
           path: |
             build/source-runtime-tests.log
             build/source-fixtures.log
+            build/source-simulator.entitlements
             build/SourceRuntime.xcresult
             build/source-ui-snapshots
           if-no-files-found: ignore

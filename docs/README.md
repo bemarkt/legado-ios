@@ -20,6 +20,8 @@
 | [实施流程与验收计划](SOURCE_PROTOCOL_IMPLEMENTATION_PLAN.md) | P0–P6 工作包、阶段依赖、验收门槛、测试、迁移与发布流程 |
 | [单文件书源示例](examples/example.source.js) | 使用虚构站点的协议说明示例 |
 | [P0 首轮实施报告](reports/SOURCE_PROTOCOL_P0_REPORT.md) | 已交付合同/工具/样本、测试结果、环境缺口和 P1 接续 |
+| [P1 WebKit 原型报告](reports/SOURCE_PROTOCOL_P1_REPORT.md) | 运行时、原生网络、CI/IPA 与真机反馈的实际证据 |
+| [真机验证步骤与记录](SOURCE_RUNTIME_DEVICE_VALIDATION.md) | Windows/iPhone 可做的操作验证、资源测量缺口和进入 P2 的条件 |
 | [可执行候选合同](../protocols/source-v1/README.md) | Schema、类型、profile、宿主语义与共享语料 |
 
 ## 开发与维护

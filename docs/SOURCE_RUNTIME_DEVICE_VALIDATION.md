@@ -8,15 +8,17 @@
 2. 打开「设置 → 其他设置 → 书源协议实验室」。离线示例先执行四项操作一次，作为恢复基线。
 3. 资源测量需要连接 macOS 的 Xcode Instruments，记录 App 与相关 WebContent 进程总内存、CPU、能耗；只有 Windows/iPhone 时仍可记录 UI、取消、前后台与恢复现象，但内存/能耗栏保留“未测”。
 
+故障源没有 search 入口；选择 content 并使用输入 `{"book":{"id":"fixture-book"},"chapter":{"id":"ch-1"}}`。这些故障操作不访问 metadata 中的 loopback 地址，真机不需要连接本地 fixture 服务。
+
 ## 操作与证据
 
 | 场景 | 步骤 | 应记录的结果 |
 | --- | --- | --- |
 | 冷启动与重复运行 | 杀掉 App 后启动，运行离线 search；再连续执行十次四项操作 | 每次开始至结果的时间、失败码、首次与后续差异；没有 Instruments 时标注手动计时 |
-| 无穷 Promise | 导入 `protocols/source-v1/fixtures/runtime-faults/never-settles.source.js`，检查元数据，运行其 search | 原生 deadline 是否结束操作、UI 是否可交互；随后切回离线源的四项操作是否正常 |
+| 无穷 Promise | 导入 `protocols/source-v1/fixtures/runtime-faults/never-settles.source.js`，检查元数据，运行其 content | 原生 deadline 是否结束操作、UI 是否可交互；随后切回离线源的四项操作是否正常 |
 | 用户取消 | 运行上面的等待源后点取消；再切回离线源 | 是否只出现一个终态、是否还能开始新操作；原生网络取消另由 CI fixture 验证 |
 | 前后台 | 普通离线操作和等待操作分别切后台再回来；各重复三次 | 是否重复结算、界面卡死或恢复后无法执行；记录后台停留时长 |
-| 同步无限循环 | 单独一次使用 `runtime-faults/infinite-computation.source.js` 的 search；不要放入自动批量流程 | UI、deadline、WebContent CPU、总内存、新页面是否受牵连；必要时手动退出 App，记录是否必须重启才能恢复 |
+| 同步无限循环 | 单独一次使用 `runtime-faults/infinite-computation.source.js` 的 content；不要放入自动批量流程 | UI、deadline、WebContent CPU、总内存、新页面是否受牵连；必要时手动退出 App，记录是否必须重启才能恢复 |
 | 内容进程异常 | 有 macOS 调试设备时做受控 WebContent 进程终止；仅 Windows 环境此项保留待测 | RUNTIME_TERMINATED 是否可见、旧回调是否失效、下一正常操作能否恢复 |
 | 持续运行资源 | 同一普通源重复运行并在成功/取消后观察 30 秒，再重复三轮 | App + WebContent 总资源趋势；系统缓存不能误记为泄漏，需比较稳定阶段 |
 
@@ -40,7 +42,7 @@ App + WebContent 内存 / CPU（有测量才填）：
 
 ## 后续工作顺序
 
-1. 完成本轮 18 项实际 WebKit 测试及 Release IPA 验证，回填 P1 报告。
+1. 已完成：实现提交 `e8294dd` 的 18 项实际 WebKit 测试及 Release IPA 验证，证据见 [P1 报告](reports/SOURCE_PROTOCOL_P1_REPORT.md)。
 2. 按上表采集真机资源与故障记录，给 D02/D03/D10 形成明确结论。未测项保持开放；若共享内容进程导致异常源拖住正常源，先调整执行边界再复测。
 3. G1 达标后进入 P2：领域接口与稳定身份、操作快照和取消调度、原生 HTTP/凭据范围、状态存储、正文规范化，再贯通搜索 → 详情 → 目录 → 阅读与重启恢复。
 4. P3 再做安装、编辑、更新、回滚和作者工具；P4 独立推进 Legado 兼容，P5 处理旧库迁移。各阶段沿用实施流程的验收门槛。

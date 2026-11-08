@@ -1,6 +1,6 @@
 # P1 WebKit 垂直原型报告
 
-日期：2026-11-08（Asia/Hong_Kong）。状态：首轮原型已实现并通过原生编译、12 项 WebKit 模拟器测试及 IPA 构建。用户反馈真机离线示例及两份本地 JS 源测试正常；G1 的完整真机故障与资源验收尚未通过。
+日期：2026-11-08（Asia/Hong_Kong）。状态：原型及通用边界补测已通过原生编译、18 项 WebKit 模拟器测试及 IPA 构建。用户反馈真机离线示例及两份本地 JS 源测试正常；G1 的完整真机故障与资源验收尚未通过。
 
 ## 本轮范围
 
@@ -56,8 +56,19 @@ IPA 文件名 `Legado-0.1.14-20-b9b7b5c-unsigned.ipa`，17,575,055 bytes；SHA-2
 - P1-05：四种配置默认值保持类型，空字符串、false、0 不丢失，config 冻结且操作之间无修改泄漏；storage 继续明确返回 UNSUPPORTED。
 - 错误边界：修正 403 被误判为 AUTH_REQUIRED（应为 HTTP）；保留 429 的合法 retryAfterMs；未知异常码和异常 getter 产生有界备用诊断，原生二次检查错误码、消息长度和重试间隔。
 
-本地 77 项合同/静态测试通过；新增六项原生测试，总计 18 项，GitHub 实际 WebKit 执行与本轮 IPA 构建结果待回填。Windows 本地不作原生编译成功声明。错误详情 details、持久化配置与账号服务仍不在本轮范围。
+实现提交：`e8294dd8cb59f6c4ce1959672e0f7c5ac6bba7eb`。Windows 本地 77 项合同/静态测试通过；六项新增原生测试与既有十二项全部在 GitHub 实际 WebKit 通过。
+
+| 本轮验证 | 证据 | 结果 |
+| --- | --- | --- |
+| 候选合同与内嵌解析器 | [Source Protocol Candidate 42483763689](https://github.com/bemarkt/legado-ios/actions/runs/42483763689) | 77 项通过，内嵌 bundle 与生成结果一致 |
+| Swift 核心、App model、模拟器编译 | [JavaScript Engine CI 42483763721](https://github.com/bemarkt/legado-ios/actions/runs/42483763721) | 335 + 74 测试通过，App 编译通过 |
+| 真实 WebKit 执行 | [Source Runtime WebKit 42483763699](https://github.com/bemarkt/legado-ios/actions/runs/42483763699) | 18 项测试，零失败，145.880 秒；iPhone Air 模拟器、iOS 26.5、Xcode 26.6 |
+| Release arm64 IPA | [Build Unsigned IPA 42483764569](https://github.com/bemarkt/legado-ios/actions/runs/42483764569) | 成功；最低 iOS 26.0，0.1.14 build 20 |
+
+本轮 IPA 为 `Legado-0.1.14-20-e8294dd-unsigned.ipa`，17,582,565 bytes，SHA-256 `871cd0d616087c6ad75155bc2fca2d4622ebbf29a051ce59cc181ae0e95c3360`。已验证 ZIP CRC、plist、arm64 Mach-O、未签名状态和五项内嵌 SourceRuntime 资源与实现提交逐字节相同；本地证据保存在忽略目录 `build/github-actions/e8294dd`。
+
+源码、原生编译、WebKit 执行和 IPA 使用同一个实现提交。Windows 冒烟验证只作 JS 逻辑证据，不冒充 WebKit 结果。错误详情 details、持久化配置与账号服务仍不在本轮范围。测试日志仍含系统进程终止权限诊断；此次未执行同步死循环，不将套件通过视为硬终止或资源回收通过。
 
 ## 下一轮
 
-本轮边界补测验收后，按 [真机验证步骤](../SOURCE_RUNTIME_DEVICE_VALIDATION.md) 在 iOS 26 真机专项执行同步死循环、进程异常、前后台切换、取消后总资源与恢复测量，形成 D01–D04、D10 的决定。G1 达标后才进入 P2 的领域接口、账号范围持久化、缓存和阅读闭环。
+本轮边界补测已通过；下一步按 [真机验证步骤](../SOURCE_RUNTIME_DEVICE_VALIDATION.md) 在 iOS 26 真机专项执行同步死循环、进程异常、前后台切换、取消后总资源与恢复测量，形成 D01–D04、D10 的决定。G1 达标后才进入 P2 的领域接口、账号范围持久化、缓存和阅读闭环。

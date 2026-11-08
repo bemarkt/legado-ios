@@ -202,6 +202,36 @@ final class SourceRuntimeTests: XCTestCase {
         _ = try await run(snapshot)
     }
 
+    func testBridgeCountsRedirectHopsInsideOperationRequestBudget() async throws {
+        let snapshot = try await source("""
+        for(let n=0;n<32;n++) await ctx.http.fetch('\(origin)/redirect/allowed');
+        try { await ctx.http.fetch('\(origin)/health'); throw Error('Redirect attempts were not counted'); }
+        catch(error) { if(error.code !== 'RESOURCE_LIMIT') throw error; }
+        return {items:[],nextCursor:null};
+        """)
+        _ = try await run(snapshot)
+    }
+
+    func testHTTPRetryPreservesResponseAndNeverReplaysPOST() async throws {
+        func serverErrors() async throws -> Int {
+            let (data, _) = try await URLSession.shared.data(from: URL(string: origin + "/diagnostics")!)
+            let info = try object(String(decoding: data, as: UTF8.self))
+            return (info["requests"] as? [[String: Any]] ?? []).filter { $0["path"] as? String == "/failure/server-error" }.count
+        }
+        let before = try await serverErrors()
+        let snapshot = try await source("""
+        for(const method of ['GET','POST']) {
+          const response = await ctx.http.fetch('\(origin)/failure/server-error',{method});
+          if(response.status !== 503 || response.ok) throw Error('HTTP failure status was lost');
+          if((await response.json()).error !== 'unavailable') throw Error('HTTP failure body was lost');
+        }
+        return {items:[],nextCursor:null};
+        """)
+        _ = try await run(snapshot)
+        let after = try await serverErrors()
+        XCTAssertEqual(after - before, 3, "GET may retry once; POST must be sent only once")
+    }
+
     func testRequestAbortSignalDoesNotCancelOtherWork() async throws {
         let snapshot = try await source("""
         const abort = new AbortController();

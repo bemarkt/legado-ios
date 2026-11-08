@@ -13,7 +13,7 @@ App → 设置 → 其他设置 → 原生书源阅读。添加文件、粘贴�
 | 工作包 | 实现 | 验收限制 |
 | --- | --- | --- |
 | P2-01 | Schema 生成 Swift wire 值类型，独立 `SourceProvider`；假实现与 WebKit adapter 使用同一领域接口 | Legado adapter 尚未接入新领域 |
-| P2-02 | 原生每跳全局/origin 请求并发 4/2；执行全局/安装并发 2/1；优先级；统一单调时钟 deadline；GET/HEAD 有限重试与操作尝试预算 | 本次原生 HTTP 回归待 CI；不是发布性能预算；凭据/封面入口未统一 |
+| P2-02 | 原生每跳全局/origin 请求并发 4/2；执行全局/安装并发 2/1；优先级；统一单调时钟 deadline；GET/HEAD 有限重试与操作尝试预算 | 13 项原生 HTTP 回归与 App 编译通过；不是发布性能预算；凭据/封面入口未统一 |
 | P2-03 | 独立 SQLite WAL；宿主安装 UUID、账号 scope、源码/配置摘要；state CAS/null/配额/跨连接事务；原始结果与规范化缓存 | UI 只开放 guest；没有登录服务。缓存代次、请求来源、显式重取与旧副本已实现；385 核心回归通过；尚无自动容量淘汰 |
 | P2-04 | 分页固定快照、空页继续、跨页一致去重、冲突/重复游标/revision 变化拒绝；识别插入、删除、更新、重排 | 设备目录交互与超大目录预算待测 |
 | P2-05 | SwiftSoup HTML → 有限 block/UTF-16 mark；文本规范化；章节稳定 ID、版本/摘要/引文位置 | 正文显示采用原生纵向滚动预览；页式阅读、注释、全文搜索、TTS 尚未接入 |
@@ -58,6 +58,7 @@ SwiftUI 原生组件承担系统安全区、键盘和模态层背景阻断。该
 | `cc09a08` / JavaScript Engine CI 42498148213 | 目录/缓存一致性新增 14 项回归；375 核心 + 74 AppModels 通过，App 模拟器编译通过 |
 | `5c2a8c9` / JavaScript Engine CI 42498879371 | 搜索续页新增 7 项核心回归；382 核心 + 74 AppModels 通过，App 模拟器编译通过 |
 | `5dfa8ab` / JavaScript Engine CI 42499435853 | 下载进度新增 3 项核心回归；385 核心 + 74 AppModels 通过，App 模拟器编译通过 |
+| `2b61f5f41130a121ebfef0ad461ee8090f4b8b93` / JavaScript Engine CI 42501128811 | 13 项原生 HTTP 回归通过；398 核心 + 74 AppModels 通过，App 模拟器编译通过；Source Protocol Candidate 42501128732 通过 |
 
 2026-11-08 集成节点的 App 代码基准为 `289e8c5301ddb559303f6dc314c6c4014542a6f4`；`12462c6` 仅修正作者侧 builder，没有修改 App、核心、工程或原生测试。旧 P1 的 18 项 WebKit 与旧 IPA 只证明 `e8294dd`，不能用于证明本轮新增行为。新的 WebKit 实测、截图复核和 IPA 验证分别登记如下。
 
@@ -109,7 +110,9 @@ SwiftUI 原生组件承担系统安全区、键盘和模态层背景阻断。该
 
 队列、传输、重试等待使用同一 `ContinuousClock` 截止时间，原生操作从模块 ready 起绑定共享截止时间。每次实际尝试消耗操作预算，包括跳转和重试。GET/HEAD 的 429/503 与连接中断最多额外尝试一次；Retry-After 不能为适应本地预算被缩短，超出可等待范围时保留原响应；写操作不默认重试。详细规则见 [候选语义](../../protocols/source-v1/README.md)。
 
-新增 13 项核心回归，使用 Swift Network 本地回环服务和真实 URLSession，覆盖跨站/同站跳转、并发许可释放、排队/传输/慢速响应总截止时间、取消、Retry-After、方法/头部/body、字节限制、Cookie 隔离和共享尝试预算。此处的真实 URLSession 指 macOS CI 原生测试，不能等同于 iPhone WebKit 设备验收。
+新增 13 项核心回归，已在 42501128811 通过：398 核心 + 74 AppModels、App 模拟器编译全部通过。测试使用 Swift Network 本地回环服务和真实 URLSession，覆盖跨站/同站跳转、并发许可释放、排队/传输/慢速响应总截止时间、取消、Retry-After、方法/头部/body、字节限制、Cookie 隔离和共享尝试预算。此处的真实 URLSession 指 macOS CI 原生测试，不能等同于 iPhone WebKit 设备验收。
+
+新增两项 WebKit 桥接测试覆盖跳转消耗操作预算、GET 重试与 POST 单次发送，留待集成节点执行；不把上述原生核心通过当作桥接已验收。
 
 ### 后续接续
 

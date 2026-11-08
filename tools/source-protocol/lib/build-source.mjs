@@ -26,6 +26,17 @@ export async function buildSource(entry) {
   const code = result.outputFiles[0].text;
   if (Buffer.byteLength(code) > profile.limits.sourceBytes) throw new Error('Built source exceeds the source byte budget');
   const ast = parse(code, { ecmaVersion: 2022, sourceType: 'module' });
+  const pending = [ast];
+  while (pending.length) {
+    const node = pending.pop();
+    if (node.type === 'ImportExpression' || (node.type === 'Identifier' && node.name === 'require')) {
+      throw new Error('Built source must not retain runtime module loading');
+    }
+    for (const value of Object.values(node)) {
+      if (Array.isArray(value)) pending.push(...value.filter(child => child && typeof child.type === 'string'));
+      else if (value && typeof value.type === 'string') pending.push(value);
+    }
+  }
   const exports = new Map(), bindings = new Map(), edits = [];
   for (const statement of ast.body) {
     if (statement.type === 'ExportNamedDeclaration') {

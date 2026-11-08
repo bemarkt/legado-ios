@@ -82,3 +82,8 @@ test('builder CLI never overwrites entry, dependencies or unapproved output', as
   await assert.rejects(execute(process.execPath, [cli, entry, output, '--replace']), /source dependency/);
   assert.equal(await readFile(output, 'utf8'), original);
 });
+
+test('builder rejects unresolved dynamic CommonJS loading', async t => {
+  const entry = await project(t, `${metadata}\n${operations}\nexport async function search(ctx, input){return require(input.query);}`);
+  await assert.rejects(buildSource(entry), /runtime module loading/);
+});

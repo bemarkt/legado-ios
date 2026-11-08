@@ -54,7 +54,13 @@ struct NativeSourceLibraryView: View {
                             .accessibilityLabel("将\(hit.book.title)加入书架")
                         }
                     }
-                    if !model.searching && model.results.isEmpty { Text("没有搜索结果").foregroundStyle(.secondary) }
+                    if !model.searching && model.results.isEmpty {
+                        Text(model.canLoadMore ? "本页暂无结果，可以继续加载。" : "没有搜索结果").foregroundStyle(.secondary)
+                    }
+                    if model.canLoadMore {
+                        Button(model.searchFailures.isEmpty ? "加载更多" : "继续加载 / 重试失败书源") { model.loadMore() }
+                            .frame(minHeight: 44)
+                    }
                     ForEach(Array(model.searchFailures.enumerated()), id: \.offset) { _, error in Text(error).font(.footnote).foregroundStyle(.secondary) }
                 }
             }

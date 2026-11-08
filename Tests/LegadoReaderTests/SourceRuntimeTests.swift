@@ -604,4 +604,49 @@ final class SourceRuntimeTests: XCTestCase {
         XCTAssertTrue(model.searchFailures.isEmpty)
     }
 
+    func testNativeSearchLoadsEmptyAndOverlappingPagesAndRetriesFailure() async throws {
+        let model = NativeSourceLibrary(databaseURL: FileManager.default.temporaryDirectory.appendingPathComponent("source-pages-\(UUID().uuidString)/native.sqlite3"))
+        let snapshot = try await source("""
+        if(input.cursor == null) return {items:[{ref:{id:'a'},title:input.query}],nextCursor:1};
+        if(input.cursor === 1) return {items:[],nextCursor:2};
+        if(!(await ctx.storage.get('failed-once'))) {
+          await ctx.storage.set('failed-once',true);
+          throw new Error('synthetic temporary failure');
+        }
+        return {items:[{ref:{id:'a'},title:input.query},{ref:{id:'b'},title:'Second'}],nextCursor:null};
+        """)
+        try await model.install(snapshot)
+        model.search("first")
+        try await waitForNativeSearch(model)
+        XCTAssertEqual(model.results.map(\.book.ref.id), ["a"])
+        XCTAssertTrue(model.canLoadMore)
+        model.loadMore()
+        try await waitForNativeSearch(model)
+        XCTAssertEqual(model.results.map(\.book.ref.id), ["a"])
+        XCTAssertTrue(model.canLoadMore)
+        model.loadMore()
+        try await waitForNativeSearch(model)
+        XCTAssertEqual(model.searchFailures.count, 1)
+        XCTAssertTrue(model.canLoadMore)
+        model.loadMore()
+        try await waitForNativeSearch(model)
+        XCTAssertEqual(model.results.map(\.book.ref.id), ["a", "b"])
+        XCTAssertTrue(model.searchFailures.isEmpty)
+        XCTAssertFalse(model.canLoadMore)
+        model.search("replacement")
+        try await waitForNativeSearch(model)
+        XCTAssertEqual(model.results.map(\.book.title), ["replacement"])
+        model.cancelSearch()
+        XCTAssertFalse(model.canLoadMore)
+    }
+
+    private func waitForNativeSearch(_ model: NativeSourceLibrary) async throws {
+        for _ in 0..<150 {
+            if !model.searching { return }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        XCTFail("Native search did not complete within its test budget")
+        model.cancelSearch()
+    }
+
 }

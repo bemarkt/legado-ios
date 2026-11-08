@@ -3,11 +3,15 @@ import SwiftUI
 
 @MainActor
 final class NativeSourceLibrary: ObservableObject {
-    private struct SearchDelivery: Sendable {
+    private struct SearchSource: Sendable {
         let installation: SourceInstallation
-        let page: SourceWire.SearchPage?
+        var pager: SourceSearchPager?
+    }
+    private struct SearchDelivery: Sendable {
+        let source: SearchSource
+        let batch: SourceSearchPager.Batch?
         let error: String?
-        var identity: SourceExecutionIdentity? = nil
+        let canContinue: Bool
     }
     struct SearchHit: Identifiable {
         let installation: SourceInstallation
@@ -25,6 +29,7 @@ final class NativeSourceLibrary: ObservableObject {
     @Published private(set) var results: [SearchHit] = []
     @Published private(set) var searching = false
     @Published private(set) var searchFailures: [String] = []
+    @Published private(set) var canLoadMore = false
     @Published var message: String?
     private let databaseURL: URL
     init(databaseURL: URL = SourceArchive.defaultURL()) { self.databaseURL = databaseURL }
@@ -33,6 +38,10 @@ final class NativeSourceLibrary: ObservableObject {
     private var inspected: [String: SourceSnapshot] = [:]
     private var searchTask: Task<Void, Never>?
     private var searchGeneration = UUID()
+    private var searchSources: [UUID: SearchSource] = [:]
+    private var searchErrors: [UUID: String] = [:]
+    private var activeQuery = ""
+    private var resultIDs = Set<String>()
     private var anchorWrite: Task<Void, Never>?
     private var anchorGeneration = UUID()
 
@@ -112,40 +121,68 @@ final class NativeSourceLibrary: ObservableObject {
         return (text, response.url)
     }
     func search(_ query: String) {
-        cancelSearch()
+        cancelSearch(clearResults: true)
         let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { results = []; return }
+        guard !query.isEmpty else { return }
+        activeQuery = query
+        searchSources = Dictionary(uniqueKeysWithValues: installations.map { ($0.id, SearchSource(installation: $0)) })
+        loadMore()
+    }
+    func loadMore() {
+        guard !searching, !searchSources.isEmpty else { return }
         let generation = UUID(); searchGeneration = generation
-        searching = true; results = []; searchFailures = []
+        let query = activeQuery
+        let sources = installations.compactMap { searchSources[$0.id] }
+        searching = true; canLoadMore = false
         searchTask = Task {
-            defer { if searchGeneration == generation { searching = false; searchTask = nil } }
-            let sources = installations
-            // Inspect and query each source inside the bounded pool so one cold/broken import does not delay all results.
+            defer {
+                if searchGeneration == generation {
+                    searching = false; searchTask = nil; canLoadMore = !searchSources.isEmpty
+                }
+            }
+            // Initial inspection and subsequent pages share the same bounded pool.
             await withTaskGroup(of: SearchDelivery.self) { group in
                 var next = 0
-                func enqueue(_ installation: SourceInstallation) {
+                func enqueue(_ source: SearchSource) {
                     group.addTask {
+                        var source = source
                         do {
                             try Task.checkCancellation()
-                            let provider = try await self.provider(installation)
-                            guard provider.descriptor.supportsSearch else { return SearchDelivery(installation: installation, page: nil, error: nil) }
-                            let page = try await provider.search(.init(query: query))
+                            if source.pager == nil {
+                                let provider = try await self.provider(source.installation)
+                                guard provider.descriptor.supportsSearch else {
+                                    return SearchDelivery(source: source, batch: nil, error: nil, canContinue: false)
+                                }
+                                source.pager = try SourceSearchPager(provider: provider, query: query)
+                            }
+                            guard let pager = source.pager else { throw SourceDomainError(.unavailable, "Search was not initialized") }
+                            let batch = try await pager.next()
                             try Task.checkCancellation()
-                            return SearchDelivery(installation: installation, page: page, error: nil, identity: provider.descriptor.identity)
-                        } catch is CancellationError { return SearchDelivery(installation: installation, page: nil, error: nil) }
-                        catch { return SearchDelivery(installation: installation, page: nil, error: error.localizedDescription) }
+                            return SearchDelivery(source: source, batch: batch, error: nil, canContinue: batch.hasMore)
+                        } catch is CancellationError { return SearchDelivery(source: source, batch: nil, error: nil, canContinue: false) }
+                        catch {
+                            let canContinue: Bool
+                            if let pager = source.pager { canContinue = await pager.hasMore }
+                            else { canContinue = true }
+                            return SearchDelivery(source: source, batch: nil, error: error.localizedDescription, canContinue: canContinue)
+                        }
                     }
                 }
                 while next < min(2, sources.count) { enqueue(sources[next]); next += 1 }
                 for await update in group {
                     guard !Task.isCancelled, searchGeneration == generation else { group.cancelAll(); return }
-                    if let page = update.page, let identity = update.identity {
-                        for book in page.items {
-                            let hit = SearchHit(installation: update.installation, book: book, identity: identity)
-                            if !results.contains(where: { $0.id == hit.id }) { results.append(hit) }
+                    let installation = update.source.installation
+                    if let batch = update.batch, let pager = update.source.pager {
+                        for book in batch.items {
+                            let hit = SearchHit(installation: installation, book: book, identity: pager.descriptor.identity)
+                            if resultIDs.insert(hit.id).inserted { results.append(hit) }
                         }
                     }
-                    if let error = update.error { searchFailures.append(update.installation.name + ": " + error) }
+                    if let error = update.error { searchErrors[installation.id] = installation.name + ": " + error }
+                    else { searchErrors.removeValue(forKey: installation.id) }
+                    searchFailures = installations.compactMap { searchErrors[$0.id] }
+                    if update.canContinue { searchSources[installation.id] = update.source }
+                    else { searchSources.removeValue(forKey: installation.id) }
                     if next < sources.count { enqueue(sources[next]); next += 1 }
                 }
             }
@@ -153,7 +190,9 @@ final class NativeSourceLibrary: ObservableObject {
     }
     func cancelSearch(clearResults: Bool = false) {
         searchGeneration = UUID(); searchTask?.cancel(); searchTask = nil; searching = false
-        if clearResults { results = []; searchFailures = [] }
+        // A cancelled delivery may have advanced its pager before reaching the UI; never resume those cursors.
+        searchSources = [:]; canLoadMore = false
+        if clearResults { results = []; resultIDs = []; searchFailures = []; searchErrors = [:] }
     }
     /// Serialize position writes so a departing chapter cannot overwrite the next chapter's anchor.
     func savePosition(_ anchor: SourceReadingAnchor) {

@@ -4,7 +4,7 @@ import Testing
 @testable import LegadoCore
 
 /// Real loopback HTTP: exercises URLSession redirects, byte streaming, timeouts and cancellation.
-private final class NativeHTTPFixture: @unchecked Sendable {
+final class NativeHTTPFixture: @unchecked Sendable {
     struct Request: Sendable {
         let method: String
         let target: String

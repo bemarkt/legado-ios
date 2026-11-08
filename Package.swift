@@ -30,6 +30,7 @@ let package = Package(
             linkerSettings: [
                 .linkedFramework("CryptoKit"),
                 .linkedFramework("Security"),
+                .linkedFramework("ImageIO"),
                 .linkedLibrary("sqlite3")
             ]
         ),

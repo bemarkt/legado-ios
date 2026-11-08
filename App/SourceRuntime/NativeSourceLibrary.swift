@@ -24,6 +24,7 @@ final class NativeSourceLibrary: ObservableObject {
         let book: SourceSavedBook
         var id: String { installation.id.uuidString + ":" + book.key.scope.accountID + ":" + book.key.bookID }
     }
+    @Published private(set) var coverRevision = UUID()
     @Published private(set) var activeAccounts: [UUID: SourceAccount] = [:]
     @Published private(set) var installations: [SourceInstallation] = []
     @Published private(set) var shelf: [ShelfBook] = []
@@ -44,6 +45,7 @@ final class NativeSourceLibrary: ObservableObject {
     }
     private var database: SourceArchive?
     private var service: SourceLibraryService?
+    private var coverService: SourceCoverService?
     private var inspected: [String: SourceSnapshot] = [:]
     private var searchTask: Task<Void, Never>?
     private var searchGeneration = UUID()
@@ -60,6 +62,24 @@ final class NativeSourceLibrary: ObservableObject {
         let service = SourceLibraryService(archive: database)
         self.database = database; self.service = service
         return (database, service)
+    }
+    func cover(_ cover: SourceWire.Cover, installation: SourceInstallation, scope: SourceScope,
+               expectedIdentity: SourceExecutionIdentity? = nil) async throws -> Data {
+        let provider = try await provider(installation, scope: scope)
+        if let expectedIdentity, provider.descriptor.identity != expectedIdentity {
+            throw SourceDomainError(.stale, "封面所属搜索结果已经过期。")
+        }
+        let service: SourceCoverService
+        if let current = coverService { service = current }
+        else {
+            service = SourceCoverService(archive: try services().0, client: SourceHTTP.client)
+            coverService = service
+        }
+        let data = try await service.image(url: cover.url, identity: provider.descriptor.identity, origins: provider.coverOrigins,
+            credentials: provider.coverCredentials, gate: provider.descriptor.commitGate)
+        guard try await selectedScope(installation) == scope else { throw SourceDomainError(.stale, "账号已切换。") }
+        try provider.descriptor.commitGate?.check()
+        return data
     }
     func releaseCatalogMemory() async { await database?.clearCatalogMemoryCache() }
     func reload() async {
@@ -125,7 +145,7 @@ final class NativeSourceLibrary: ObservableObject {
         let snapshot = try await inspect(installation.source)
         let value = try snapshot.configuration(overrides: configuration)
         try await services().0.saveConfiguration(value, scope: scope, expectedSourceDigest: installation.digest, requireSelectedAccount: true)
-        cancelSearch(clearResults: true)
+        cancelSearch(clearResults: true); coverRevision = UUID()
     }
     func selectAccount(_ accountID: String, installation: SourceInstallation) async throws {
         guard selectingAccounts.insert(installation.id).inserted else { throw SourceDomainError(.unavailable, "正在切换账号，请稍后重试。") }
@@ -187,7 +207,7 @@ final class NativeSourceLibrary: ObservableObject {
         try await credentials.clear(session: context.session, changeGate: context.changeGate)
         await credentialsChanged()
     }
-    func credentialsChanged() async { cancelSearch(clearResults: true); await reload() }
+    func credentialsChanged() async { cancelSearch(clearResults: true); coverRevision = UUID(); await reload() }
     func replace(_ installation: SourceInstallation, with snapshot: SourceSnapshot, resetConfiguration: Bool,
                  originURL: String?, locallyModified: Bool) async throws {
         guard snapshot.inspection.unsupportedRequirements.isEmpty else { throw SourceFailure(code: "UNSUPPORTED", message: "此书源要求尚未支持的能力") }

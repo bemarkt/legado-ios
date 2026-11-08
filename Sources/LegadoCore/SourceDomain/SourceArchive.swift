@@ -119,6 +119,8 @@ public actor SourceArchive {
     private static let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
     private let stateLimit: Int
     private let catalogCacheLimits: SourceCatalogCacheLimits
+    private let coverStorageBytes: Int
+    private let coverStorageCount: Int
     private struct CatalogIndex {
         let catalog: SourceCatalog
         let recordVersion: String
@@ -131,9 +133,12 @@ public actor SourceArchive {
     private var catalogOrder: [SourceBookKey] = []
     private var catalogDecodes = 0
     public init(url: URL, stateLimit: Int = 1_048_576, catalogCacheLimits: SourceCatalogCacheLimits = .init(),
-                initialChapterStorageLimits: SourceChapterStorageLimits = .init()) throws {
+                initialChapterStorageLimits: SourceChapterStorageLimits = .init(),
+                coverStorageBytes: Int = SourceCoverStorageUsage.maximumBytes, coverStorageCount: Int = SourceCoverStorageUsage.maximumCount) throws {
         self.stateLimit = stateLimit
         self.catalogCacheLimits = catalogCacheLimits
+        self.coverStorageBytes = max(1, min(coverStorageBytes, SourceCoverStorageUsage.maximumBytes))
+        self.coverStorageCount = max(1, min(coverStorageCount, SourceCoverStorageUsage.maximumCount))
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         var raw: OpaquePointer?
         guard sqlite3_open_v2(url.path, &raw, SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK, let raw else {
@@ -322,6 +327,78 @@ public actor SourceArchive {
             }
         } else { try put("configuration", scope: scopeKey(scope), key: "values", value: value) }
     }
+
+    // Cover thumbnails and their small LRU records use the generic records table; no schema bump.
+    public func coverStorageUsage() throws -> SourceCoverStorageUsage {
+        let query = try prepare("SELECT COUNT(*),COALESCE(SUM(length(payload)),0) FROM records WHERE namespace='cover-image'", strings: [])
+        defer { sqlite3_finalize(query) }
+        guard sqlite3_step(query) == SQLITE_ROW else { throw databaseError() }
+        return .init(count: Int(sqlite3_column_int64(query, 0)), bytes: Int(sqlite3_column_int64(query, 1)))
+    }
+    private func coverGeneration() throws -> String {
+        if let generation: String = try record("cover-control", scope: "", key: "generation") { return generation }
+        let generation = UUID().uuidString
+        try put("cover-control", scope: "", key: "generation", value: generation)
+        return generation
+    }
+    func prepareCover(_ key: SourceCoverKey, gate: SourceCommitGate) throws -> SourceCoverRequest {
+        try transaction(gate: gate) {
+            let generation = try coverGeneration(), scope = try scopeKey(key.scope)
+            let metadata: SourceCoverMetadata? = try record("cover-access", scope: scope, key: key.digest)
+            let query = try prepare("SELECT payload FROM records WHERE namespace='cover-image' AND scope=? AND key=?", strings: [scope, key.digest])
+            defer { sqlite3_finalize(query) }
+            let status = sqlite3_step(query)
+            guard status == SQLITE_ROW || status == SQLITE_DONE else { throw databaseError() }
+            var cached: SourceCoverRecord?
+            if status == SQLITE_ROW, let metadata {
+                let bytes = data(query, column: 0)
+                if !bytes.isEmpty, bytes.count <= SourceCoverProcessor.maximumThumbnailBytes {
+                    cached = .init(data: bytes, storedAt: metadata.storedAt)
+                    // Delete/insert changes the rowid ordering, while keeping the image blob untouched.
+                    try touchCover(scope: scope, key: key.digest, metadata: metadata)
+                }
+            }
+            return .init(key: key, generation: generation, cached: cached)
+        }
+    }
+    private func touchCover(scope: String, key: String, metadata: SourceCoverMetadata) throws {
+        let query = try prepare("DELETE FROM records WHERE namespace='cover-access' AND scope=? AND key=?", strings: [scope, key])
+        defer { sqlite3_finalize(query) }
+        try done(query)
+        try put("cover-access", scope: scope, key: key, value: metadata)
+    }
+    func saveCover(_ bytes: Data, request: SourceCoverRequest, gate: SourceCommitGate, now: Date = Date()) throws {
+        guard !bytes.isEmpty, bytes.count <= SourceCoverProcessor.maximumThumbnailBytes, bytes.count <= coverStorageBytes else {
+            throw SourceDomainError(.resourceLimit, "封面超过缓存容量。")
+        }
+        try transaction(gate: gate) {
+            guard try coverGeneration() == request.generation else { throw SourceDomainError(.stale, "封面缓存已经清理，请重新加载。") }
+            let scope = try scopeKey(request.key.scope), key = request.key.digest
+            try putPayload("cover-image", scope: scope, key: key, payload: bytes)
+            try touchCover(scope: scope, key: key, metadata: .init(storedAt: now))
+            var usage = try coverStorageUsage()
+            while usage.bytes > coverStorageBytes || usage.count > coverStorageCount {
+                let query = try prepare("SELECT scope,key FROM records WHERE namespace='cover-access' ORDER BY rowid LIMIT 1", strings: [])
+                guard sqlite3_step(query) == SQLITE_ROW else { sqlite3_finalize(query); throw databaseError() }
+                let oldestScope = string(query, column: 0), oldestKey = string(query, column: 1)
+                sqlite3_finalize(query)
+                let removal = try prepare("DELETE FROM records WHERE namespace IN ('cover-image','cover-access') AND scope=? AND key=?", strings: [oldestScope, oldestKey])
+                do { try done(removal) } catch { sqlite3_finalize(removal); throw error }
+                sqlite3_finalize(removal)
+                usage = try coverStorageUsage()
+            }
+        }
+    }
+    @discardableResult
+    public func clearCoverCache() throws -> Int {
+        try transaction {
+            let count = try coverStorageUsage().count
+            try Self.execute(handle, "DELETE FROM records WHERE namespace IN ('cover-image','cover-access')")
+            try put("cover-control", scope: "", key: "generation", value: UUID().uuidString)
+            return count
+        }
+    }
+
     public func books(scope: SourceScope) throws -> [SourceSavedBook] { try records("book", scope: scopeKey(scope), as: SourceSavedBook.self) }
     public func saveBook(_ value: SourceSavedBook, gate: SourceCommitGate? = nil) throws {
         guard value.key.bookID == value.details.ref.id else { throw SourceDomainError(.invalidInput, "Book identity mismatch") }

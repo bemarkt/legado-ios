@@ -253,6 +253,8 @@ struct WebKitSourceProvider: SourceProvider {
     private let state: SourceStateBinding
     private let allowLoopbackHTTP: Bool
     private let credentials: SourceCredentialSession?
+    var coverCredentials: SourceCredentialSession? { credentials }
+    var coverOrigins: Set<String> { Set(snapshot.inspection.metadata.origins) }
     private static let scheduler = SourceWorkScheduler(globalLimit: 2, perOriginLimit: 1)
     private var priorityOverride: SourceWorkScheduler.Priority?
 

@@ -37,6 +37,7 @@ struct NativeSourceLibraryView: View {
                     if model.searching { HStack { ProgressView(); Text("正在搜索…"); Spacer(); Button("取消") { model.cancelSearch() } } }
                     ForEach(model.results) { hit in
                         HStack {
+                            NativeSourceCoverView(model: model, installation: hit.installation, scope: hit.identity.scope, cover: hit.book.cover, expectedIdentity: hit.identity)
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(hit.book.title)
                                 Text([hit.book.author, hit.installation.name].compactMap { $0 }.joined(separator: " · "))
@@ -73,9 +74,12 @@ struct NativeSourceLibraryView: View {
                     NavigationLink {
                         NativeSourceBookView(model: model, item: item)
                     } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(item.book.details.title)
-                            Text(item.installation.name).font(.caption).foregroundStyle(.secondary)
+                        HStack(spacing: 12) {
+                            NativeSourceCoverView(model: model, installation: item.installation, scope: item.book.key.scope, cover: item.book.details.cover)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(item.book.details.title)
+                                Text(item.installation.name).font(.caption).foregroundStyle(.secondary)
+                            }
                         }
                     }
                 }
@@ -457,6 +461,8 @@ private struct NativeSourceEditorView: View {
 private struct NativeSourceStorageView: View {
     @ObservedObject var model: NativeSourceLibrary
     @State private var usage: SourceChapterStorageUsage?
+    @State private var coverUsage: SourceCoverStorageUsage?
+    @State private var clearingCovers = false
     @State private var cacheMiB = 128
     @State private var offlineMiB = 1024
     @State private var busy = false
@@ -474,6 +480,11 @@ private struct NativeSourceStorageView: View {
             } footer: {
                 Text("阅读缓存会自动回收较久未使用的章节。主动下载和升级前已有的正文会保留，需手动移除。统计为正文记录的存储量。")
             }
+            Section {
+                if let coverUsage { LabeledContent("封面缓存", value: "\(coverUsage.count) 张 · \(size(coverUsage.bytes))") }
+                Button("清理封面缓存", role: .destructive) { clearingCovers = true }
+                    .frame(minHeight: 44).disabled(busy || coverUsage?.count == 0 || coverUsage == nil)
+            } footer: { Text("缩略图最多保留 128 张或 32 MiB；超过上限会回收较久未查看的封面。") }
             Section("容量上限") {
                 Picker("阅读缓存", selection: $cacheMiB) {
                     ForEach(Array(Set([64,128,256,512,cacheMiB])).sorted(), id: \.self) { Text(size($0 * mib)).tag($0) }
@@ -497,6 +508,19 @@ private struct NativeSourceStorageView: View {
         .navigationTitle("缓存与下载").navigationBarTitleDisplayMode(.inline)
         .task { await reload() }
         .refreshable { await reload() }
+        .confirmationDialog("清理所有账号的封面缓存？", isPresented: $clearingCovers, titleVisibility: .visible) {
+            Button("清理封面", role: .destructive) {
+                busy = true
+                Task {
+                    defer { busy = false }
+                    do {
+                        let count = try await model.services().0.clearCoverCache()
+                        await reload(); feedback = "已清理 \(count) 张封面。"
+                    } catch { feedback = error.localizedDescription }
+                }
+            }
+            Button("取消", role: .cancel) { }
+        } message: { Text("下次查看时会重新下载封面，书架和正文保留。") }
         .confirmationDialog(clearing == .offlineDownloads ? "移除全部离线下载？" : "清理阅读缓存？",
                             isPresented: Binding(get: { clearing != nil }, set: { if !$0 { clearing = nil } }), titleVisibility: .visible) {
             if let selection = clearing {
@@ -512,6 +536,7 @@ private struct NativeSourceStorageView: View {
         do {
             let value = try await model.services().0.chapterStorageUsage()
             usage = value
+            coverUsage = try await model.services().0.coverStorageUsage()
             cacheMiB = max(1, value.limits.readingCacheBytes / mib)
             offlineMiB = max(1, value.limits.offlineBytes / mib)
         } catch { feedback = error.localizedDescription }

@@ -16,7 +16,10 @@ struct NativeSourceBookView: View {
     var body: some View {
         List {
             Section {
-                Text(item.book.details.title).font(.title2.bold())
+                HStack(alignment: .top, spacing: 14) {
+                    NativeSourceCoverView(model: model, installation: item.installation, scope: item.book.key.scope, cover: item.book.details.cover, width: 70)
+                    Text(item.book.details.title).font(.title2.bold())
+                }
                 if let author = item.book.details.author { Text(author).foregroundStyle(.secondary) }
                 if let description = item.book.details.description, !description.isEmpty { Text(description).font(.footnote).lineLimit(6) }
                 Toggle("仅使用离线章节", isOn: $offline)

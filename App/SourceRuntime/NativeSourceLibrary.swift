@@ -38,6 +38,7 @@ final class NativeSourceLibrary: ObservableObject {
     private var guestGates: [UUID: SourceCommitGate] = [:]
     private var credentialEditGates: [UUID: SourceCommitGate] = [:]
     private var selectingAccounts = Set<UUID>()
+    private var replacingInstallations = Set<UUID>()
     init(databaseURL: URL = SourceArchive.defaultURL(), credentials: SourceCredentialVault = .shared) {
         self.databaseURL = databaseURL; self.credentials = credentials
     }
@@ -154,9 +155,11 @@ final class NativeSourceLibrary: ObservableObject {
         return session
     }
     func credentialContext(_ installation: SourceInstallation, accountID: String) async throws -> NativeSourceCredentialContext {
+        guard !replacingInstallations.contains(installation.id) else { throw SourceDomainError(.stale, "书源正在更新，请完成后重新登录。") }
         let gate = credentialEditGates[installation.id] ?? SourceCommitGate()
         credentialEditGates[installation.id] = gate
         let session = try await credentialSession(installation, accountID: accountID)
+        guard !replacingInstallations.contains(installation.id) else { throw SourceDomainError(.stale, "书源正在更新，请完成后重新登录。") }
         try gate.check()
         return NativeSourceCredentialContext(installation: installation, session: session, changeGate: gate)
     }
@@ -197,6 +200,8 @@ final class NativeSourceLibrary: ObservableObject {
         let updated = try SourceInstallation(id: installation.id, publisherID: metadata.id, name: metadata.name, version: metadata.version,
             source: snapshot.source, origins: metadata.origins, createdAt: installation.createdAt,
             originURL: originURL, locallyModified: locallyModified)
+        guard replacingInstallations.insert(installation.id).inserted else { throw SourceDomainError(.storageConflict, "书源正在更新，请完成后重新审阅。") }
+        defer { replacingInstallations.remove(installation.id) }
         credentialEditGates.removeValue(forKey: installation.id)?.invalidate()
         try await archive.saveInstallation(updated, replacing: installation.digest, reviewedConfigurations: reviewed, resetAllAccountConfigurations: resetConfiguration)
         cancelSearch(clearResults: true)

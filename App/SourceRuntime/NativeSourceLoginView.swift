@@ -56,6 +56,7 @@ final class NativeSourceLoginBrowser: NSObject, ObservableObject, WKNavigationDe
         guard let webView, ready else { throw SourceDomainError(.unavailable, "请先等待登录页面载入。") }
         let cookies = await webView.configuration.websiteDataStore.httpCookieStore.allCookies()
         try ensureOpen()
+        guard ready else { throw SourceDomainError(.stale, "登录页面正在跳转，请载入后再保存。") }
         // Parent-domain and host cookies can collapse to one exact-origin key.
         // Keep the most specific domain, with host-only spelling first on a tie.
         let sorted = cookies.sorted {
@@ -97,7 +98,7 @@ final class NativeSourceLoginBrowser: NSObject, ObservableObject, WKNavigationDe
             && navigationResponse.response.url.map { (try? policy.validate($0.absoluteString)) != nil } == true
         decisionHandler(allowed ? .allow : .cancel)
     }
-    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) { loading = true }
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) { loading = true; ready = false }
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { loading = false; ready = !closed }
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { failed(error) }
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { failed(error) }

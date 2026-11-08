@@ -105,6 +105,7 @@ struct NativeSourceReaderView: View {
     let offline: Bool
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .body) private var textScale = 1.0
     @State private var currentID = ""
     @State private var chapter: SourceCachedChapter?
     @State private var passages: [Passage] = []
@@ -129,7 +130,7 @@ struct NativeSourceReaderView: View {
                     ForEach(passages) { passage in
                         Text(attributed(passage))
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .lineSpacing(fontSize * 0.35)
+                            .lineSpacing(fontSize * textScale * 0.35)
                             .textSelection(.enabled)
                             .id(passage.id)
                     }
@@ -159,13 +160,19 @@ struct NativeSourceReaderView: View {
         }
         .safeAreaInset(edge: .bottom) {
             HStack(spacing: 12) {
-                Button("上一章") { move(-1) }
+                Button { move(-1) } label: {
+                    if dynamicTypeSize.isAccessibilitySize { Image(systemName: "chevron.left") }
+                    else { Text("上一章") }
+                }.accessibilityLabel("上一章")
                     .frame(minWidth: 44, minHeight: 44).disabled(loading || (index ?? 0) == 0)
                 Spacer()
                 if loading { Button("取消") { loadTask?.cancel() }.frame(minWidth: 44, minHeight: 44) }
                 else { Text("\((index ?? 0) + 1) / \(catalog.chapters.count)").font(.caption).foregroundStyle(.secondary) }
                 Spacer()
-                Button("下一章") { move(1) }
+                Button { move(1) } label: {
+                    if dynamicTypeSize.isAccessibilitySize { Image(systemName: "chevron.right") }
+                    else { Text("下一章") }
+                }.accessibilityLabel("下一章")
                     .frame(minWidth: 44, minHeight: 44).disabled(loading || (index ?? 0) >= catalog.chapters.count - 1)
             }.padding().background(.bar)
         }
@@ -249,11 +256,9 @@ struct NativeSourceReaderView: View {
         return result
     }
     private func attributed(_ passage: Passage) -> AttributedString {
-        // Reading this environment value also invalidates existing attributed passages after a type-size change.
-        _ = dynamicTypeSize
-        let base = UIFont.systemFont(ofSize: passage.headingLevel == nil ? fontSize : fontSize + 4,
+        let base = UIFont.systemFont(ofSize: (passage.headingLevel == nil ? fontSize : fontSize + 4) * textScale,
                                      weight: passage.headingLevel == nil ? .regular : .semibold)
-        let output = NSMutableAttributedString(string: passage.text, attributes: [.font: UIFontMetrics(forTextStyle: .body).scaledFont(for: base), .foregroundColor: UIColor.label])
+        let output = NSMutableAttributedString(string: passage.text, attributes: [.font: base, .foregroundColor: UIColor.label])
         for mark in passage.marks {
             let range = NSRange(location: mark.startUTF16, length: mark.endUTF16 - mark.startUTF16)
             guard NSMaxRange(range) <= output.length else { continue }

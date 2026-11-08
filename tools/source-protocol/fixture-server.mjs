@@ -30,6 +30,10 @@ export async function startFixtureServer({ port = 0 } = {}) {
     const json = (status, body, headers) => send(status, JSON.stringify(body), headers);
     if (request.headers.host !== new URL(baseURL).host) { json(400, { error: 'Unexpected Host' }); return; }
     if (!['GET', 'POST'].includes(request.method)) { json(405, { error: 'Unsupported method' }); return; }
+    if (url.pathname === '/') {
+      send(200, `<!doctype html><html><head><title>Fixture login</title><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><h1>Fixture login</h1><button id="login" onclick="fetch('/state/login').then(() => document.getElementById('status').textContent='Saved in browser')">Sign in</button><p id="status">Temporary browser</p></body></html>`, { 'Content-Type': 'text/html; charset=utf-8' });
+      return;
+    }
     if (url.pathname === '/health') { json(200, { fixtureVersion: 1 }); return; }
     if (url.pathname === '/diagnostics') { json(200, { requests, activeRequests: activeRequests - 1 }); return; }
     if (url.pathname === '/redirect/allowed') { send(302, '', { Location: '/health' }); return; }

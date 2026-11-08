@@ -2,6 +2,7 @@ import XCTest
 import WebKit
 import SwiftUI
 import UIKit
+import Security
 @testable import Legado
 
 @MainActor
@@ -682,6 +683,266 @@ final class SourceRuntimeTests: XCTestCase {
         }
         XCTFail("Native search did not complete within its test budget")
         model.cancelSearch()
+    }
+
+}
+
+
+private final class RuntimeMemoryCredentials: SourceCredentialPersistence, @unchecked Sendable {
+    private let lock = NSLock()
+    private var records: [SourceScope: Data] = [:]
+    func read(scope: SourceScope) throws -> Data? { lock.lock(); defer { lock.unlock() }; return records[scope] }
+    func write(_ data: Data, scope: SourceScope) throws { lock.lock(); defer { lock.unlock() }; records[scope] = data }
+}
+
+extension SourceRuntimeTests {
+    private func accountModel() -> NativeSourceLibrary {
+        NativeSourceLibrary(databaseURL: FileManager.default.temporaryDirectory.appendingPathComponent("native-account-\(UUID().uuidString)/native.sqlite3"),
+                            credentials: SourceCredentialVault(persistence: RuntimeMemoryCredentials()))
+    }
+    private func waitForLogin(_ browser: NativeSourceLoginBrowser) async throws {
+        for _ in 0..<150 {
+            if browser.ready { return }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        throw SourceDomainError(.timeout, "Fixture login did not load")
+    }
+    private func script(_ body: String, in view: WKWebView) async throws -> String {
+        try await withCheckedThrowingContinuation { continuation in
+            view.callAsyncJavaScript(body, arguments: [:], in: nil, in: .page) { result in
+                switch result {
+                case .success(let value):
+                    if let string = value as? String { continuation.resume(returning: string) }
+                    else { continuation.resume(throwing: SourceDomainError(.invalidData, "Script did not return text")) }
+                case .failure(let error): continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
+    func testAccountSwitchKeepsShelvesSeparateAndRevokesGuestProvider() async throws {
+        let model = accountModel()
+        try await model.install(model.inspect(SourceAssets.script("OfflineExample.source")))
+        let installation = try XCTUnwrap(model.installations.first)
+        let (archive, library) = try model.services()
+        let guestProvider = try await model.provider(installation)
+        let guestBook = try await library.addBook(provider: guestProvider, ref: .init(id: "guest-book"))
+        let account = try await archive.addAccount(name: "Reader A", installationID: installation.id)
+        try await model.selectAccount(account.id, installation: installation)
+        XCTAssertTrue(model.shelf.isEmpty)
+        do { _ = try await guestProvider.search(.init(query: "stale")); XCTFail("Guest provider survived account selection") }
+        catch let error as SourceDomainError { XCTAssertEqual(error.code, .stale) }
+        do { _ = try await model.provider(installation, scope: guestBook.key.scope); XCTFail("An old book used the newly selected account") }
+        catch let error as SourceDomainError { XCTAssertEqual(error.code, .stale) }
+        let provider = try await model.provider(installation)
+        let privateBook = try await library.addBook(provider: provider, ref: .init(id: "account-book"))
+        await model.reload()
+        XCTAssertEqual(model.shelf.map(\.book.key), [privateBook.key])
+        try await model.selectAccount("guest", installation: installation)
+        XCTAssertEqual(model.shelf.map(\.book.key), [guestBook.key])
+        do { _ = try await provider.search(.init(query: "stale")); XCTFail("Account provider survived deselection") }
+        catch let error as SourceDomainError { XCTAssertEqual(error.code, .stale) }
+    }
+
+    func testBrowserLoginPersistsOnlyAfterSaveAndFeedsNativeHTTP() async throws {
+        let model = accountModel()
+        let snapshot = try await source("const response = await ctx.http.fetch('\(origin)/state/account'); const account = await response.json(); if(response.status !== 200) throw Error('AUTH_REQUIRED'); return {items:[{ref:{id:'account'},title:account.account}],nextCursor:null};")
+        try await model.install(snapshot)
+        let installation = try XCTUnwrap(model.installations.first)
+        let account = try await model.services().0.addAccount(name: "Reader", installationID: installation.id)
+        try await model.selectAccount(account.id, installation: installation)
+        let context = try await model.credentialContext(installation, accountID: account.id)
+        let browser = NativeSourceLoginBrowser(origin: origin, allowLoopbackHTTP: true)
+        defer { browser.close() }
+        try await browser.prepare(cookies: [])
+        try await waitForLogin(browser)
+        let view = try XCTUnwrap(browser.webView)
+        XCTAssertFalse(view.configuration.websiteDataStore.isPersistent)
+        let hasBridge = try await script("return String(Boolean(window.webkit?.messageHandlers?.sourceHost));", in: view)
+        XCTAssertEqual(hasBridge, "false")
+        let marker = try await script("await fetch('/state/login'); return 'done';", in: view)
+        XCTAssertEqual(marker, "done")
+        let before = try await context.session.headers(for: URL(string: origin)!)
+        XCTAssertTrue(before.isEmpty)
+        let raw = try await script("return document.cookie;", in: view)
+        XCTAssertFalse(raw.contains("fixture_session"), "HTTPOnly cookie appeared in document.cookie")
+        let cookies = try await browser.cookies()
+        XCTAssertEqual(cookies.first(where: { $0.name == "fixture_session" })?.value, "fixture-a")
+        try await model.saveLoginCookies(cookies, origin: origin, context: context)
+        let current = try await model.credentialSession(installation, accountID: account.id)
+        let response = try await SourceHTTP.fetch(.init(url: origin + "/state/account", method: "GET", headers: [:], body: nil, redirect: "follow"),
+            policy: .init(origins: [origin], allowLoopbackHTTP: true), credentials: current)
+        XCTAssertEqual(response.status, 200)
+        let data = try XCTUnwrap(Data(base64Encoded: response.body))
+        XCTAssertEqual(try object(String(decoding: data, as: UTF8.self))["account"] as? String, "fixture-a")
+        let provider = try WebKitSourceProvider(snapshot: snapshot, installation: installation, accountID: account.id,
+            archive: model.services().0, allowLoopbackHTTP: true, credentials: current)
+        let search = try await provider.search(.init(query: "account"))
+        XCTAssertEqual(search.items.first?.title, "fixture-a")
+        let reopened = NativeSourceLoginBrowser(origin: origin, allowLoopbackHTTP: true)
+        defer { reopened.close() }
+        try await reopened.prepare(cookies: model.credentials.browserCookies(session: current))
+        try await waitForLogin(reopened)
+        let restored = try await reopened.cookies()
+        XCTAssertEqual(restored.first(where: { $0.name == "fixture_session" })?.value, "fixture-a")
+    }
+
+    func testCancelledLoginIsDiscardedAndBrowserBlocksOtherOrigins() async throws {
+        let model = accountModel()
+        try await model.install(source("return {items:[],nextCursor:null};"))
+        let installation = try XCTUnwrap(model.installations.first)
+        let account = try await model.services().0.addAccount(name: "Reader", installationID: installation.id)
+        try await model.selectAccount(account.id, installation: installation)
+        let context = try await model.credentialContext(installation, accountID: account.id)
+        let browser = NativeSourceLoginBrowser(origin: origin, allowLoopbackHTTP: true)
+        try await browser.prepare(cookies: [])
+        try await waitForLogin(browser)
+        let view = try XCTUnwrap(browser.webView)
+        _ = try await script("await fetch('/state/login'); return 'done';", in: view)
+        let marker = UUID().uuidString
+        let alternate = origin.replacingOccurrences(of: "127.0.0.1", with: "localhost")
+        // The host-only check intentionally returns 400, but still records a reachable control request.
+        let (_, control) = try await URLSession.shared.data(from: URL(string: alternate + "/outside-control-" + marker)!)
+        XCTAssertEqual((control as? HTTPURLResponse)?.statusCode, 400)
+        let blocked = try await script("try { await fetch('\(alternate)/outside-browser-\(marker)'); return 'allowed'; } catch { return 'blocked'; }", in: view)
+        XCTAssertEqual(blocked, "blocked")
+        let (diagnosticsData, _) = try await URLSession.shared.data(from: URL(string: origin + "/diagnostics")!)
+        let diagnostics = try object(String(decoding: diagnosticsData, as: UTF8.self))
+        let requests = try XCTUnwrap(diagnostics["requests"] as? [[String: Any]])
+        XCTAssertTrue(requests.contains { ($0["path"] as? String) == "/outside-control-" + marker })
+        XCTAssertFalse(requests.contains { ($0["path"] as? String) == "/outside-browser-" + marker }, "Cross-origin request reached the server despite the content rule")
+        view.load(URLRequest(url: URL(string: "https://outside.example/")!))
+        for _ in 0..<50 {
+            if browser.message != nil { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertNotNil(browser.message)
+        XCTAssertEqual(view.url.flatMap(SourceHostHTTPPolicy.origin), origin)
+        browser.close()
+        let saved = try await context.session.headers(for: URL(string: origin)!)
+        XCTAssertTrue(saved.isEmpty)
+        let fresh = NativeSourceLoginBrowser(origin: origin, allowLoopbackHTTP: true)
+        defer { fresh.close() }
+        try await fresh.prepare(cookies: [])
+        try await waitForLogin(fresh)
+        let cookies = try await fresh.cookies()
+        XCTAssertFalse(cookies.contains { $0.name == "fixture_session" })
+    }
+
+    func testSourceReplacementRejectsAlreadyOpenCredentialEditor() async throws {
+        let model = accountModel()
+        let original = try await model.inspect(SourceAssets.script("OfflineExample.source"))
+        try await model.install(original)
+        let installation = try XCTUnwrap(model.installations.first)
+        let account = try await model.services().0.addAccount(name: "Reader", installationID: installation.id)
+        try await model.selectAccount(account.id, installation: installation)
+        let context = try await model.credentialContext(installation, accountID: account.id)
+        let candidate = try await model.inspect(original.source.replacingOccurrences(of: "离线示例", with: "Edited account fixture"))
+        try await model.replace(installation, with: candidate, resetConfiguration: false, originURL: nil, locallyModified: true)
+        do {
+            try await model.saveBearer("discarded-token", origin: installation.origins[0], context: context)
+            XCTFail("Stale credential editor saved a token")
+        } catch let error as SourceDomainError { XCTAssertEqual(error.code, .stale) }
+        let status = try await model.credentials.status(scope: context.session.scope)
+        XCTAssertTrue(status.bearerOrigins.isEmpty)
+    }
+
+    func testCredentialPersistenceUsesActualSimulatorKeychain() async throws {
+        let service = "org.example.source-tests.\(UUID().uuidString)"
+        defer { SecItemDelete([kSecClass: kSecClassGenericPassword, kSecAttrService: service] as CFDictionary) }
+        let persistence = SourceKeychainCredentials(service: service)
+        let scope = try SourceScope(installationID: UUID(), accountID: UUID().uuidString)
+        let vault = SourceCredentialVault(persistence: persistence)
+        let session = try await vault.session(scope: scope, allowedOrigins: ["https://fixture.example"])
+        try await vault.setBearer("synthetic-token", origin: "https://fixture.example", session: session)
+        let reloaded = SourceCredentialVault(persistence: persistence)
+        let current = try await reloaded.session(scope: scope, allowedOrigins: ["https://fixture.example"])
+        let headers = try await current.headers(for: URL(string: "https://fixture.example/")!)
+        XCTAssertEqual(headers, ["Authorization": "Bearer synthetic-token"])
+        try await reloaded.clear(scope: scope)
+        let empty = try await SourceCredentialVault(persistence: persistence).session(scope: scope, allowedOrigins: ["https://fixture.example"])
+        let afterClear = try await empty.headers(for: URL(string: "https://fixture.example/")!)
+        XCTAssertTrue(afterClear.isEmpty)
+    }
+    func testSwitchingGuestAccountRejectsDelayedStateWrites() async throws {
+        let model = accountModel()
+        let snapshot = try await source("await ctx.storage.set('started', true); await new Promise(r => setTimeout(r, 800)); await ctx.storage.set('late', true); return {items:[],nextCursor:null};")
+        try await model.install(snapshot)
+        let installation = try XCTUnwrap(model.installations.first)
+        let archive = try model.services().0
+        let guest = try SourceScope(installationID: installation.id)
+        let provider = try await model.provider(installation)
+        let operation = Task { try await provider.search(.init(query: "test")) }
+        var started = false
+        for _ in 0..<750 {
+            if try await archive.state(scope: guest, key: "started") != nil { started = true; break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertTrue(started, "Source operation never reached the state bridge")
+        let account = try await archive.addAccount(name: "Reader", installationID: installation.id)
+        try await model.selectAccount(account.id, installation: installation)
+        do { _ = try await operation.value; XCTFail("Revoked guest operation succeeded") }
+        catch let error as SourceDomainError { XCTAssertEqual(error.code, .stale) }
+        let late = try await archive.state(scope: guest, key: "late")
+        XCTAssertNil(late)
+    }
+
+    func testSourceReplacementValidatesNonselectedAccountSettings() async throws {
+        let model = accountModel()
+        let original = try await source("return {items:[],nextCursor:null};", settings: "{region:{type:'enum',label:'Region',default:'a',options:[{value:'a',label:'A'},{value:'b',label:'B'}]}}")
+        try await model.install(original)
+        let installation = try XCTUnwrap(model.installations.first)
+        let archive = try model.services().0
+        let account = try await archive.addAccount(name: "Reader", installationID: installation.id)
+        let scope = try SourceScope(installationID: installation.id, accountID: account.id)
+        try await archive.saveConfiguration(.object(["region": .string("b")]), scope: scope)
+        let changed = try await model.inspect(original.source.replacingOccurrences(of: "options:[{value:'a',label:'A'},{value:'b',label:'B'}]", with: "options:[{value:'a',label:'A'}]"))
+        do {
+            try await model.replace(installation, with: changed, resetConfiguration: false, originURL: nil, locallyModified: true)
+            XCTFail("Source update ignored the nonselected account's invalid settings")
+        } catch { XCTAssertEqual(model.installations.first?.digest, installation.digest) }
+        try await model.replace(installation, with: changed, resetConfiguration: true, originURL: nil, locallyModified: true)
+        let reset = try await archive.configuration(scope: scope)
+        XCTAssertEqual(reset, .object([:]))
+    }
+
+    func testNativeAccountSettingsRenderAtPhoneAndAccessibilitySizes() async throws {
+        let model = accountModel()
+        try await model.install(model.inspect(SourceAssets.script("OfflineExample.source")))
+        let installation = try XCTUnwrap(model.installations.first)
+        let account = try await model.services().0.addAccount(name: "日常阅读", installationID: installation.id)
+        try await model.selectAccount(account.id, installation: installation)
+        for (name, size, category, dark) in [
+            ("phone", CGSize(width: 390, height: 844), UIContentSizeCategory.large, false),
+            ("accessibility", CGSize(width: 390, height: 844), UIContentSizeCategory.accessibilityExtraExtraExtraLarge, true)
+        ] {
+            let screen = NavigationStack { NativeSourceAccountsView(model: model, initialInstallation: installation) }
+                .environment(\.dynamicTypeSize, dark ? .accessibility5 : .large)
+            let host = UIHostingController(rootView: screen)
+            host.traitOverrides.preferredContentSizeCategory = category
+            host.overrideUserInterfaceStyle = dark ? .dark : .light
+            let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+            let previous = scene.windows.first(where: \.isKeyWindow)
+            let window = UIWindow(windowScene: scene), container = UIViewController()
+            window.rootViewController = container; window.makeKeyAndVisible()
+            container.addChild(host); host.view.frame = CGRect(origin: .zero, size: size)
+            container.view.addSubview(host.view); host.didMove(toParent: container)
+            defer { window.isHidden = true; previous?.makeKeyAndVisible() }
+            try await Task.sleep(for: .milliseconds(600))
+            window.layoutIfNeeded(); host.view.layoutIfNeeded()
+            var rendered = false
+            let image = UIGraphicsImageRenderer(size: size).image { _ in
+                rendered = host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true)
+            }
+            XCTAssertTrue(rendered)
+            let pixels = try XCTUnwrap(image.cgImage?.dataProvider?.data) as Data
+            XCTAssertGreaterThan(Set(pixels).count, 8)
+            let attachment = XCTAttachment(image: image); attachment.name = "native-accounts-" + name; attachment.lifetime = .keepAlways
+            add(attachment)
+            for scroll in descendants(host.view).compactMap({ $0 as? UIScrollView }) where scroll.bounds.width > 100 {
+                XCTAssertLessThanOrEqual(scroll.contentSize.width, scroll.bounds.width + 1)
+            }
+        }
     }
 
 }

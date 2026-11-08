@@ -1,6 +1,8 @@
 import Foundation
 import CryptoKit
+#if SWIFT_PACKAGE
 import LegadoCore
+#endif
 
 /// P1 candidate data only. No Legado rules or engine objects cross this boundary.
 struct SourceFailure: Error, Codable, Sendable, LocalizedError {
@@ -59,8 +61,9 @@ struct SourceInspection: Decodable, Sendable {
         let version: String
         let origins: [String]
         struct Setting: Decodable, Sendable {
-            struct Option: Decodable, Sendable { let value: String }
+            struct Option: Decodable, Sendable { let value: String; let label: String }
             let type: String
+            let label: String
             let `default`: SourceSettingValue
             let maxLength: Int?
             let minimum: Double?

@@ -3,7 +3,7 @@ import Foundation
 public actor SourceLibraryService {
     public enum ReadPolicy: Sendable, Equatable { case current, offline }
     public let archive: SourceArchive
-    private var generations: [String: UUID] = [:]
+    private var generations: [String: SourceCommitGate] = [:]
     public init(archive: SourceArchive) { self.archive = archive }
 
     public func addBook(provider: any SourceProvider, ref: SourceWire.SourceRef) async throws -> SourceSavedBook {
@@ -16,38 +16,50 @@ public actor SourceLibraryService {
     }
 
     public func refreshCatalog(provider: any SourceProvider, book: SourceWire.SourceRef) async throws -> SourceCatalog {
+        try Task.checkCancellation()
         let key = try SourceBookKey(scope: provider.descriptor.identity.scope, bookID: book.id)
         let operation = "catalog:" + SourceCoding.digest(try SourceCoding.encode(key))
-        let generation = UUID()
+        generations[operation]?.invalidate()
+        let generation = SourceCommitGate()
         generations[operation] = generation
-        defer { if generations[operation] == generation { generations.removeValue(forKey: operation) } }
+        defer {
+            generation.invalidate()
+            if generations[operation] === generation { generations.removeValue(forKey: operation) }
+        }
         let catalog = try await SourceCatalogLoader().load(provider: provider, book: book)
         try Task.checkCancellation()
-        guard generations[operation] == generation else { throw SourceDomainError(.stale, "A newer catalog refresh superseded this result") }
-        try await archive.saveCatalog(catalog)
+        guard generations[operation] === generation else { throw SourceDomainError(.stale, "A newer catalog refresh superseded this result") }
+        try await archive.saveCatalog(catalog, gate: generation)
         return catalog
     }
 
     public func chapter(provider: any SourceProvider, book: SourceWire.SourceRef, chapter: SourceWire.SourceRef,
                         policy: ReadPolicy = .current) async throws -> SourceCachedChapter {
+        try Task.checkCancellation()
         let identity = provider.descriptor.identity
         let key = try SourceChapterKey(book: .init(scope: identity.scope, bookID: book.id), chapterID: chapter.id)
+        let operation = "chapter:" + SourceCoding.digest(try SourceCoding.encode(key))
+        generations[operation]?.invalidate()
+        let generation = SourceCommitGate()
+        generations[operation] = generation
+        defer {
+            generation.invalidate()
+            if generations[operation] === generation { generations.removeValue(forKey: operation) }
+        }
         if let cached = try await archive.chapter(key, identity: identity, allowPreviousExtraction: policy == .offline) {
+            try Task.checkCancellation()
+            guard generations[operation] === generation else { throw SourceDomainError(.stale, "Chapter read superseded") }
             return cached
         }
         guard policy != .offline else { throw SourceDomainError(.notDownloaded, "This chapter has not been downloaded for this account") }
-        let operation = "chapter:" + SourceCoding.digest(try SourceCoding.encode(key))
-        let generation = UUID()
-        generations[operation] = generation
-        defer { if generations[operation] == generation { generations.removeValue(forKey: operation) } }
         let content = try await provider.content(.init(book: book, chapter: chapter))
         try Task.checkCancellation()
-        guard provider.descriptor.identity == identity, generations[operation] == generation else {
+        guard provider.descriptor.identity == identity, generations[operation] === generation else {
             throw SourceDomainError(.stale, "Chapter result belongs to an older operation")
         }
         let value = SourceCachedChapter(key: key, identity: identity, content: content, document: try ChapterNormalizer.normalize(content))
         try Task.checkCancellation()
-        try await archive.saveChapter(value)
+        try await archive.saveChapter(value, gate: generation)
         return value
     }
 

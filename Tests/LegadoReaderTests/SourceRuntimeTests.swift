@@ -365,4 +365,116 @@ final class SourceRuntimeTests: XCTestCase {
                                                    policy: .init(origins: [origin], allowLoopbackHTTP: true, maximumBytes: 1024, maximumRedirects: 0, timeout: 5))
         XCTAssertEqual(recovered.status, 200)
     }
+
+    func testInstalledStoragePersistsAcrossPagesAndSeparatesAccounts() async throws {
+        let databaseURL = FileManager.default.temporaryDirectory.appendingPathComponent("source-webkit-\(UUID().uuidString)/native.sqlite3")
+        let archive = try SourceArchive(url: databaseURL)
+        let snapshot = try await source("""
+        const entry = await ctx.storage.get('counter');
+        const next = (entry?.value ?? 0) + 1;
+        const written = await ctx.storage.set('counter', next, {ifRevision:entry?.revision ?? null});
+        if(written.value !== next || !written.revision) throw Error('Write response lost');
+        return {items:[{ref:{id:'counter'},title:String(next)}],nextCursor:null};
+        """)
+        let install = try SourceInstallation(publisherID: snapshot.inspection.metadata.id, name: "Storage fixture", version: "1.0.0",
+                                            source: snapshot.source, origins: snapshot.inspection.metadata.origins)
+        try await archive.saveInstallation(install)
+        for expected in [1,2] {
+            let provider = try WebKitSourceProvider(snapshot: snapshot, installation: install, archive: SourceArchive(url: databaseURL))
+            let page = try await provider.search(.init(query: "counter"))
+            XCTAssertEqual(page.items.first?.title, String(expected))
+        }
+        let other = try WebKitSourceProvider(snapshot: snapshot, installation: install, accountID: "other", archive: archive)
+        let separate = try await other.search(.init(query: "counter"))
+        XCTAssertEqual(separate.items.first?.title, "1")
+    }
+
+    func testStorageNullRevisionConflictsAndInvalidObjectsOnWebKit() async throws {
+        let archive = try SourceArchive(url: FileManager.default.temporaryDirectory.appendingPathComponent("source-webkit-\(UUID().uuidString)/native.sqlite3"))
+        let snapshot = try await source("""
+        const original=await ctx.storage.set('value',null,{ifRevision:null});
+        const read=await ctx.storage.get('value');
+        if(read === null || read.value !== null || read.revision !== original.revision) throw Error('Null is not missing');
+        try { await ctx.storage.set('value',1,{ifRevision:null}); throw Error('Conflict accepted'); }
+        catch(e) { if(e.code !== 'STORAGE_CONFLICT') throw e; }
+        await ctx.storage.remove('value',{ifRevision:original.revision});
+        if(await ctx.storage.get('value') !== null) throw Error('Remove failed');
+        const next=await ctx.storage.set('value',2,{ifRevision:null});
+        if(next.revision === original.revision) throw Error('Revision reused');
+        for(const value of [undefined,NaN,Infinity,new Date(),{get x(){throw Error('Getter executed')}},[,,]]) {
+          try { await ctx.storage.set('invalid',value); throw Error('Invalid storage accepted'); }
+          catch(e) { if(e.code !== 'INVALID_INPUT') throw e; }
+        }
+        try { await ctx.storage.set('large','x'.repeat(65537)); throw Error('Oversize storage accepted'); }
+        catch(e) { if(e.code !== 'RESOURCE_LIMIT') throw e; }
+        return {items:[],nextCursor:null};
+        """)
+        let scope = try SourceScope(installationID: UUID())
+        _ = try await SourceRuntime().run(.search, inputJSON: #"{"query":"test"}"#, snapshot: snapshot,
+                                          state: SourceStateBinding(archive: archive, scope: scope))
+        let invalid = try await archive.state(scope: scope, key: "invalid")
+        XCTAssertNil(invalid)
+    }
+
+    func testConfigurationOverridesAreValidatedAndBoundToProviderIdentity() async throws {
+        let snapshot = try await source("return {items:[{ref:{id:'config'},title:ctx.config.mode+':'+ctx.config.count+':'+ctx.config.enabled}],nextCursor:null};",
+            settings: """
+            {mode:{type:'enum',label:'Mode',default:'a',options:[{value:'a',label:'A'},{value:'b',label:'B'}]},
+             count:{type:'number',label:'Count',default:0,minimum:0,maximum:5},enabled:{type:'boolean',label:'Enabled',default:false}}
+            """)
+        let archive = try SourceArchive(url: FileManager.default.temporaryDirectory.appendingPathComponent("source-config-\(UUID().uuidString)/native.sqlite3"))
+        let installation = try SourceInstallation(publisherID: snapshot.inspection.metadata.id, name: "Config", version: "1.0.0", source: snapshot.source, origins: snapshot.inspection.metadata.origins)
+        let initial = try WebKitSourceProvider(snapshot: snapshot, installation: installation, archive: archive)
+        let configured = try WebKitSourceProvider(snapshot: snapshot, installation: installation, configuration: .object(["mode":.string("b"),"count":.number(2),"enabled":.bool(true)]), archive: archive)
+        XCTAssertNotEqual(initial.descriptor.identity, configured.descriptor.identity)
+        let page = try await configured.search(.init(query: "config"))
+        XCTAssertEqual(page.items.first?.title, "b:2:true")
+        let invalidConfigs: [SourceJSON] = [.object(["mode":.string("unknown")]),.object(["count":.number(6)]),.object(["unknown":.bool(true)])]
+        for config in invalidConfigs {
+            XCTAssertThrowsError(try snapshot.configuration(overrides: config))
+        }
+    }
+
+    func testTypedLibraryFlowPersistsCatalogContentAndReadingAnchorOnWebKit() async throws {
+        let databaseURL = FileManager.default.temporaryDirectory.appendingPathComponent("source-library-\(UUID().uuidString)/native.sqlite3")
+        let archive = try SourceArchive(url: databaseURL)
+        let snapshot = try await SourceInspector().inspect(fixture("html.source.js"))
+        let installation = try SourceInstallation(publisherID: snapshot.inspection.metadata.id, name: "HTML fixture", version: "1.0.0", source: snapshot.source, origins: snapshot.inspection.metadata.origins)
+        try await archive.saveInstallation(installation)
+        let provider = try WebKitSourceProvider(snapshot: snapshot, installation: installation, archive: archive, allowLoopbackHTTP: true)
+        let library = SourceLibraryService(archive: archive)
+        let page = try await provider.search(.init(query: "demo"))
+        let book = try await library.addBook(provider: provider, ref: XCTUnwrap(page.items.first?.ref))
+        let catalog = try await library.refreshCatalog(provider: provider, book: book.details.ref)
+        XCTAssertEqual(catalog.chapters.count, 2)
+        let downloaded = try await library.download(provider: provider, catalog: catalog)
+        XCTAssertEqual(downloaded, 2)
+        let content = try await library.chapter(provider: provider, book: book.details.ref, chapter: catalog.chapters[0].ref)
+        XCTAssertFalse(content.document.plainText.contains("throw new Error"))
+        let anchor = SourceReadingAnchor(chapter: content.key, document: content.document, offsetUTF16: 5)
+        try await archive.saveAnchor(anchor)
+        let reopened = try SourceArchive(url: databaseURL)
+        let saved = try await reopened.books(scope: provider.descriptor.identity.scope)
+        XCTAssertEqual(saved.count, 1)
+        let savedAnchor = try await reopened.anchor(book: book.key)
+        XCTAssertEqual(savedAnchor, anchor)
+        let offline = try await SourceLibraryService(archive: reopened).chapter(provider: provider, book: book.details.ref, chapter: catalog.chapters[0].ref, policy: .offline)
+        XCTAssertEqual(offline.document, content.document)
+    }
+
+    func testOperationCompletionRejectsLaterStorageWrites() async throws {
+        let archive = try SourceArchive(url: FileManager.default.temporaryDirectory.appendingPathComponent("source-late-\(UUID().uuidString)/native.sqlite3"))
+        let scope = try SourceScope(installationID: UUID())
+        let snapshot = try await source("""
+        await ctx.storage.set('finished','saved');
+        setTimeout(()=>ctx.storage.set('late','must not persist').catch(()=>{}),500);
+        return {items:[],nextCursor:null};
+        """)
+        _ = try await SourceRuntime().run(.search, inputJSON: #"{"query":"test"}"#, snapshot: snapshot, state: .init(archive: archive, scope: scope))
+        try await Task.sleep(for: .milliseconds(600))
+        let late = try await archive.state(scope: scope, key: "late")
+        let finished = try await archive.state(scope: scope, key: "finished")
+        XCTAssertNil(late)
+        XCTAssertEqual(finished?.value, .string("saved"))
+    }
 }

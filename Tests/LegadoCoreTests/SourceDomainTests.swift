@@ -33,6 +33,39 @@ private actor DomainFixtureProvider: SourceProvider {
     }
 }
 
+/// First result is deliberately held after the newer result has committed.
+private actor DelayedDomainProvider: SourceProvider {
+    nonisolated let descriptor: SourceProviderDescriptor
+    private var calls = 0
+    private var pending: CheckedContinuation<Void, Never>?
+    private var started: CheckedContinuation<Void, Never>?
+    init(scope: SourceScope) throws {
+        descriptor = .init(identity: try .init(scope: scope, sourceDigest: String(repeating: "a", count: 64), configuration: .object([:])), name: "Delayed")
+    }
+    func waitForFirstCall() async {
+        if calls > 0 { return }
+        await withCheckedContinuation { started = $0 }
+    }
+    func release() { pending?.resume(); pending = nil }
+    private func resultLabel() async -> String {
+        calls += 1
+        guard calls == 1 else { return "new" }
+        await withCheckedContinuation { continuation in
+            pending = continuation
+            started?.resume(); started = nil
+        }
+        return "old"
+    }
+    func search(_ input: SourceWire.SearchInput) async throws -> SourceWire.SearchPage { .init(items: [], nextCursor: .null) }
+    func book(_ input: SourceWire.BookInput) async throws -> SourceWire.BookDetails { .init(ref: input.ref, title: "Book") }
+    func chapters(_ input: SourceWire.ChaptersInput) async throws -> SourceWire.ChapterPage {
+        .init(items: [.init(ref: .init(id: "chapter"), title: await resultLabel())], nextCursor: .null)
+    }
+    func content(_ input: SourceWire.ContentInput) async throws -> SourceWire.ChapterContent {
+        .init(body: .text(.init(text: await resultLabel())))
+    }
+}
+
 @Suite("Native source domain")
 struct SourceDomainTests {
     private func scope(_ account: String = "guest", id: UUID = UUID()) throws -> SourceScope { try .init(installationID: id, accountID: account) }
@@ -274,4 +307,43 @@ struct SourceDomainTests {
         #expect(updates.filter { $0.page != nil }.count == 1)
         #expect(updates.filter { $0.error != nil }.count == 1)
     }
+    @Test func completedOperationCannotCommitStateOrCache() async throws {
+        let archive = try SourceArchive(url: database()), scope = try scope()
+        let gate = SourceCommitGate()
+        _ = try await archive.setState(scope: scope, key: "saved", value: .string("before"), gate: gate)
+        gate.invalidate()
+        await #expect(throws: SourceDomainError.self) { try await archive.setState(scope: scope, key: "saved", value: .string("late"), gate: gate) }
+        await #expect(throws: SourceDomainError.self) { try await archive.removeState(scope: scope, key: "saved", gate: gate) }
+        #expect(try await archive.state(scope: scope, key: "saved")?.value == .string("before"))
+        let provider = try DomainFixtureProvider(scope: scope)
+        let catalog = try await SourceCatalogLoader().load(provider: provider, book: .init(id: "book"))
+        await #expect(throws: SourceDomainError.self) { try await archive.saveCatalog(catalog, gate: gate) }
+        #expect(try await archive.catalog(book: .init(scope: scope, bookID: "book")) == nil)
+    }
+
+    @Test func supersededCatalogCannotReplaceNewerCatalog() async throws {
+        let archive = try SourceArchive(url: database()), provider = try DelayedDomainProvider(scope: scope())
+        let library = SourceLibraryService(archive: archive)
+        let old = Task { try await library.refreshCatalog(provider: provider, book: .init(id: "book")) }
+        await provider.waitForFirstCall()
+        let new = try await library.refreshCatalog(provider: provider, book: .init(id: "book"))
+        await provider.release()
+        await #expect(throws: SourceDomainError.self) { try await old.value }
+        let key = try SourceBookKey(scope: provider.descriptor.identity.scope, bookID: "book")
+        #expect(new.chapters.first?.title == "new")
+        #expect(try await archive.catalog(book: key) == new)
+    }
+
+    @Test func supersededChapterCannotReplaceNewerChapter() async throws {
+        let archive = try SourceArchive(url: database()), provider = try DelayedDomainProvider(scope: scope())
+        let library = SourceLibraryService(archive: archive)
+        let old = Task { try await library.chapter(provider: provider, book: .init(id: "book"), chapter: .init(id: "chapter")) }
+        await provider.waitForFirstCall()
+        let new = try await library.chapter(provider: provider, book: .init(id: "book"), chapter: .init(id: "chapter"))
+        await provider.release()
+        await #expect(throws: SourceDomainError.self) { try await old.value }
+        #expect(new.document.plainText == "new")
+        #expect(try await archive.chapter(new.key, identity: provider.descriptor.identity) == new)
+    }
+
 }

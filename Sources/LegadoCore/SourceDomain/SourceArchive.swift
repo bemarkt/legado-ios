@@ -110,8 +110,8 @@ public actor SourceArchive {
         try put("book", scope: scopeKey(value.key.scope), key: value.key.bookID, value: value)
     }
     public func catalog(book: SourceBookKey) throws -> SourceCatalog? { try record("catalog", scope: scopeKey(book.scope), key: book.bookID) }
-    public func saveCatalog(_ value: SourceCatalog) throws {
-        try put("catalog", scope: scopeKey(value.identity.scope), key: value.book.id, value: value)
+    public func saveCatalog(_ value: SourceCatalog, gate: SourceCommitGate? = nil) throws {
+        try put("catalog", scope: scopeKey(value.identity.scope), key: value.book.id, value: value, gate: gate)
     }
     public func chapter(_ key: SourceChapterKey, identity: SourceExecutionIdentity, allowPreviousExtraction: Bool = false) throws -> SourceCachedChapter? {
         guard key.book.scope == identity.scope else { throw SourceDomainError(.invalidInput, "Cache scope mismatch") }
@@ -121,9 +121,9 @@ public actor SourceArchive {
         if !allowPreviousExtraction, result.identity != identity { return nil }
         return result
     }
-    public func saveChapter(_ value: SourceCachedChapter) throws {
+    public func saveChapter(_ value: SourceCachedChapter, gate: SourceCommitGate? = nil) throws {
         guard value.key.book.scope == value.identity.scope else { throw SourceDomainError(.invalidInput, "Chapter cache scope mismatch") }
-        try put("chapter", scope: scopeKey(value.key.book.scope), key: chapterKey(value.key), value: value)
+        try put("chapter", scope: scopeKey(value.key.book.scope), key: chapterKey(value.key), value: value, gate: gate)
     }
     public func anchor(book: SourceBookKey) throws -> SourceReadingAnchor? { try record("anchor", scope: scopeKey(book.scope), key: book.bookID) }
     public func saveAnchor(_ value: SourceReadingAnchor) throws { try put("anchor", scope: scopeKey(value.chapter.book.scope), key: value.chapter.book.bookID, value: value) }
@@ -139,10 +139,10 @@ public actor SourceArchive {
         }
     }
     @discardableResult
-    public func setState(scope: SourceScope, key: String, value: SourceJSON, condition: SourceStateCondition = .any) throws -> SourceStateEntry {
+    public func setState(scope: SourceScope, key: String, value: SourceJSON, condition: SourceStateCondition = .any, gate: SourceCommitGate? = nil) throws -> SourceStateEntry {
         try validateStateKey(key)
         let payload = try value.validatedData(maximumBytes: 65_536)
-        return try transaction {
+        return try transaction(gate: gate) {
             let current = try state(scope: scope, key: key)
             try check(condition, current: current)
             let query = try prepare("SELECT COALESCE(SUM(length(payload)),0) FROM source_state WHERE scope=? AND key<>?", strings: [scopeKey(scope), key])
@@ -160,9 +160,9 @@ public actor SourceArchive {
             return result
         }
     }
-    public func removeState(scope: SourceScope, key: String, condition: SourceStateCondition = .any) throws {
+    public func removeState(scope: SourceScope, key: String, condition: SourceStateCondition = .any, gate: SourceCommitGate? = nil) throws {
         try validateStateKey(key)
-        try transaction {
+        try transaction(gate: gate) {
             try check(condition, current: state(scope: scope, key: key))
             let statement = try prepare("DELETE FROM source_state WHERE scope=? AND key=?", strings: [scopeKey(scope), key])
             defer { sqlite3_finalize(statement) }
@@ -204,22 +204,24 @@ public actor SourceArchive {
             }
         }
     }
-    private func put<T: Encodable>(_ namespace: String, scope: String, key: String, value: T) throws {
+    private func put<T: Encodable>(_ namespace: String, scope: String, key: String, value: T, gate: SourceCommitGate? = nil) throws {
         try Task.checkCancellation()
         let payload = try SourceCoding.encode(value)
         guard payload.count <= 64 * 1024 * 1024 else { throw SourceDomainError(.resourceLimit, "Archive record budget exceeded") }
         let statement = try prepare("INSERT INTO records(namespace,scope,key,payload) VALUES(?,?,?,?) ON CONFLICT(namespace,scope,key) DO UPDATE SET payload=excluded.payload", strings: [namespace, scope, key])
         defer { sqlite3_finalize(statement) }
         try bind(payload, to: statement, at: 4)
-        try done(statement)
+        if let gate { try transaction(gate: gate) { try done(statement) } }
+        else { try Task.checkCancellation(); try done(statement) }
     }
-    private func transaction<T>(_ body: () throws -> T) throws -> T {
+    private func transaction<T>(gate: SourceCommitGate? = nil, _ body: () throws -> T) throws -> T {
         try Task.checkCancellation()
         try Self.execute(handle, "BEGIN IMMEDIATE")
         do {
             let result = try body()
             try Task.checkCancellation()
-            try Self.execute(handle, "COMMIT")
+            if let gate { try gate.withCommit { try Self.execute(handle, "COMMIT") } }
+            else { try Self.execute(handle, "COMMIT") }
             return result
         } catch { try? Self.execute(handle, "ROLLBACK"); throw error }
     }

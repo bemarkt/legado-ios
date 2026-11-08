@@ -13,7 +13,7 @@ struct SourceProtocolLabView: View {
     var body: some View {
         Form {
             Section {
-                Text("这是自有书源协议的实验入口。可检查单文件源码，并逐项执行搜索、详情、目录与正文。结果暂不写入书架；账号登录和持久化存储尚未接入。")
+                Text("这是自有书源协议的实验入口。可检查单文件源码，并逐项执行搜索、详情、目录与正文。此处结果只用于调试；保存书源和离线阅读请使用「原生书源阅读」。")
                     .font(.footnote).foregroundStyle(.secondary)
                 Button("载入离线示例") {
                     do { source = try SourceAssets.script("OfflineExample.source"); snapshot = nil; result = "" }

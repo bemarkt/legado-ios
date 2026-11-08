@@ -171,3 +171,18 @@ public protocol SourceProvider: Sendable {
     func chapters(_ input: SourceWire.ChaptersInput) async throws -> SourceWire.ChapterPage
     func content(_ input: SourceWire.ContentInput) async throws -> SourceWire.ChapterContent
 }
+
+/// Linearizes native commits against operation completion or supersession.
+/// A mutation already committed before invalidation remains valid; no later commit is admitted.
+public final class SourceCommitGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var active = true
+    public init() { }
+    public func invalidate() { lock.lock(); active = false; lock.unlock() }
+    public func withCommit<T>(_ body: () throws -> T) throws -> T {
+        lock.lock(); defer { lock.unlock() }
+        guard active else { throw SourceDomainError(.stale, "Operation already ended or was superseded") }
+        try Task.checkCancellation()
+        return try body()
+    }
+}

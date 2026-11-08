@@ -1,6 +1,8 @@
 import Foundation
 import WebKit
+#if SWIFT_PACKAGE
 import LegadoCore
+#endif
 
 struct SourceStateBinding: Sendable {
     let archive: SourceArchive
@@ -37,6 +39,8 @@ final class SourceHostBridge: NSObject, WKScriptMessageHandlerWithReply {
     private let profile: SourceProfile
     private let policy: SourceHTTPPolicy
     private let stateBinding: SourceStateBinding?
+    private let priority: SourceWorkScheduler.Priority
+    private let stateGate = SourceCommitGate()
     private var stateCount = 0
     private var active = true
     private var ready = false
@@ -45,9 +49,10 @@ final class SourceHostBridge: NSObject, WKScriptMessageHandlerWithReply {
     private var tasks: [String: Task<Void, Never>] = [:]
     private var replies: [String: @MainActor @Sendable (Any?, String?) -> Void] = [:]
 
-    init(snapshot: SourceSnapshot, profile: SourceProfile, allowLoopbackHTTP: Bool, timeoutMs: Int, state: SourceStateBinding? = nil) {
+    init(snapshot: SourceSnapshot, profile: SourceProfile, allowLoopbackHTTP: Bool, timeoutMs: Int, state: SourceStateBinding? = nil, priority: SourceWorkScheduler.Priority = .reading) {
         self.profile = profile
         stateBinding = state
+        self.priority = priority
         policy = SourceHTTPPolicy(origins: Set(snapshot.inspection.metadata.origins), allowLoopbackHTTP: allowLoopbackHTTP,
                                   maximumBytes: profile.limits.httpResponseBytes,
                                   maximumRedirects: profile.experimentalRuntimeBudgets.maxRedirects,
@@ -57,6 +62,7 @@ final class SourceHostBridge: NSObject, WKScriptMessageHandlerWithReply {
     func finish() {
         guard active else { return }
         active = false
+        stateGate.invalidate()
         tasks.values.forEach { $0.cancel() }
         tasks.removeAll()
         let pending = replies.values
@@ -118,6 +124,7 @@ final class SourceHostBridge: NSObject, WKScriptMessageHandlerWithReply {
                 stateCount += 1
                 seen.insert(envelope.id)
                 replies[envelope.id] = replyHandler
+                let stateGate = self.stateGate
                 tasks[envelope.id] = Task { [weak self] in
                     let response: String
                     do {
@@ -128,10 +135,10 @@ final class SourceHostBridge: NSObject, WKScriptMessageHandlerWithReply {
                             response = String(decoding: try SourceCoding.encode(entry), as: UTF8.self)
                         case "storageSet":
                             guard let value = state.value else { throw SourceFailure(code: "INVALID_INPUT", message: "Missing state value") }
-                            let entry = try await binding.archive.setState(scope: binding.scope, key: state.key, value: value, condition: state.condition)
+                            let entry = try await binding.archive.setState(scope: binding.scope, key: state.key, value: value, condition: state.condition, gate: stateGate)
                             response = String(decoding: try SourceCoding.encode(entry), as: UTF8.self)
                         default:
-                            try await binding.archive.removeState(scope: binding.scope, key: state.key, condition: state.condition)
+                            try await binding.archive.removeState(scope: binding.scope, key: state.key, condition: state.condition, gate: stateGate)
                             response = "null"
                         }
                     } catch let error as SourceDomainError {
@@ -158,9 +165,9 @@ final class SourceHostBridge: NSObject, WKScriptMessageHandlerWithReply {
             count += 1
             seen.insert(envelope.id)
             replies[envelope.id] = replyHandler
-            tasks[envelope.id] = Task { [weak self, policy] in
+            tasks[envelope.id] = Task { [weak self, policy, priority] in
                 let response: String
-                do { response = String(decoding: try JSONEncoder().encode(await SourceHTTP.fetch(request, policy: policy)), as: UTF8.self) }
+                do { response = String(decoding: try JSONEncoder().encode(await SourceHTTP.fetch(request, policy: policy, priority: priority)), as: UTF8.self) }
                 catch { response = Self.errorJSON(error as? SourceFailure ?? .init(code: "NETWORK", message: "HTTP request failed")) }
                 guard let self, self.active, let reply = self.replies.removeValue(forKey: envelope.id) else { return }
                 self.tasks.removeValue(forKey: envelope.id)
@@ -180,7 +187,7 @@ final class SourceRuntime {
 
     func run(_ operation: SourceOperation, inputJSON: String, snapshot: SourceSnapshot,
              allowLoopbackHTTP: Bool = false, timeoutMs: Int? = nil,
-             configuration: SourceJSON? = nil, state: SourceStateBinding? = nil) async throws -> String {
+             configuration: SourceJSON? = nil, state: SourceStateBinding? = nil, priority: SourceWorkScheduler.Priority = .reading) async throws -> String {
         guard snapshot.inspection.unsupportedRequirements.isEmpty,
               snapshot.inspection.operations.contains(operation.rawValue) else {
             throw SourceFailure(code: "UNSUPPORTED", message: "Required source capability is unavailable")
@@ -188,7 +195,7 @@ final class SourceRuntime {
         try await inspector.validate(operation.inputContract, json: inputJSON)
         try Task.checkCancellation()
         let budget = min(max(timeoutMs ?? profile.experimentalRuntimeBudgets.operationMs, 1), profile.experimentalRuntimeBudgets.operationMs)
-        let bridge = SourceHostBridge(snapshot: snapshot, profile: profile, allowLoopbackHTTP: allowLoopbackHTTP, timeoutMs: budget, state: state)
+        let bridge = SourceHostBridge(snapshot: snapshot, profile: profile, allowLoopbackHTTP: allowLoopbackHTTP, timeoutMs: budget, state: state, priority: priority)
         let page = try SourceWebPage(script: SourceAssets.script("SourceRunner"), bridge: bridge)
         bridge.page = page
         page.onClose = { [weak bridge] in bridge?.finish() }
@@ -232,6 +239,7 @@ struct WebKitSourceProvider: SourceProvider {
     private let state: SourceStateBinding
     private let allowLoopbackHTTP: Bool
     private static let scheduler = SourceWorkScheduler(globalLimit: 2, perOriginLimit: 1)
+    private var priorityOverride: SourceWorkScheduler.Priority?
 
     init(snapshot: SourceSnapshot, installation: SourceInstallation, accountID: String = "guest", configuration: SourceJSON? = nil,
          archive: SourceArchive, allowLoopbackHTTP: Bool = false) throws {
@@ -249,16 +257,23 @@ struct WebKitSourceProvider: SourceProvider {
     func chapters(_ input: SourceWire.ChaptersInput) async throws -> SourceWire.ChapterPage { try await invoke(.chapters, input: input) }
     func content(_ input: SourceWire.ContentInput) async throws -> SourceWire.ChapterContent { try await invoke(.content, input: input) }
 
+    func prioritized(_ priority: SourceWorkScheduler.Priority) -> Self {
+        var provider = self
+        provider.priorityOverride = priority
+        return provider
+    }
+
     private func invoke<Input: Encodable & Sendable, Output: Decodable & Sendable>(_ operation: SourceOperation, input: Input) async throws -> Output {
         let inputJSON = String(decoding: try SourceCoding.encode(input), as: UTF8.self)
+        let priority = priorityOverride ?? (operation == .content ? .reading : .search)
         let raw = try await Self.scheduler.withPermit(origin: descriptor.identity.scope.installationID.uuidString,
-            priority: operation == .content ? .reading : .search, deadline: Date().addingTimeInterval(30)) {
-            try await execute(operation, inputJSON: inputJSON)
+            priority: priority, deadline: Date().addingTimeInterval(30)) {
+            try await execute(operation, inputJSON: inputJSON, priority: priority)
         }
         return try SourceCoding.decode(Output.self, from: Data(raw.utf8))
     }
-    @MainActor private func execute(_ operation: SourceOperation, inputJSON: String) async throws -> String {
+    @MainActor private func execute(_ operation: SourceOperation, inputJSON: String, priority: SourceWorkScheduler.Priority) async throws -> String {
         try await SourceRuntime().run(operation, inputJSON: inputJSON, snapshot: snapshot, allowLoopbackHTTP: allowLoopbackHTTP,
-                                      configuration: configuration, state: state)
+                                      configuration: configuration, state: state, priority: priority)
     }
 }

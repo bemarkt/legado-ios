@@ -55,6 +55,9 @@ struct OtherSettingsView: View {
                     DiagnosticLogView()
                 } label: { Label("日志与诊断", systemImage: "doc.text.magnifyingglass") }
                 NavigationLink {
+                    NativeSourceLibraryView()
+                } label: { Label("原生书源阅读", systemImage: "books.vertical") }
+                NavigationLink {
                     SourceProtocolLabView()
                 } label: { Label("书源协议实验室", systemImage: "flask") }
                 Toggle("正文几何 debug", isOn: $debugContentOverlay)

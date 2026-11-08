@@ -13,6 +13,7 @@ npm run fixtures
 
 - `check`：确认生成类型、App 内嵌解析器及许可证没有漂移，并运行 Node 测试。
 - `bundle`：使用锁定的 esbuild 和 Ajv standalone 生成可读的浏览器包；不在 App 运行时生成 validator 函数。
+- `build-source`：作者侧可选 TS/多文件构建，输出可读自包含 `.source.js`，保留静态 metadata 和许可注释，拒绝远程/动态依赖；见 [作者指南](../../docs/SOURCE_AUTHOR_GUIDE.md)。
 - `generate`：Schema 修改后重新生成类型。
 - `validate`：读取受限大小 UTF-8 文件，在有 deadline/内存限制的 worker 内解析 AST。输出元数据、入口、摘要和未知能力；不 import/eval 输入。
 - `fixtures`：启动本机确定性站点，Ctrl+C 结束。没有任意文件读取或代理转发入口。

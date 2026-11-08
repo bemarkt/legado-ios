@@ -67,6 +67,23 @@ public actor SourceCoverService {
     public func image(url: String, identity: SourceExecutionIdentity, origins: Set<String>,
                       credentials: SourceCredentialSession? = nil, gate: SourceCommitGate? = nil,
                       allowLoopbackHTTP: Bool = false, cachedOnly: Bool = false) async throws -> Data {
+        let started = ContinuousClock.now, operationID = UUID()
+        do {
+            let result = try await loadImage(url: url, identity: identity, origins: origins, credentials: credentials, gate: gate,
+                allowLoopbackHTTP: allowLoopbackHTTP, cachedOnly: cachedOnly)
+            await SourceDiagnostics.shared.record(id: operationID, operation: .cover, identity: identity, issue: nil,
+                elapsedMilliseconds: Int(started.duration(to: .now) / .milliseconds(1)))
+            return result
+        } catch {
+            let code = (error as? SourceDomainError)?.code.rawValue ?? (error as? SourceHostHTTPFailure)?.code.rawValue
+                ?? (error is CancellationError ? "CANCELLED" : "UNKNOWN")
+            await SourceDiagnostics.shared.record(id: operationID, operation: .cover, identity: identity, issue: .init(code: code),
+                elapsedMilliseconds: Int(started.duration(to: .now) / .milliseconds(1)))
+            throw error
+        }
+    }
+    private func loadImage(url: String, identity: SourceExecutionIdentity, origins: Set<String>,
+                           credentials: SourceCredentialSession?, gate: SourceCommitGate?, allowLoopbackHTTP: Bool, cachedOnly: Bool) async throws -> Data {
         guard (credentials == nil && identity.credentialRevision == nil) || (credentials?.scope == identity.scope && credentials?.revision == identity.credentialRevision
               && credentials?.allowedOrigins == origins) else {
             throw SourceDomainError(.invalidInput, "封面凭据与执行范围不一致。")

@@ -15,6 +15,7 @@ struct NativeSourceLibraryView: View {
                 Text("自有 JS 书源的阅读预览。可保存书源、下载章节并离线继续阅读。")
                     .font(.footnote).foregroundStyle(.secondary)
                 Button { importing = true } label: { Label("添加 JS 书源", systemImage: "plus.circle") }
+                NavigationLink { NativeSourceDiagnosticsView() } label: { Label("书源诊断", systemImage: "list.bullet.rectangle") }.frame(minHeight: 44)
                 NavigationLink { NativeSourceStorageView(model: model) } label: {
                     Label("缓存与下载", systemImage: "internaldrive")
                 }.frame(minHeight: 44)
@@ -58,14 +59,19 @@ struct NativeSourceLibraryView: View {
                             .accessibilityLabel("将\(hit.book.title)加入书架")
                         }
                     }
-                    if !model.searching && model.results.isEmpty {
+                    if !model.searching && model.results.isEmpty && model.searchFailures.isEmpty {
                         Text(model.canLoadMore ? "本页暂无结果，可以继续加载。" : "没有搜索结果").foregroundStyle(.secondary)
                     }
                     if model.canLoadMore {
                         Button(model.searchFailures.isEmpty ? "加载更多" : "继续加载 / 重试失败书源") { model.loadMore() }
                             .frame(minHeight: 44)
                     }
-                    ForEach(Array(model.searchFailures.enumerated()), id: \.offset) { _, error in Text(error).font(.footnote).foregroundStyle(.secondary) }
+                    ForEach(model.searchFailures) { failure in
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(failure.installation.name).font(.subheadline.bold())
+                            NativeSourceIssueView(model: model, installation: failure.installation, issue: failure.issue, retry: { model.loadMore() })
+                        }
+                    }
                 }
             }
             Section("书架") {
@@ -212,7 +218,7 @@ private struct NativeSourceImportView: View {
     }
 }
 
-private struct NativeSourceSettingsView: View {
+struct NativeSourceSettingsView: View {
     @ObservedObject var model: NativeSourceLibrary
     let initialInstallation: SourceInstallation
     private var installation: SourceInstallation { model.installations.first { $0.id == initialInstallation.id } ?? initialInstallation }

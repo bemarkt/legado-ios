@@ -10,6 +10,8 @@ struct NativeSourceBookView: View {
     @State private var busy = false
     @State private var task: Task<Void, Never>?
     @State private var message: String?
+    @State private var issue: SourceIssue?
+    @State private var retryDownload = false
     @State private var resumeID: String?
     @State private var operationID = UUID()
     @State private var downloadProgress: SourceDownloadProgress?
@@ -29,9 +31,9 @@ struct NativeSourceBookView: View {
                     Button(resumeID == nil ? "开始阅读" : "继续阅读") {
                         selected = catalog.chapters.first(where: { $0.ref.id == resumeID }) ?? catalog.chapters.first
                     }
-                    Button("下载全部章节") { start { try await download(catalog) } }.disabled(offline || busy)
+                    Button("下载全部章节") { retryDownload = true; start { try await download(catalog) } }.disabled(offline || busy)
                 }
-                Button("刷新目录") { start { try await refresh() } }.disabled(offline || busy)
+                Button("刷新目录") { retryDownload = false; start { try await refresh() } }.disabled(offline || busy)
                 if let progress = downloadProgress {
                     VStack(alignment: .leading, spacing: 8) {
                         ProgressView(value: Double(progress.completed), total: Double(max(1, progress.total)))
@@ -47,6 +49,14 @@ struct NativeSourceBookView: View {
                         Spacer()
                         Button("取消") { task?.cancel() }.frame(minWidth: 44, minHeight: 44)
                     }
+                }
+                if let issue {
+                    NativeSourceIssueView(model: model, installation: item.installation, issue: issue, retry: {
+                        start {
+                            if retryDownload, let catalog { try await download(catalog) }
+                            else { try await refresh() }
+                        }
+                    })
                 }
                 if let message { Text(message).font(.footnote).foregroundStyle(.secondary).textSelection(.enabled) }
             }
@@ -73,7 +83,7 @@ struct NativeSourceBookView: View {
                 try Task.checkCancellation()
                 resumeID = try await archive.anchor(book: item.book.key)?.chapter.chapterID
                 if catalog == nil { start { try await refresh() } }
-            } catch { message = error.localizedDescription }
+            } catch { issue = SourceIssue(error: error) }
         }
         .navigationDestination(isPresented: Binding(get: { selected != nil }, set: { if !$0 { selected = nil } })) {
             if let selected, let catalog {
@@ -83,13 +93,13 @@ struct NativeSourceBookView: View {
         .onDisappear { operationID = UUID(); task?.cancel(); task = nil; busy = false }
     }
     private func start(_ operation: @escaping @MainActor () async throws -> Void) {
-        task?.cancel(); busy = true; message = nil; downloadProgress = nil
+        task?.cancel(); busy = true; message = nil; issue = nil; downloadProgress = nil
         let token = UUID(); operationID = token
         task = Task {
             defer { if operationID == token { busy = false; task = nil } }
             do { try await operation() }
             catch is CancellationError { if operationID == token { message = "已取消，已完成的章节仍保留。" } }
-            catch { if operationID == token { message = error.localizedDescription } }
+            catch { if operationID == token { issue = SourceIssue(error: error) } }
         }
     }
     private func refresh() async throws {
@@ -135,7 +145,7 @@ struct NativeSourceReaderView: View {
     @State private var passages: [Passage] = []
     @State private var visibleID: Int?
     @State private var loading = false
-    @State private var error: String?
+    @State private var error: SourceIssue?
     @State private var notice: String?
     @State private var requestedPolicy = SourceLibraryService.ReadPolicy.current
     @State private var loadTask: Task<Void, Never>?
@@ -160,13 +170,9 @@ struct NativeSourceReaderView: View {
                             .id(passage.id)
                     }
                     if let error {
-                        ContentUnavailableView { Label("暂时无法读取", systemImage: "book.closed") }
-                        description: { Text(error) }
-                        actions: {
-                            Button("重试") { load(currentID, policy: requestedPolicy) }
-                            if !offline, requestedPolicy != .offline {
-                                Button("阅读已下载副本") { load(currentID, policy: .offline) }
-                            }
+                        NativeSourceIssueView(model: model, installation: item.installation, issue: error, retry: { load(currentID, policy: requestedPolicy) })
+                        if !offline, requestedPolicy != .offline {
+                            Button("阅读已下载副本") { load(currentID, policy: .offline) }.frame(minHeight: 44)
                         }
                     }
                 }
@@ -211,6 +217,7 @@ struct NativeSourceReaderView: View {
         }
         .task { load(initialChapterID) }
         .onChange(of: visibleID) { savePosition() }
+        .onChange(of: model.coverRevision) { provider = nil }
         .onChange(of: scenePhase) {
             if scenePhase != .active { savePosition(); prefetch?.cancel() }
         }
@@ -256,8 +263,8 @@ struct NativeSourceReaderView: View {
                     let next = catalog.chapters[index + 1]
                     prefetch = Task { _ = try? await service.chapter(provider: provider.prioritized(.background), book: catalog.book, chapter: next.ref, catalog: catalog) }
                 }
-            } catch is CancellationError { if generation == token { error = "读取已取消" } }
-            catch { if generation == token { self.error = error.localizedDescription } }
+            } catch is CancellationError { if generation == token { error = .init(code: "CANCELLED") } }
+            catch { if generation == token { self.error = SourceIssue(error: error) } }
         }
     }
     private func move(_ distance: Int) {

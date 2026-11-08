@@ -285,15 +285,26 @@ struct WebKitSourceProvider: SourceProvider {
     }
 
     private func invoke<Input: Encodable & Sendable, Output: Decodable & Sendable>(_ operation: SourceOperation, input: Input) async throws -> Output {
-        try descriptor.commitGate?.check()
-        let inputJSON = String(decoding: try SourceCoding.encode(input), as: UTF8.self)
-        let priority = priorityOverride ?? (operation == .content ? .reading : .search)
-        let raw = try await Self.scheduler.withPermit(origin: descriptor.identity.scope.installationID.uuidString,
-            priority: priority, deadline: Date().addingTimeInterval(30)) {
-            try await execute(operation, inputJSON: inputJSON, priority: priority)
+        let started = ContinuousClock.now, operationID = UUID()
+        do {
+            try descriptor.commitGate?.check()
+            let inputJSON = String(decoding: try SourceCoding.encode(input), as: UTF8.self)
+            let priority = priorityOverride ?? (operation == .content ? .reading : .search)
+            let raw = try await Self.scheduler.withPermit(origin: descriptor.identity.scope.installationID.uuidString,
+                priority: priority, deadline: Date().addingTimeInterval(30)) {
+                try await execute(operation, inputJSON: inputJSON, priority: priority)
+            }
+            try descriptor.commitGate?.check()
+            let result = try SourceCoding.decode(Output.self, from: Data(raw.utf8))
+            await SourceDiagnostics.shared.record(id: operationID, operation: .init(rawValue: operation.rawValue)!, identity: descriptor.identity,
+                issue: nil, elapsedMilliseconds: Int(started.duration(to: .now) / .milliseconds(1)))
+            return result
+        } catch {
+            let failure = error as? SourceFailure
+            await SourceDiagnostics.shared.record(id: operationID, operation: .init(rawValue: operation.rawValue)!, identity: descriptor.identity,
+                issue: SourceIssue(error: error), elapsedMilliseconds: Int(started.duration(to: .now) / .milliseconds(1)), line: failure?.line, column: failure?.column)
+            throw error
         }
-        try descriptor.commitGate?.check()
-        return try SourceCoding.decode(Output.self, from: Data(raw.utf8))
     }
     @MainActor private func execute(_ operation: SourceOperation, inputJSON: String, priority: SourceWorkScheduler.Priority) async throws -> String {
         try await SourceRuntime().run(operation, inputJSON: inputJSON, snapshot: snapshot, allowLoopbackHTTP: allowLoopbackHTTP,

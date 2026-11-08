@@ -10,8 +10,13 @@ final class NativeSourceLibrary: ObservableObject {
     private struct SearchDelivery: Sendable {
         let source: SearchSource
         let batch: SourceSearchPager.Batch?
-        let error: String?
+        let error: SourceIssue?
         let canContinue: Bool
+    }
+    struct SearchFailure: Identifiable {
+        let installation: SourceInstallation
+        let issue: SourceIssue
+        var id: UUID { installation.id }
     }
     struct SearchHit: Identifiable {
         let installation: SourceInstallation
@@ -30,7 +35,7 @@ final class NativeSourceLibrary: ObservableObject {
     @Published private(set) var shelf: [ShelfBook] = []
     @Published private(set) var results: [SearchHit] = []
     @Published private(set) var searching = false
-    @Published private(set) var searchFailures: [String] = []
+    @Published private(set) var searchFailures: [SearchFailure] = []
     @Published private(set) var canLoadMore = false
     @Published var message: String?
     private let databaseURL: URL
@@ -50,7 +55,7 @@ final class NativeSourceLibrary: ObservableObject {
     private var searchTask: Task<Void, Never>?
     private var searchGeneration = UUID()
     private var searchSources: [UUID: SearchSource] = [:]
-    private var searchErrors: [UUID: String] = [:]
+    private var searchErrors: [UUID: SearchFailure] = [:]
     private var activeQuery = ""
     private var resultIDs = Set<String>()
     private var anchorWrite: Task<Void, Never>?
@@ -251,7 +256,11 @@ final class NativeSourceLibrary: ObservableObject {
         guard !searching, !searchSources.isEmpty else { return }
         let generation = UUID(); searchGeneration = generation
         let query = activeQuery
-        let sources = installations.compactMap { searchSources[$0.id] }
+        let sources = installations.compactMap { installation -> SearchSource? in
+            guard searchErrors[installation.id]?.issue.canRetry() ?? true else { return nil }
+            return searchSources[installation.id]
+        }
+        guard !sources.isEmpty else { return }
         searching = true; canLoadMore = false
         searchTask = Task {
             defer {
@@ -283,7 +292,7 @@ final class NativeSourceLibrary: ObservableObject {
                             let canContinue: Bool
                             if let pager = source.pager { canContinue = await pager.hasMore }
                             else { canContinue = true }
-                            return SearchDelivery(source: source, batch: nil, error: error.localizedDescription, canContinue: canContinue)
+                            return SearchDelivery(source: source, batch: nil, error: SourceIssue(error: error), canContinue: canContinue)
                         }
                     }
                 }
@@ -297,7 +306,7 @@ final class NativeSourceLibrary: ObservableObject {
                             if resultIDs.insert(hit.id).inserted { results.append(hit) }
                         }
                     }
-                    if let error = update.error { searchErrors[installation.id] = installation.name + ": " + error }
+                    if let error = update.error { searchErrors[installation.id] = .init(installation: installation, issue: error) }
                     else { searchErrors.removeValue(forKey: installation.id) }
                     searchFailures = installations.compactMap { searchErrors[$0.id] }
                     if update.canContinue { searchSources[installation.id] = update.source }

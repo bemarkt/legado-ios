@@ -90,7 +90,7 @@ struct NativeSourceBookView: View {
         }
     }
     private func refresh() async throws {
-        let provider = try await model.provider(item.installation)
+        let provider = try await model.provider(item.installation, scope: item.book.key.scope)
         let fresh = try await model.services().1.refreshCatalog(provider: provider, book: item.book.details.ref)
         try Task.checkCancellation()
         if let old = catalog {
@@ -100,7 +100,7 @@ struct NativeSourceBookView: View {
         catalog = fresh
     }
     private func download(_ catalog: SourceCatalog) async throws {
-        let provider = try await model.provider(item.installation)
+        let provider = try await model.provider(item.installation, scope: item.book.key.scope)
         let token = operationID
         let count = try await model.services().1.download(provider: provider.prioritized(.background), catalog: catalog) { progress in
             await MainActor.run {
@@ -227,7 +227,7 @@ struct NativeSourceReaderView: View {
             do {
                 let provider: WebKitSourceProvider
                 if let existing = self.provider { provider = existing }
-                else { provider = try await model.provider(item.installation); self.provider = provider }
+                else { provider = try await model.provider(item.installation, scope: item.book.key.scope); self.provider = provider }
                 let (archive, service) = try model.services()
                 guard policy == .offline || catalog.identity == provider.descriptor.identity else {
                     throw SourceDomainError(.stale, "书源或选项已改变，请返回书籍详情刷新目录后再阅读。已下载内容仍可在离线模式打开。")

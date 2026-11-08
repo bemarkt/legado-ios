@@ -52,12 +52,12 @@ final class SourceHostBridge: NSObject, WKScriptMessageHandlerWithReply {
     private var tasks: [String: Task<Void, Never>] = [:]
     private var replies: [String: @MainActor @Sendable (Any?, String?) -> Void] = [:]
 
-    init(snapshot: SourceSnapshot, profile: SourceProfile, allowLoopbackHTTP: Bool, timeoutMs: Int, state: SourceStateBinding? = nil, priority: SourceWorkScheduler.Priority = .reading, credentials: SourceCredentialSession? = nil) {
+    init(snapshot: SourceSnapshot, profile: SourceProfile, allowLoopbackHTTP: Bool, timeoutMs: Int, state: SourceStateBinding? = nil, priority: SourceWorkScheduler.Priority = .reading, credentials: SourceCredentialSession? = nil, activityGate: SourceCommitGate? = nil) {
         self.profile = profile
         networkBudget = SourceHTTPRequestBudget(maximumRequests: profile.limits.operationHTTPRequests)
         stateBinding = state
         self.credentials = credentials
-        stateGate = SourceCommitGate(parent: credentials?.commitGate)
+        stateGate = SourceCommitGate(parent: credentials?.commitGate ?? activityGate)
         self.priority = priority
         policy = SourceHTTPPolicy(origins: Set(snapshot.inspection.metadata.origins), allowLoopbackHTTP: allowLoopbackHTTP,
                                   maximumBytes: profile.limits.httpResponseBytes,
@@ -198,8 +198,9 @@ final class SourceRuntime {
     func run(_ operation: SourceOperation, inputJSON: String, snapshot: SourceSnapshot,
              allowLoopbackHTTP: Bool = false, timeoutMs: Int? = nil,
              configuration: SourceJSON? = nil, state: SourceStateBinding? = nil, priority: SourceWorkScheduler.Priority = .reading,
-             credentials: SourceCredentialSession? = nil) async throws -> String {
-        try credentials?.commitGate.check()
+             credentials: SourceCredentialSession? = nil, activityGate: SourceCommitGate? = nil) async throws -> String {
+        let executionGate = credentials?.commitGate ?? activityGate
+        try executionGate?.check()
         guard snapshot.inspection.unsupportedRequirements.isEmpty,
               snapshot.inspection.operations.contains(operation.rawValue) else {
             throw SourceFailure(code: "UNSUPPORTED", message: "Required source capability is unavailable")
@@ -207,7 +208,7 @@ final class SourceRuntime {
         try await inspector.validate(operation.inputContract, json: inputJSON)
         try Task.checkCancellation()
         let budget = min(max(timeoutMs ?? profile.experimentalRuntimeBudgets.operationMs, 1), profile.experimentalRuntimeBudgets.operationMs)
-        let bridge = SourceHostBridge(snapshot: snapshot, profile: profile, allowLoopbackHTTP: allowLoopbackHTTP, timeoutMs: budget, state: state, priority: priority, credentials: credentials)
+        let bridge = SourceHostBridge(snapshot: snapshot, profile: profile, allowLoopbackHTTP: allowLoopbackHTTP, timeoutMs: budget, state: state, priority: priority, credentials: credentials, activityGate: executionGate)
         let page = try SourceWebPage(script: SourceAssets.script("SourceRunner"), bridge: bridge)
         bridge.page = page
         page.onClose = { [weak bridge] in bridge?.finish() }
@@ -217,7 +218,7 @@ final class SourceRuntime {
                                          arguments: ["source": snapshot.source, "operation": operation.rawValue,
                                                      "inputJSON": inputJSON, "configJSON": configJSON, "session": bridge.session, "operationID": bridge.operation],
                                          timeoutMs: profile.experimentalRuntimeBudgets.moduleInitializationMs)
-        try credentials?.commitGate.check()
+        try executionGate?.check()
         // The envelope escapes the serialized result. Bound both wire and decoded sizes.
         guard raw.utf8.count <= profile.limits.outputBytes * 2 + 4096 else {
             throw SourceFailure(code: "RESOURCE_LIMIT", message: "Output byte budget exceeded")
@@ -256,7 +257,7 @@ struct WebKitSourceProvider: SourceProvider {
     private var priorityOverride: SourceWorkScheduler.Priority?
 
     init(snapshot: SourceSnapshot, installation: SourceInstallation, accountID: String = "guest", configuration: SourceJSON? = nil,
-         archive: SourceArchive, allowLoopbackHTTP: Bool = false, credentials: SourceCredentialSession? = nil) throws {
+         archive: SourceArchive, allowLoopbackHTTP: Bool = false, credentials: SourceCredentialSession? = nil, activityGate: SourceCommitGate? = nil) throws {
         guard snapshot.sha256 == installation.digest else { throw SourceFailure(code: "INVALID_INPUT", message: "Installed source digest mismatch") }
         self.snapshot = snapshot
         self.configuration = try snapshot.configuration(overrides: configuration)
@@ -266,7 +267,7 @@ struct WebKitSourceProvider: SourceProvider {
         }
         self.credentials = credentials
         descriptor = SourceProviderDescriptor(identity: try .init(scope: scope, sourceDigest: snapshot.sha256, configuration: self.configuration, credentialRevision: credentials?.revision),
-                                              name: snapshot.inspection.metadata.name, supportsSearch: snapshot.inspection.operations.contains("search"), commitGate: credentials?.commitGate)
+                                              name: snapshot.inspection.metadata.name, supportsSearch: snapshot.inspection.operations.contains("search"), commitGate: credentials?.commitGate ?? activityGate)
         state = SourceStateBinding(archive: archive, scope: scope)
         self.allowLoopbackHTTP = allowLoopbackHTTP
     }
@@ -282,18 +283,18 @@ struct WebKitSourceProvider: SourceProvider {
     }
 
     private func invoke<Input: Encodable & Sendable, Output: Decodable & Sendable>(_ operation: SourceOperation, input: Input) async throws -> Output {
-        try credentials?.commitGate.check()
+        try descriptor.commitGate?.check()
         let inputJSON = String(decoding: try SourceCoding.encode(input), as: UTF8.self)
         let priority = priorityOverride ?? (operation == .content ? .reading : .search)
         let raw = try await Self.scheduler.withPermit(origin: descriptor.identity.scope.installationID.uuidString,
             priority: priority, deadline: Date().addingTimeInterval(30)) {
             try await execute(operation, inputJSON: inputJSON, priority: priority)
         }
-        try credentials?.commitGate.check()
+        try descriptor.commitGate?.check()
         return try SourceCoding.decode(Output.self, from: Data(raw.utf8))
     }
     @MainActor private func execute(_ operation: SourceOperation, inputJSON: String, priority: SourceWorkScheduler.Priority) async throws -> String {
         try await SourceRuntime().run(operation, inputJSON: inputJSON, snapshot: snapshot, allowLoopbackHTTP: allowLoopbackHTTP,
-                                      configuration: configuration, state: state, priority: priority, credentials: credentials)
+                                      configuration: configuration, state: state, priority: priority, credentials: credentials, activityGate: descriptor.commitGate)
     }
 }

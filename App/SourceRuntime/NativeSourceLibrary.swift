@@ -17,13 +17,14 @@ final class NativeSourceLibrary: ObservableObject {
         let installation: SourceInstallation
         let book: SourceWire.BookSummary
         let identity: SourceExecutionIdentity
-        var id: String { installation.id.uuidString + ":" + book.ref.id }
+        var id: String { installation.id.uuidString + ":" + identity.scope.accountID + ":" + book.ref.id }
     }
     struct ShelfBook: Identifiable {
         let installation: SourceInstallation
         let book: SourceSavedBook
-        var id: String { installation.id.uuidString + ":" + book.key.bookID }
+        var id: String { installation.id.uuidString + ":" + book.key.scope.accountID + ":" + book.key.bookID }
     }
+    @Published private(set) var activeAccounts: [UUID: SourceAccount] = [:]
     @Published private(set) var installations: [SourceInstallation] = []
     @Published private(set) var shelf: [ShelfBook] = []
     @Published private(set) var results: [SearchHit] = []
@@ -32,7 +33,14 @@ final class NativeSourceLibrary: ObservableObject {
     @Published private(set) var canLoadMore = false
     @Published var message: String?
     private let databaseURL: URL
-    init(databaseURL: URL = SourceArchive.defaultURL()) { self.databaseURL = databaseURL }
+    let credentials: SourceCredentialVault
+    private var reloadGeneration = UUID()
+    private var guestGates: [UUID: SourceCommitGate] = [:]
+    private var credentialEditGates: [UUID: SourceCommitGate] = [:]
+    private var selectingAccounts = Set<UUID>()
+    init(databaseURL: URL = SourceArchive.defaultURL(), credentials: SourceCredentialVault = .shared) {
+        self.databaseURL = databaseURL; self.credentials = credentials
+    }
     private var database: SourceArchive?
     private var service: SourceLibraryService?
     private var inspected: [String: SourceSnapshot] = [:]
@@ -54,14 +62,20 @@ final class NativeSourceLibrary: ObservableObject {
     }
     func releaseCatalogMemory() async { await database?.clearCatalogMemoryCache() }
     func reload() async {
+        let generation = UUID(); reloadGeneration = generation
         do {
             let (archive, _) = try services()
             let installed = try await archive.installations()
             var shelf: [ShelfBook] = []
+            var accounts: [UUID: SourceAccount] = [:]
             for installation in installed {
-                let scope = try SourceScope(installationID: installation.id)
+                let selected = try await archive.accountSettings(installationID: installation.id).selected
+                accounts[installation.id] = selected
+                let scope = try SourceScope(installationID: installation.id, accountID: selected.id)
                 for book in try await archive.books(scope: scope) { shelf.append(.init(installation: installation, book: book)) }
             }
+            guard reloadGeneration == generation else { return }
+            activeAccounts = accounts
             installations = installed.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
             self.shelf = shelf.sorted { $0.book.addedAt > $1.book.addedAt }
         } catch { message = error.localizedDescription }
@@ -82,30 +96,102 @@ final class NativeSourceLibrary: ObservableObject {
         try await services().0.saveInstallation(installation)
         await reload()
     }
-    func provider(_ installation: SourceInstallation) async throws -> WebKitSourceProvider {
+    func selectedScope(_ installation: SourceInstallation) async throws -> SourceScope {
+        let selected = try await services().0.accountSettings(installationID: installation.id).selectedID
+        return try .init(installationID: installation.id, accountID: selected)
+    }
+    func provider(_ installation: SourceInstallation, scope expectedScope: SourceScope? = nil) async throws -> WebKitSourceProvider {
         let (archive, _) = try services()
-        let scope = try SourceScope(installationID: installation.id)
+        let scope = try await selectedScope(installation)
+        guard expectedScope == nil || expectedScope == scope else { throw SourceDomainError(.stale, "账号已切换，请从当前书架重新打开。") }
+        let activityGate: SourceCommitGate?
+        if scope.accountID == "guest" {
+            let gate = guestGates[installation.id] ?? SourceCommitGate()
+            guestGates[installation.id] = gate; activityGate = gate
+        } else { activityGate = nil }
         let captured = try await archive.executionSnapshot(scope: scope)
         let snapshot = try await inspect(captured.installation.source)
-        return try WebKitSourceProvider(snapshot: snapshot, installation: captured.installation, configuration: captured.configuration, archive: archive)
+        let session = scope.accountID == "guest" ? nil : try await credentials.session(scope: scope, allowedOrigins: Set(snapshot.inspection.metadata.origins))
+        guard try await selectedScope(installation) == scope else { throw SourceDomainError(.stale, "账号已切换，请重试。") }
+        try activityGate?.check()
+        return try WebKitSourceProvider(snapshot: snapshot, installation: captured.installation, accountID: scope.accountID,
+                                       configuration: captured.configuration, archive: archive, credentials: session, activityGate: activityGate)
     }
-    func saveConfiguration(_ configuration: SourceJSON, installation: SourceInstallation) async throws {
+    func saveConfiguration(_ configuration: SourceJSON, installation: SourceInstallation, scope: SourceScope) async throws {
+        guard try await selectedScope(installation) == scope else { throw SourceDomainError(.stale, "账号已切换，请重新打开选项。") }
         let snapshot = try await inspect(installation.source)
         let value = try snapshot.configuration(overrides: configuration)
-        try await services().0.saveConfiguration(value, scope: .init(installationID: installation.id), expectedSourceDigest: installation.digest)
+        try await services().0.saveConfiguration(value, scope: scope, expectedSourceDigest: installation.digest, requireSelectedAccount: true)
         cancelSearch(clearResults: true)
     }
+    func selectAccount(_ accountID: String, installation: SourceInstallation) async throws {
+        guard selectingAccounts.insert(installation.id).inserted else { throw SourceDomainError(.unavailable, "正在切换账号，请稍后重试。") }
+        defer { selectingAccounts.remove(installation.id) }
+        let previous = try await selectedScope(installation)
+        guard previous.accountID != accountID else { return }
+        cancelSearch(clearResults: true); reloadGeneration = UUID()
+        credentialEditGates.removeValue(forKey: installation.id)?.invalidate()
+        guestGates.removeValue(forKey: installation.id)?.invalidate()
+        await credentials.suspend(scope: previous)
+        try await services().0.selectAccount(accountID, installationID: installation.id)
+        await reload()
+    }
+    func credentialSession(_ installation: SourceInstallation, accountID: String) async throws -> SourceCredentialSession {
+        let scope = try await selectedScope(installation)
+        guard scope.accountID == accountID, accountID != "guest" else { throw SourceDomainError(.stale, "请先选择独立账号。") }
+        let captured = try await services().0.executionSnapshot(scope: scope)
+        guard captured.installation.digest == installation.digest else { throw SourceDomainError(.stale, "书源已更新，请重新打开账号设置。") }
+        let session = try await credentials.session(scope: scope, allowedOrigins: Set(captured.installation.origins))
+        guard try await selectedScope(installation) == scope else { throw SourceDomainError(.stale, "账号已切换，请重新打开。") }
+        try session.commitGate.check()
+        return session
+    }
+    func credentialContext(_ installation: SourceInstallation, accountID: String) async throws -> NativeSourceCredentialContext {
+        let gate = credentialEditGates[installation.id] ?? SourceCommitGate()
+        credentialEditGates[installation.id] = gate
+        let session = try await credentialSession(installation, accountID: accountID)
+        try gate.check()
+        return NativeSourceCredentialContext(installation: installation, session: session, changeGate: gate)
+    }
+    func validateCredentialContext(_ context: NativeSourceCredentialContext) async throws {
+        try context.changeGate.check(); try context.session.commitGate.check()
+        let current = try await services().0.executionSnapshot(scope: context.session.scope)
+        guard current.installation.digest == context.installation.digest,
+              try await selectedScope(current.installation) == context.session.scope else {
+            throw SourceDomainError(.stale, "账号或书源已改变，请重新打开登录页面。")
+        }
+        try context.changeGate.check(); try context.session.commitGate.check()
+    }
+    func saveLoginCookies(_ cookies: [SourceCredentialCookie], origin: String, context: NativeSourceCredentialContext) async throws {
+        try await validateCredentialContext(context)
+        try await credentials.replaceBrowserCookies(cookies, session: context.session, replacingOrigins: [origin], changeGate: context.changeGate)
+        await credentialsChanged()
+    }
+    func saveBearer(_ token: String?, origin: String, context: NativeSourceCredentialContext) async throws {
+        try await validateCredentialContext(context)
+        try await credentials.setBearer(token, origin: origin, session: context.session, changeGate: context.changeGate)
+        await credentialsChanged()
+    }
+    func clearLogin(context: NativeSourceCredentialContext) async throws {
+        try await validateCredentialContext(context)
+        try await credentials.clear(session: context.session, changeGate: context.changeGate)
+        await credentialsChanged()
+    }
+    func credentialsChanged() async { cancelSearch(clearResults: true); await reload() }
     func replace(_ installation: SourceInstallation, with snapshot: SourceSnapshot, resetConfiguration: Bool,
                  originURL: String?, locallyModified: Bool) async throws {
         guard snapshot.inspection.unsupportedRequirements.isEmpty else { throw SourceFailure(code: "UNSUPPORTED", message: "此书源要求尚未支持的能力") }
         let (archive, _) = try services()
-        let scope = try SourceScope(installationID: installation.id)
-        if !resetConfiguration { _ = try snapshot.configuration(overrides: await archive.configuration(scope: scope)) }
+        let reviewed = try await archive.accountConfigurations(installationID: installation.id)
+        if !resetConfiguration {
+            for configuration in reviewed.values { _ = try snapshot.configuration(overrides: configuration) }
+        }
         let metadata = snapshot.inspection.metadata
         let updated = try SourceInstallation(id: installation.id, publisherID: metadata.id, name: metadata.name, version: metadata.version,
             source: snapshot.source, origins: metadata.origins, createdAt: installation.createdAt,
             originURL: originURL, locallyModified: locallyModified)
-        try await archive.saveInstallation(updated, replacing: installation.digest, resetConfigurationFor: resetConfiguration ? scope : nil)
+        credentialEditGates.removeValue(forKey: installation.id)?.invalidate()
+        try await archive.saveInstallation(updated, replacing: installation.digest, reviewedConfigurations: reviewed, resetAllAccountConfigurations: resetConfiguration)
         cancelSearch(clearResults: true)
         await reload()
     }
@@ -209,7 +295,7 @@ final class NativeSourceLibrary: ObservableObject {
     }
     func pendingPositionWrites() async { await anchorWrite?.value }
     func add(_ hit: SearchHit) async throws {
-        let provider = try await provider(hit.installation)
+        let provider = try await provider(hit.installation, scope: hit.identity.scope)
         guard provider.descriptor.identity == hit.identity else {
             throw SourceDomainError(.stale, "书源或选项已经更新，请重新搜索后加入书架")
         }

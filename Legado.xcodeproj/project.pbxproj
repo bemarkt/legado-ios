@@ -185,6 +185,8 @@
 		FB1000000000000000000066 /* NativeSourceReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB2000000000000000000066; };
 		FB100000000000000000000A /* SourceCredentials.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB200000000000000000000A; };
 		FB100000000000000000000B /* SourceAccounts.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB200000000000000000000B; };
+		FB1000000000000000000067 /* NativeSourceAccountsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB2000000000000000000067; };
+		FB1000000000000000000068 /* NativeSourceLoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB2000000000000000000068; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -365,6 +367,8 @@
 		FB2000000000000000000066 /* NativeSourceReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NativeSourceReaderView.swift; path = App/SourceRuntime/NativeSourceReaderView.swift; sourceTree = SOURCE_ROOT; };
 		FB200000000000000000000A /* SourceCredentials.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SourceCredentials.swift; path = Sources/LegadoCore/SourceDomain/SourceCredentials.swift; sourceTree = SOURCE_ROOT; };
 		FB200000000000000000000B /* SourceAccounts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SourceAccounts.swift; path = Sources/LegadoCore/SourceDomain/SourceAccounts.swift; sourceTree = SOURCE_ROOT; };
+		FB2000000000000000000067 /* NativeSourceAccountsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NativeSourceAccountsView.swift; path = App/SourceRuntime/NativeSourceAccountsView.swift; sourceTree = SOURCE_ROOT; };
+		FB2000000000000000000068 /* NativeSourceLoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NativeSourceLoginView.swift; path = App/SourceRuntime/NativeSourceLoginView.swift; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -398,6 +402,8 @@
 				FA2000000000000000000002 /* SourceWebPage.swift */,
 				FB2000000000000000000064 /* NativeSourceLibrary.swift */,
 				FB2000000000000000000065 /* NativeSourceLibraryView.swift */,
+				FB2000000000000000000068 /* NativeSourceLoginView.swift */,
+				FB2000000000000000000067 /* NativeSourceAccountsView.swift */,
 				FB2000000000000000000066 /* NativeSourceReaderView.swift */,
 				FA2000000000000000000001 /* SourceContracts.swift */,
 				FB2000000000000000000001 /* ChapterDocument.swift */,
@@ -886,6 +892,8 @@
 			files = (
 				FB1000000000000000000064 /* NativeSourceLibrary.swift in Sources */,
 				FB1000000000000000000065 /* NativeSourceLibraryView.swift in Sources */,
+				FB1000000000000000000068 /* NativeSourceLoginView.swift in Sources */,
+				FB1000000000000000000067 /* NativeSourceAccountsView.swift in Sources */,
 				FB1000000000000000000066 /* NativeSourceReaderView.swift in Sources */,
 				FA1000000000000000000001,
 				FB1000000000000000000001 /* ChapterDocument.swift in Sources */,

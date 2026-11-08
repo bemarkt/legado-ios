@@ -143,7 +143,7 @@ struct SourceCredentialTests {
         let value = try cookie(expires: expiry)
         let browser = try #require(value.browserCookie())
         #expect(browser.isHTTPOnly && browser.isSecure)
-        let restored = try #require(SourceCredentialCookie.capture(browser, origin: origin))
+        let restored = try #require(try SourceCredentialCookie.capture(browser, origin: origin))
         #expect(restored.origin == value.origin)
         #expect(restored.name == value.name && restored.value == value.value && restored.path == value.path)
         #expect(restored.secure == value.secure && restored.httpOnly == value.httpOnly)
@@ -181,4 +181,87 @@ struct SourceCredentialTests {
         #expect(try await reopened.accountSettings(installationID: install.id).selected == account)
         #expect(throws: SourceDomainError.self) { try SourceAccount(name: "\n") }
     }
+    @Test func browserSaveOnlyReplacesTheSelectedWebsite() async throws {
+        let vault = SourceCredentialVault(persistence: MemorySourceCredentials()), scope = try scope()
+        let first = try await vault.session(scope: scope, allowedOrigins: [origin, other])
+        try await first.receive([cookie(), cookie(origin: other, value: "other-login")])
+        try await vault.setBearer("existing-token", origin: origin, session: first)
+        let second = try await vault.session(scope: scope, allowedOrigins: [origin, other])
+        try await vault.replaceBrowserCookies([cookie(value: "new-login")], session: second, replacingOrigins: [origin])
+        let current = try await vault.session(scope: scope, allowedOrigins: [origin, other])
+        #expect(try await current.headers(for: URL(string: origin)!) == ["Cookie": "session=new-login", "Authorization": "Bearer existing-token"])
+        #expect(try await current.headers(for: URL(string: other)!) == ["Cookie": "session=other-login"])
+        await #expect(throws: SourceDomainError.self) {
+            try await vault.replaceBrowserCookies([cookie(origin: other)], session: current, replacingOrigins: [origin])
+        }
+        try await vault.replaceBrowserCookies([], session: current, replacingOrigins: [origin])
+        let cleared = try await vault.session(scope: scope, allowedOrigins: [origin, other])
+        #expect(try await cleared.headers(for: URL(string: origin)!) == ["Authorization": "Bearer existing-token"])
+        #expect(try await cleared.headers(for: URL(string: other)!) == ["Cookie": "session=other-login"])
+    }
+    @Test func revokedCredentialEditorCannotSaveOrClearANewerContext() async throws {
+        let vault = SourceCredentialVault(persistence: MemorySourceCredentials())
+        let session = try await vault.session(scope: scope(), allowedOrigins: [origin])
+        try await session.receive([cookie()])
+        let editGate = SourceCommitGate(); editGate.invalidate()
+        await #expect(throws: SourceDomainError.self) {
+            try await vault.replaceBrowserCookies([], session: session, changeGate: editGate)
+        }
+        await #expect(throws: SourceDomainError.self) {
+            try await vault.setBearer("stale", origin: origin, session: session, changeGate: editGate)
+        }
+        await #expect(throws: SourceDomainError.self) { try await vault.clear(session: session, changeGate: editGate) }
+        #expect(try await session.headers(for: URL(string: origin)!) == ["Cookie": "session=secret"])
+    }
+    @Test func selectedAccountIsCheckedInsideTheConfigurationTransaction() async throws {
+        let archive = try SourceArchive(url: FileManager.default.temporaryDirectory.appendingPathComponent("account-config-\(UUID().uuidString)/native.sqlite3"))
+        let installation = try SourceInstallation(publisherID: "fixture", name: "Fixture", version: "1", source: "fixture", origins: [origin])
+        try await archive.saveInstallation(installation)
+        let account = try await archive.addAccount(name: "Reader", installationID: installation.id)
+        let guest = try SourceScope(installationID: installation.id)
+        try await archive.selectAccount(account.id, installationID: installation.id)
+        await #expect(throws: SourceDomainError.self) {
+            try await archive.saveConfiguration(.object(["name": .string("stale")]), scope: guest, expectedSourceDigest: installation.digest, requireSelectedAccount: true)
+        }
+        #expect(try await archive.configuration(scope: guest) == nil)
+        let selected = try SourceScope(installationID: installation.id, accountID: account.id)
+        try await archive.saveConfiguration(.object(["name": .string("selected")]), scope: selected, expectedSourceDigest: installation.digest, requireSelectedAccount: true)
+        #expect(try await archive.configuration(scope: selected) == .object(["name": .string("selected")]))
+    }
+    @Test func sourceUpdateRejectsChangedAccountConfigurationWithoutPartialReset() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("account-update-\(UUID().uuidString)/native.sqlite3")
+        let archive = try SourceArchive(url: url), otherConnection = try SourceArchive(url: url)
+        let original = try SourceInstallation(publisherID: "fixture", name: "Fixture", version: "1", source: "v1", origins: [origin])
+        try await archive.saveInstallation(original)
+        let account = try await archive.addAccount(name: "Reader", installationID: original.id)
+        let scope = try SourceScope(installationID: original.id, accountID: account.id)
+        try await archive.saveConfiguration(.object(["color": .string("blue")]), scope: scope)
+        let reviewed = try await archive.accountConfigurations(installationID: original.id)
+        let updated = try SourceInstallation(id: original.id, publisherID: "fixture", name: "Fixture", version: "2", source: "v2", origins: [origin])
+        try await otherConnection.saveConfiguration(.object(["color": .string("green")]), scope: scope)
+        await #expect(throws: SourceDomainError.self) {
+            try await archive.saveInstallation(updated, replacing: original.digest, reviewedConfigurations: reviewed, resetAllAccountConfigurations: true)
+        }
+        #expect(try await archive.installation(original.id)?.digest == original.digest)
+        #expect(try await archive.configuration(scope: scope) == .object(["color": .string("green")]))
+        #expect(try await archive.installationHistory(original.id).isEmpty)
+        let fresh = try await archive.accountConfigurations(installationID: original.id)
+        try await archive.saveInstallation(updated, replacing: original.digest, reviewedConfigurations: fresh, resetAllAccountConfigurations: true)
+        #expect(try await archive.configuration(scope: scope) == .object([:]))
+        #expect(try await archive.accountConfigurations(installationID: original.id).values.allSatisfy { $0 == .object([:]) })
+        #expect(try await archive.installationHistory(original.id).first?.digest == original.digest)
+    }
+    @Test func sourceUpdateRejectsAnUnreviewedNewAccount() async throws {
+        let archive = try SourceArchive(url: FileManager.default.temporaryDirectory.appendingPathComponent("account-new-\(UUID().uuidString)/native.sqlite3"))
+        let original = try SourceInstallation(publisherID: "fixture", name: "Fixture", version: "1", source: "v1", origins: [origin])
+        try await archive.saveInstallation(original)
+        let reviewed = try await archive.accountConfigurations(installationID: original.id)
+        _ = try await archive.addAccount(name: "New reader", installationID: original.id)
+        let updated = try SourceInstallation(id: original.id, publisherID: "fixture", name: "Fixture", version: "2", source: "v2", origins: [origin])
+        await #expect(throws: SourceDomainError.self) {
+            try await archive.saveInstallation(updated, replacing: original.digest, reviewedConfigurations: reviewed)
+        }
+        #expect(try await archive.installation(original.id)?.digest == original.digest)
+    }
+
 }

@@ -136,15 +136,20 @@ public actor SourceCredentialVault {
         let entry = try validated(session)
         return entry.bundle.cookies.filter { session.allowedOrigins.contains($0.origin) && ($0.expiresAt.map { $0 > Date() } ?? true) }
     }
-    public func replaceBrowserCookies(_ cookies: [SourceCredentialCookie], session: SourceCredentialSession) throws {
+    public func replaceBrowserCookies(_ cookies: [SourceCredentialCookie], session: SourceCredentialSession,
+                                      replacingOrigins: Set<String>? = nil, changeGate: SourceCommitGate? = nil) throws {
         let entry = try validated(session)
-        guard cookies.allSatisfy({ session.allowedOrigins.contains($0.origin) }) else { throw SourceDomainError(.invalidInput, "Cookie 超出账号授权范围。") }
+        let origins = replacingOrigins ?? session.allowedOrigins
+        guard !origins.isEmpty, origins.isSubset(of: session.allowedOrigins), cookies.allSatisfy({ origins.contains($0.origin) }) else {
+            throw SourceDomainError(.invalidInput, "Cookie 超出账号授权范围。")
+        }
         var bundle = entry.bundle
-        bundle.cookies.removeAll { session.allowedOrigins.contains($0.origin) }
+        bundle.cookies.removeAll { origins.contains($0.origin) }
         bundle.cookies.append(contentsOf: cookies.filter { $0.expiresAt.map { $0 > Date() } ?? true })
-        try replace(bundle, scope: session.scope)
+        if let changeGate { try changeGate.withCommit { try replace(bundle, scope: session.scope) } }
+        else { try replace(bundle, scope: session.scope) }
     }
-    public func setBearer(_ token: String?, origin: String, session: SourceCredentialSession) throws {
+    public func setBearer(_ token: String?, origin: String, session: SourceCredentialSession, changeGate: SourceCommitGate? = nil) throws {
         let entry = try validated(session)
         guard session.allowedOrigins.contains(origin) else { throw SourceDomainError(.invalidInput, "令牌网站不在授权范围内。") }
         if let token {
@@ -154,7 +159,12 @@ public actor SourceCredentialVault {
         }
         var bundle = entry.bundle
         bundle.bearer[origin] = token
-        try replace(bundle, scope: session.scope)
+        if let changeGate { try changeGate.withCommit { try replace(bundle, scope: session.scope) } }
+        else { try replace(bundle, scope: session.scope) }
+    }
+    public func clear(session: SourceCredentialSession, changeGate: SourceCommitGate) throws {
+        _ = try validated(session)
+        try changeGate.withCommit { try clear(scope: session.scope) }
     }
     public func clear(scope: SourceScope) throws {
         _ = try load(scope)

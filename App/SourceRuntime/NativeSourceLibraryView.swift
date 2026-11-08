@@ -216,6 +216,8 @@ private struct NativeSourceSettingsView: View {
     @State private var editingText = ""
     @State private var history: [SourceInstallation] = []
     @State private var snapshot: SourceSnapshot?
+    @State private var configurationScope: SourceScope?
+    private var accountID: String { model.activeAccounts[installation.id]?.id ?? "guest" }
     @State private var values: [String: SourceJSON] = [:]
     @State private var feedback: String?
     @State private var busy = false
@@ -225,6 +227,11 @@ private struct NativeSourceSettingsView: View {
                 LabeledContent("名称", value: installation.name)
                 LabeledContent("版本", value: installation.version)
                 ForEach(installation.origins, id: \.self) { Text($0).font(.footnote) }
+            }
+            Section("账号") {
+                NavigationLink { NativeSourceAccountsView(model: model, initialInstallation: installation) } label: {
+                    LabeledContent("账号与登录", value: model.activeAccounts[installation.id]?.name ?? "访客")
+                }.frame(minHeight: 44)
             }
             Section("源代码") {
                 Button("查看或修改源码") { editingText = installation.source; editing = true }
@@ -246,11 +253,15 @@ private struct NativeSourceSettingsView: View {
                         busy = true
                         Task {
                             defer { busy = false }
-                            do { try await model.saveConfiguration(.object(values), installation: installation); feedback = "选项已保存" }
+                            do {
+                                guard let configurationScope else { throw SourceDomainError(.stale, "请等待账号选项载入。") }
+                                try await model.saveConfiguration(.object(values), installation: installation, scope: configurationScope)
+                                feedback = "选项已保存"
+                            }
                             catch { feedback = error.localizedDescription }
                         }
-                    }.disabled(busy)
-                }.disabled(busy)
+                    }.frame(minHeight: 44).disabled(busy || configurationScope?.accountID != accountID)
+                }.disabled(busy || configurationScope?.accountID != accountID)
             }
             if let feedback { Section { Text(feedback).font(.footnote) } }
         }
@@ -259,14 +270,22 @@ private struct NativeSourceSettingsView: View {
         .sheet(isPresented: $editing) {
             NativeSourceEditorView(model: model, installation: installation, initialText: editingText)
         }
-        .task(id: installation.digest) {
+        .task(id: installation.digest + ":" + accountID) {
+            configurationScope = nil; snapshot = nil; values = [:]; feedback = nil
             do {
-                history = try await model.services().0.installationHistory(installation.id)
-                let snapshot = try await model.inspect(installation.source)
-                let stored = try await model.services().0.configuration(scope: .init(installationID: installation.id))
-                if case .object(let values) = try snapshot.configuration(overrides: stored) { self.values = values }
-                self.snapshot = snapshot
-            } catch { feedback = error.localizedDescription }
+                let source = installation
+                let scope = try await model.selectedScope(source)
+                let history = try await model.services().0.installationHistory(source.id)
+                let snapshot = try await model.inspect(source.source)
+                let stored = try await model.services().0.configuration(scope: scope)
+                let effective = try snapshot.configuration(overrides: stored)
+                try Task.checkCancellation()
+                guard try await model.selectedScope(source) == scope else { return }
+                try Task.checkCancellation()
+                if case .object(let values) = effective { self.values = values }
+                self.history = history; self.snapshot = snapshot; configurationScope = scope
+            } catch is CancellationError { }
+            catch { if !Task.isCancelled { feedback = error.localizedDescription } }
         }
     }
     @ViewBuilder private func settingRow(_ key: String, setting: SourceInspection.Metadata.Setting) -> some View {
@@ -363,7 +382,7 @@ private struct NativeSourceEditorView: View {
                         if reviewed.inspection.metadata.id != installation.publisherID {
                             Text("标识不同，请另存为新书源，避免改变已有书籍的身份。")
                         } else {
-                            Toggle("重置书源选项为新版本默认值", isOn: $resetConfiguration)
+                            Toggle("将所有账号的书源选项重置为默认值", isOn: $resetConfiguration)
                             Toggle("已确认此源码兼容已有书源状态", isOn: $acceptsStateCompatibility)
                             Text("回滚只恢复源码，不恢复书源状态。无法确认状态兼容时，请另存为新书源。")
                                 .font(.footnote).foregroundStyle(.secondary)

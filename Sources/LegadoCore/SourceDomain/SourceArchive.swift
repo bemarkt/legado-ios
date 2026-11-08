@@ -228,13 +228,25 @@ public actor SourceArchive {
         try record("installation-history", scope: "", key: id.uuidString) ?? []
     }
     public func saveInstallation(_ value: SourceInstallation, replacing expectedDigest: String? = nil,
-                                 resetConfigurationFor scope: SourceScope? = nil) throws {
+                                 resetConfigurationFor scope: SourceScope? = nil,
+                                 reviewedConfigurations: [String: SourceJSON]? = nil, resetAllAccountConfigurations: Bool = false) throws {
         guard value.digest == SourceCoding.digest(Data(value.source.utf8)), value.source.utf8.count <= 2_097_152 else {
             throw SourceDomainError(.invalidData, "Source snapshot digest mismatch")
         }
         try transaction {
             let current = try installation(value.id)
             guard current?.digest == expectedDigest else { throw SourceDomainError(.storageConflict, "Installation changed; reload before saving") }
+            if let reviewedConfigurations {
+                guard try accountConfigurationValues(value.id) == reviewedConfigurations else {
+                    throw SourceDomainError(.storageConflict, "账号或选项已经改变，请重新审阅书源更新。")
+                }
+            }
+            if resetAllAccountConfigurations {
+                guard let reviewedConfigurations else { throw SourceDomainError(.invalidInput, "重置所有账号选项前需要审阅配置。") }
+                for accountID in reviewedConfigurations.keys {
+                    try saveConfiguration(.object([:]), scope: SourceScope(installationID: value.id, accountID: accountID))
+                }
+            }
             if let current {
                 guard current.publisherID == value.publisherID else { throw SourceDomainError(.invalidInput, "A different publisher ID needs a separate installation") }
                 if current.digest != value.digest {
@@ -281,14 +293,30 @@ public actor SourceArchive {
         }
     }
 
+    /// Missing overrides and an empty object have the same effective configuration.
+    public func accountConfigurations(installationID: UUID) throws -> [String: SourceJSON] {
+        try transaction { try accountConfigurationValues(installationID) }
+    }
+    private func accountConfigurationValues(_ installationID: UUID) throws -> [String: SourceJSON] {
+        var values: [String: SourceJSON] = [:]
+        for account in try accountSettings(installationID: installationID).accounts {
+            let scope = try SourceScope(installationID: installationID, accountID: account.id)
+            values[account.id] = try configuration(scope: scope) ?? .object([:])
+        }
+        return values
+    }
+
     public func configuration(scope: SourceScope) throws -> SourceJSON? { try record("configuration", scope: scopeKey(scope), key: "values") }
-    public func saveConfiguration(_ value: SourceJSON, scope: SourceScope, expectedSourceDigest: String? = nil) throws {
+    public func saveConfiguration(_ value: SourceJSON, scope: SourceScope, expectedSourceDigest: String? = nil, requireSelectedAccount: Bool = false) throws {
         guard case .object = value else { throw SourceDomainError(.invalidInput, "Configuration must be an object") }
         _ = try value.validatedData(maximumBytes: 65_536)
-        if let expectedSourceDigest {
+        if expectedSourceDigest != nil || requireSelectedAccount {
             try transaction {
-                guard try installation(scope.installationID)?.digest == expectedSourceDigest else {
+                if let expectedSourceDigest, try installation(scope.installationID)?.digest != expectedSourceDigest {
                     throw SourceDomainError(.storageConflict, "Source changed; reopen settings before saving")
+                }
+                if requireSelectedAccount, try accountSettings(installationID: scope.installationID).selectedID != scope.accountID {
+                    throw SourceDomainError(.stale, "账号已切换，请重新打开选项。")
                 }
                 try put("configuration", scope: scopeKey(scope), key: "values", value: value)
             }

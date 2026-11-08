@@ -4,3 +4,8 @@
 /scripts/source-protocol-baseline.py text eol=lf
 /.github/workflows/source-protocol-ci.yml text eol=lf
 /docs/reports/source-protocol-p0-baseline.json text eol=lf
+
+/App/Resources/SourceRuntime/** text eol=lf
+/App/SourceRuntime/** text eol=lf
+/Tests/LegadoReaderTests/SourceRuntimeTests.swift text eol=lf
+/.github/workflows/source-runtime-ci.yml text eol=lf

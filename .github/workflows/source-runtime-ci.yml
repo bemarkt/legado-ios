@@ -1,0 +1,105 @@
+name: Source Runtime WebKit
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'App/**'
+      - 'Tests/LegadoReaderTests/**'
+      - 'protocols/source-v1/**'
+      - 'tools/source-protocol/**'
+      - 'Legado.xcodeproj/**'
+      - '.github/workflows/source-runtime-ci.yml'
+  pull_request:
+    paths:
+      - 'App/**'
+      - 'Tests/LegadoReaderTests/**'
+      - 'protocols/source-v1/**'
+      - 'tools/source-protocol/**'
+      - 'Legado.xcodeproj/**'
+      - '.github/workflows/source-runtime-ci.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: source-runtime-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  simulator:
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: tools/source-protocol/package-lock.json
+      - name: Verify embedded inspector against shared contracts
+        working-directory: tools/source-protocol
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm run check
+      - name: Show native toolchain and select iOS simulator
+        run: |
+          xcodebuild -version
+          xcrun simctl list devices available -j > /tmp/source-simulators.json
+          python3 - <<'PY'
+          import json, os
+          data = json.load(open('/tmp/source-simulators.json'))
+          candidates = [(runtime, device) for runtime, devices in data['devices'].items()
+                        if 'iOS-26' in runtime for device in devices
+                        if device.get('isAvailable') and device['name'].startswith('iPhone')]
+          if not candidates:
+              raise SystemExit('No iOS 26 simulator available')
+          runtime, device = sorted(candidates, key=lambda item: (item[0], item[1]['name']))[-1]
+          print(runtime, device['name'], device['udid'])
+          with open(os.environ['GITHUB_ENV'], 'a') as env:
+              env.write('SOURCE_SIMULATOR=' + device['udid'] + '\n')
+          PY
+      - name: Cache Swift packages
+        uses: actions/cache@v4
+        with:
+          path: SourcePackages
+          key: macos-26-spm-${{ hashFiles('Legado.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved', 'Package.resolved') }}
+      - name: Run actual WebKit protocol tests on simulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          node tools/source-protocol/fixture-server.mjs > build/source-fixtures.log 2>&1 &
+          FIXTURE_PID=$!
+          trap 'kill "$FIXTURE_PID" 2>/dev/null || true' EXIT
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:18764/health; then break; fi
+            sleep 1
+          done
+          curl --fail http://127.0.0.1:18764/health
+          xcrun simctl boot "$SOURCE_SIMULATOR" || true
+          xcrun simctl bootstatus "$SOURCE_SIMULATOR" -b
+          xcodebuild test \
+            -project Legado.xcodeproj -scheme LegadoReaderTests -configuration Debug \
+            -destination "platform=iOS Simulator,id=$SOURCE_SIMULATOR" \
+            -derivedDataPath build/SourceRuntimeDerivedData -clonedSourcePackagesDirPath SourcePackages \
+            -skipPackagePluginValidation -skipMacroValidation \
+            -only-testing:LegadoReaderTests/SourceRuntimeTests \
+            -parallel-testing-enabled NO -maximum-concurrent-test-simulator-destinations 1 \
+            -resultBundlePath build/SourceRuntime.xcresult \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY='' \
+            CODE_SIGN_ENTITLEMENTS='' DEVELOPMENT_TEAM='' \
+            2>&1 | tee build/source-runtime-tests.log
+      - name: Upload simulator evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Source-Runtime-WebKit-Evidence
+          path: |
+            build/source-runtime-tests.log
+            build/source-fixtures.log
+            build/SourceRuntime.xcresult
+          if-no-files-found: ignore
+          retention-days: 14

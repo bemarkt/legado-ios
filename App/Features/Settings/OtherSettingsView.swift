@@ -54,6 +54,9 @@ struct OtherSettingsView: View {
                 NavigationLink {
                     DiagnosticLogView()
                 } label: { Label("日志与诊断", systemImage: "doc.text.magnifyingglass") }
+                NavigationLink {
+                    SourceProtocolLabView()
+                } label: { Label("书源协议实验室", systemImage: "flask") }
                 Toggle("正文几何 debug", isOn: $debugContentOverlay)
             } header: { Text("诊断") } footer: {
                 Text("日志仅保存在本机，最多保留 500 条。网络日志不记录请求正文与 Header，URL 查询参数和常见凭据会隐藏。")

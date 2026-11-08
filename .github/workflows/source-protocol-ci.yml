@@ -6,6 +6,7 @@ on:
     paths:
       - 'protocols/source-v1/**'
       - 'tools/source-protocol/**'
+      - 'App/Resources/SourceRuntime/**'
       - 'scripts/source-protocol-baseline.py'
       - 'Sources/LegadoCore/Persistence/LegadoDatabase.swift'
       - '.github/workflows/source-protocol-ci.yml'
@@ -13,6 +14,7 @@ on:
     paths:
       - 'protocols/source-v1/**'
       - 'tools/source-protocol/**'
+      - 'App/Resources/SourceRuntime/**'
       - 'scripts/source-protocol-baseline.py'
       - 'Sources/LegadoCore/Persistence/LegadoDatabase.swift'
       - '.github/workflows/source-protocol-ci.yml'

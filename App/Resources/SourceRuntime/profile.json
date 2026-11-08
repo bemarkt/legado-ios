@@ -1,0 +1,34 @@
+{
+  "status": "candidate",
+  "apiVersion": 1,
+  "ecmaVersion": 2022,
+  "extensions": [],
+  "limits": {
+    "sourceBytes": 2097152,
+    "metadataBytes": 65536,
+    "astNodes": 100000,
+    "astDepth": 128,
+    "jsonDepth": 32,
+    "jsonNodes": 100000,
+    "outputBytes": 8388608,
+    "refStateBytes": 16384,
+    "cursorBytes": 16384,
+    "storageValueBytes": 65536,
+    "storageTotalBytes": 1048576,
+    "httpResponseBytes": 8388608,
+    "operationHTTPRequests": 64,
+    "catalogPages": 1000
+  },
+  "parser": {
+    "timeoutMs": 2000,
+    "maxOldGenerationSizeMb": 64,
+    "maxYoungGenerationSizeMb": 16,
+    "stackSizeMb": 4
+  },
+  "experimentalRuntimeBudgets": {
+    "moduleInitializationMs": 2000,
+    "operationMs": 15000,
+    "maxRedirects": 5
+  },
+  "note": "These are candidate input/test limits, not measured iOS performance guarantees. D02/D03/D10 remain open."
+}

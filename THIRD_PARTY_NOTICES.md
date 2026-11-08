@@ -46,3 +46,7 @@
 `tools/source-protocol` 的 Node 原型使用 Acorn 8.19.0（MIT）解析 ECMAScript AST，使用 Ajv 8.20.0（MIT）校验 JSON Schema。精确版本、下载来源和 integrity 记录在该目录的 `package-lock.json`，各依赖的版权/许可随 npm 包保留。传递依赖 fast-deep-equal、json-schema-traverse、require-from-string 使用 MIT 许可；fast-uri 使用 BSD-3-Clause 许可，完整声明随各 npm 包保留。
 
 这些依赖当前只用于开发工具，没有加入 App 或复制到 App 资源；将来嵌入 App 时必须同步收录实际分发版本的完整版权与许可。协议 fixture 与合成旧库 seed 由本项目构造，不含真实站点正文或个人数据。
+
+## Source protocol prototype parser and validation
+
+The iOS App embeds Acorn 8.19.0 and generated Ajv 8.20.0 validators. Full licenses (including transitive dependency notices) are bundled in `App/Resources/SourceRuntime/LICENSES.md`. The readable generated bundle is reproducible with `npm --prefix tools/source-protocol run bundle`. esbuild 0.25.12 is a build-only dependency and is not shipped as an engine.

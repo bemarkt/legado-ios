@@ -163,6 +163,14 @@
 		DE1000000000000000000002 /* JavaScriptHostInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE2000000000000000000002 /* JavaScriptHostInstaller.swift */; };
 		DF1000000000000000000001 /* BookSourceRuntimeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF2000000000000000000001 /* BookSourceRuntimeStore.swift */; };
 		EA1000000000000000000001 /* JavaScriptJsoupHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA2000000000000000000001 /* JavaScriptJsoupHost.swift */; };
+		FA1000000000000000000001 /* SourceContracts.swift */ = {isa = PBXBuildFile; fileRef = FA2000000000000000000001; };
+		FA1000000000000000000002 /* SourceWebPage.swift */ = {isa = PBXBuildFile; fileRef = FA2000000000000000000002; };
+		FA1000000000000000000003 /* SourceHTTP.swift */ = {isa = PBXBuildFile; fileRef = FA2000000000000000000003; };
+		FA1000000000000000000004 /* SourceRuntime.swift */ = {isa = PBXBuildFile; fileRef = FA2000000000000000000004; };
+		FA1000000000000000000005 /* SourceProtocolLabView.swift */ = {isa = PBXBuildFile; fileRef = FA2000000000000000000005; };
+		FA1000000000000000000010 /* SourceRuntime */ = {isa = PBXBuildFile; fileRef = FA2000000000000000000010; };
+		FA1000000000000000000011 /* SourceRuntimeTests.swift */ = {isa = PBXBuildFile; fileRef = FA2000000000000000000011; };
+		FA1000000000000000000012 /* fixtures */ = {isa = PBXBuildFile; fileRef = FA2000000000000000000012; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -321,6 +329,14 @@
 		DE2000000000000000000002 /* JavaScriptHostInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/LegadoCore/JavaScript/Core/JavaScriptHostInstaller.swift; sourceTree = SOURCE_ROOT; };
 		DF2000000000000000000001 /* BookSourceRuntimeStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/LegadoCore/JavaScript/Host/BookSourceRuntimeStore.swift; sourceTree = SOURCE_ROOT; };
 		EA2000000000000000000001 /* JavaScriptJsoupHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/LegadoCore/JavaScript/Host/JavaScriptJsoupHost.swift; sourceTree = SOURCE_ROOT; };
+		FA2000000000000000000001 /* SourceContracts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SourceContracts.swift; path = App/SourceRuntime/SourceContracts.swift; sourceTree = SOURCE_ROOT; };
+		FA2000000000000000000002 /* SourceWebPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SourceWebPage.swift; path = App/SourceRuntime/SourceWebPage.swift; sourceTree = SOURCE_ROOT; };
+		FA2000000000000000000003 /* SourceHTTP.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SourceHTTP.swift; path = App/SourceRuntime/SourceHTTP.swift; sourceTree = SOURCE_ROOT; };
+		FA2000000000000000000004 /* SourceRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SourceRuntime.swift; path = App/SourceRuntime/SourceRuntime.swift; sourceTree = SOURCE_ROOT; };
+		FA2000000000000000000005 /* SourceProtocolLabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SourceProtocolLabView.swift; path = App/SourceRuntime/SourceProtocolLabView.swift; sourceTree = SOURCE_ROOT; };
+		FA2000000000000000000010 /* SourceRuntime */ = {isa = PBXFileReference; lastKnownFileType = folder; name = SourceRuntime; path = App/Resources/SourceRuntime; sourceTree = SOURCE_ROOT; };
+		FA2000000000000000000011 /* SourceRuntimeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SourceRuntimeTests.swift; path = Tests/LegadoReaderTests/SourceRuntimeTests.swift; sourceTree = SOURCE_ROOT; };
+		FA2000000000000000000012 /* fixtures */ = {isa = PBXFileReference; lastKnownFileType = folder; name = fixtures; path = protocols/source-v1/fixtures; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -345,6 +361,14 @@
 		D40000000000000000000001 = {
 			isa = PBXGroup;
 			children = (
+				FA2000000000000000000012 /* fixtures */,
+				FA2000000000000000000011 /* SourceRuntimeTests.swift */,
+				FA2000000000000000000010 /* SourceRuntime */,
+				FA2000000000000000000005 /* SourceProtocolLabView.swift */,
+				FA2000000000000000000004 /* SourceRuntime.swift */,
+				FA2000000000000000000003 /* SourceHTTP.swift */,
+				FA2000000000000000000002 /* SourceWebPage.swift */,
+				FA2000000000000000000001 /* SourceContracts.swift */,
 				AA2200000000000000000001 /* SourceEditorView.swift */,
 				AA2200000000000000000002 /* ReplaceRuleEditorView.swift */,
 				AA2200000000000000000003 /* SyntaxCodeEditor.swift */,
@@ -715,7 +739,7 @@
 		B50000000000000000000030 /* LegadoReaderTests */ = {
             isa = PBXNativeTarget;
             buildConfigurationList = B60000000000000000000030;
-            buildPhases = (B30000000000000000000030, B30000000000000000000031);
+            buildPhases = (B30000000000000000000030, B30000000000000000000031, FA3000000000000000000012);
             buildRules = ();
             dependencies = (B80000000000000000000030);
             name = LegadoReaderTests;
@@ -795,6 +819,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				FA1000000000000000000010,
 				91000000000000000000000A /* Kanna-LICENSE.txt in Resources */,
 				910000000000000000000009 /* SwiftSoup-LICENSE.txt in Resources */,
 				910000000000000000000008 /* Legado-LICENSE.txt in Resources */,
@@ -807,15 +832,21 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		FA3000000000000000000012 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (FA1000000000000000000012,); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		B30000000000000000000050 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (B10000000000000000000050, AA1100000000000000000009, AA1100000000000000000010, DA1000000000000000000001); runOnlyForDeploymentPostprocessing = 0; };
-		B30000000000000000000030 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (B10000000000000000000030, BC1000000000000000000001, ED1000000000000000000003, DA1000000000000000000002); runOnlyForDeploymentPostprocessing = 0; };
+		B30000000000000000000030 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (FA1000000000000000000011, B10000000000000000000030, BC1000000000000000000001, ED1000000000000000000003, DA1000000000000000000002); runOnlyForDeploymentPostprocessing = 0; };
 		D30000000000000000000002 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				FA1000000000000000000001,
+				FA1000000000000000000002,
+				FA1000000000000000000003,
+				FA1000000000000000000004,
+				FA1000000000000000000005,
 				AA1100000000000000000001 /* SourceEditorView.swift in Sources */,
 				AA1100000000000000000002 /* ReplaceRuleEditorView.swift in Sources */,
 				AA1100000000000000000003 /* SyntaxCodeEditor.swift in Sources */,

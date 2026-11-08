@@ -12,6 +12,7 @@ struct NativeSourceBookView: View {
     @State private var message: String?
     @State private var resumeID: String?
     @State private var operationID = UUID()
+    @State private var downloadProgress: SourceDownloadProgress?
     var body: some View {
         List {
             Section {
@@ -28,7 +29,22 @@ struct NativeSourceBookView: View {
                     Button("下载全部章节") { start { try await download(catalog) } }.disabled(offline || busy)
                 }
                 Button("刷新目录") { start { try await refresh() } }.disabled(offline || busy)
-                if busy { HStack { ProgressView(); Text("处理中…"); Spacer(); Button("取消") { task?.cancel() } } }
+                if let progress = downloadProgress {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ProgressView(value: Double(progress.completed), total: Double(max(1, progress.total)))
+                            .accessibilityLabel("章节下载进度")
+                            .accessibilityValue("已保存 \(progress.completed) 章，共 \(progress.total) 章")
+                        Text("已保存 \(progress.completed) / \(progress.total) 章").font(.footnote).monospacedDigit()
+                        if busy, let chapter = progress.currentChapter { Text(chapter.title).font(.caption).foregroundStyle(.secondary) }
+                    }
+                }
+                if busy {
+                    HStack {
+                        if downloadProgress == nil { ProgressView(); Text("处理中…") }
+                        Spacer()
+                        Button("取消") { task?.cancel() }.frame(minWidth: 44, minHeight: 44)
+                    }
+                }
                 if let message { Text(message).font(.footnote).foregroundStyle(.secondary).textSelection(.enabled) }
             }
             Section("目录 · \(catalog?.chapters.count ?? 0) 章") {
@@ -64,7 +80,7 @@ struct NativeSourceBookView: View {
         .onDisappear { operationID = UUID(); task?.cancel(); task = nil; busy = false }
     }
     private func start(_ operation: @escaping @MainActor () async throws -> Void) {
-        task?.cancel(); busy = true; message = nil
+        task?.cancel(); busy = true; message = nil; downloadProgress = nil
         let token = UUID(); operationID = token
         task = Task {
             defer { if operationID == token { busy = false; task = nil } }
@@ -85,7 +101,12 @@ struct NativeSourceBookView: View {
     }
     private func download(_ catalog: SourceCatalog) async throws {
         let provider = try await model.provider(item.installation)
-        let count = try await model.services().1.download(provider: provider.prioritized(.background), catalog: catalog)
+        let token = operationID
+        let count = try await model.services().1.download(provider: provider.prioritized(.background), catalog: catalog) { progress in
+            await MainActor.run {
+                if operationID == token { downloadProgress = progress }
+            }
+        }
         try Task.checkCancellation()
         message = "已保存 \(count) 章，可打开离线模式阅读。"
     }

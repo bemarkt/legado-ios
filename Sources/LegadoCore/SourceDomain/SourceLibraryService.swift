@@ -1,5 +1,11 @@
 import Foundation
 
+public struct SourceDownloadProgress: Sendable, Equatable {
+    public let completed: Int
+    public let total: Int
+    public let currentChapter: SourceWire.Chapter?
+}
+
 public actor SourceLibraryService {
     public enum ReadPolicy: Sendable, Equatable { case current, reload, offline }
     public let archive: SourceArchive
@@ -74,14 +80,21 @@ public actor SourceLibraryService {
     }
 
     /// A failed download preserves completed chapters; cancellation is checked between chapters.
-    public func download(provider: any SourceProvider, catalog: SourceCatalog) async throws -> Int {
+    public func download(provider: any SourceProvider, catalog: SourceCatalog,
+                         progress: @Sendable (SourceDownloadProgress) async -> Void = { _ in }) async throws -> Int {
         guard provider.descriptor.identity == catalog.identity else { throw SourceDomainError(.stale, "Download must use the catalog snapshot") }
         var count = 0
+        try Task.checkCancellation()
+        await progress(.init(completed: 0, total: catalog.chapters.count, currentChapter: nil))
         for item in catalog.chapters {
+            try Task.checkCancellation()
+            await progress(.init(completed: count, total: catalog.chapters.count, currentChapter: item))
             try Task.checkCancellation()
             _ = try await chapter(provider: provider, book: catalog.book, chapter: item.ref, catalog: catalog)
             count += 1
+            await progress(.init(completed: count, total: catalog.chapters.count, currentChapter: nil))
         }
+        try Task.checkCancellation()
         return count
     }
 }

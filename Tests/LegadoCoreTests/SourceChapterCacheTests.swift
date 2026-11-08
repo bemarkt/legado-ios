@@ -46,6 +46,11 @@ private actor ChapterCacheProvider: SourceProvider {
     }
 }
 
+private actor DownloadProgressRecorder {
+    private(set) var values: [SourceDownloadProgress] = []
+    func append(_ value: SourceDownloadProgress) { values.append(value) }
+}
+
 @Suite("Chapter cache revision consistency")
 struct SourceChapterCacheTests {
     private let book = SourceWire.SourceRef(id: "book")
@@ -262,6 +267,55 @@ struct SourceChapterCacheTests {
         let reopened = try SourceArchive(url: f.url)
         #expect(try await reopened.chapter(cached.key, identity: cached.identity) == normalized)
         #expect(await f.provider.contentCalls == 1)
+    }
+
+    @Test func downloadReportsOnlyPersistedOrCachedChaptersAsCompleted() async throws {
+        let f = try fixture()
+        await f.provider.setCatalog([.init(ref: chapter, title: "One"), .init(ref: .init(id: "two"), title: "Two")], revision: "two")
+        let catalog = try await f.service.refreshCatalog(provider: f.provider, book: book)
+        _ = try await f.service.chapter(provider: f.provider, book: book, chapter: chapter, catalog: catalog)
+        let recorder = DownloadProgressRecorder()
+        let count = try await f.service.download(provider: f.provider, catalog: catalog) { await recorder.append($0) }
+        let values = await recorder.values
+        #expect(count == 2)
+        #expect(values.map(\.completed) == [0,0,1,1,2])
+        #expect(values.map(\.currentChapter?.ref.id) == [nil,"one",nil,"two",nil])
+        #expect(values.allSatisfy { $0.total == 2 })
+        #expect(await f.provider.contentCalls == 2)
+    }
+
+    @Test func cancelledDownloadRetainsCompletedCountAndChapters() async throws {
+        let f = try fixture()
+        await f.provider.setCatalog([.init(ref: chapter, title: "One"), .init(ref: .init(id: "two"), title: "Two")], revision: "two")
+        let catalog = try await f.service.refreshCatalog(provider: f.provider, book: book)
+        let recorder = DownloadProgressRecorder()
+        let task = Task {
+            try await f.service.download(provider: f.provider, catalog: catalog) { value in
+                await recorder.append(value)
+                if value.completed == 1 { withUnsafeCurrentTask { $0?.cancel() } }
+            }
+        }
+        await #expect(throws: CancellationError.self) { try await task.value }
+        #expect(await recorder.values.last?.completed == 1)
+        #expect(try await f.service.chapter(provider: f.provider, book: book, chapter: chapter, policy: .offline).document.plainText == "Original body")
+        await #expect(throws: SourceDomainError.self) {
+            try await f.service.chapter(provider: f.provider, book: book, chapter: .init(id: "two"), policy: .offline)
+        }
+    }
+
+    @Test func failedDownloadDoesNotAdvanceProgressPastSavedChapters() async throws {
+        let f = try fixture()
+        await f.provider.setCatalog([.init(ref: chapter, title: "One"), .init(ref: .init(id: "two"), title: "Two")], revision: "two")
+        let catalog = try await f.service.refreshCatalog(provider: f.provider, book: book)
+        let recorder = DownloadProgressRecorder()
+        await #expect(throws: SourceDomainError.self) {
+            try await f.service.download(provider: f.provider, catalog: catalog) { value in
+                await recorder.append(value)
+                if value.completed == 1 { await f.provider.setFailing(true) }
+            }
+        }
+        #expect(await recorder.values.last?.completed == 1)
+        #expect(try await f.service.chapter(provider: f.provider, book: book, chapter: chapter, policy: .offline).document.plainText == "Original body")
     }
 
     /// Write the historical on-disk shape, without passing it through the current cache API.

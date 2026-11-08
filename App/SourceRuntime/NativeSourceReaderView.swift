@@ -91,7 +91,7 @@ struct NativeSourceBookView: View {
     }
 }
 
-private struct NativeSourceReaderView: View {
+struct NativeSourceReaderView: View {
     struct Passage: Identifiable {
         let id: Int
         let text: String
@@ -191,6 +191,9 @@ private struct NativeSourceReaderView: View {
                 if let existing = self.provider { provider = existing }
                 else { provider = try await model.provider(item.installation); self.provider = provider }
                 let (archive, service) = try model.services()
+                guard offline || catalog.identity == provider.descriptor.identity else {
+                    throw SourceDomainError(.stale, "书源或选项已改变，请返回书籍详情刷新目录后再阅读。已下载内容仍可在离线模式打开。")
+                }
                 let content = try await service.chapter(provider: provider, book: item.book.details.ref, chapter: selected.ref, policy: offline ? .offline : .current)
                 try Task.checkCancellation()
                 guard generation == token else { return }

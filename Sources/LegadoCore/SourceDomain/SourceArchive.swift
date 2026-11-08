@@ -10,12 +10,15 @@ public struct SourceInstallation: Codable, Sendable, Equatable, Identifiable {
     public let digest: String
     public let origins: [String]
     public let createdAt: Date
-    public init(id: UUID = UUID(), publisherID: String, name: String, version: String, source: String, origins: [String], createdAt: Date = Date()) throws {
+    public let originURL: String?
+    public let locallyModified: Bool?
+    public init(id: UUID = UUID(), publisherID: String, name: String, version: String, source: String, origins: [String], createdAt: Date = Date(), originURL: String? = nil, locallyModified: Bool = false) throws {
         guard source.utf8.count <= 2_097_152, !publisherID.isEmpty, !name.isEmpty, !origins.isEmpty else {
             throw SourceDomainError(.invalidInput, "Invalid source installation")
         }
         self.id = id; self.publisherID = publisherID; self.name = name; self.version = version
         self.source = source; digest = SourceCoding.digest(Data(source.utf8)); self.origins = origins; self.createdAt = createdAt
+        self.originURL = originURL; self.locallyModified = locallyModified
     }
 }
 
@@ -88,21 +91,44 @@ public actor SourceArchive {
 
     public func installations() throws -> [SourceInstallation] { try records("installation", scope: "", as: SourceInstallation.self) }
     public func installation(_ id: UUID) throws -> SourceInstallation? { try record("installation", scope: "", key: id.uuidString) }
-    public func saveInstallation(_ value: SourceInstallation, replacing expectedDigest: String? = nil) throws {
+    public func installationHistory(_ id: UUID) throws -> [SourceInstallation] {
+        try record("installation-history", scope: "", key: id.uuidString) ?? []
+    }
+    public func saveInstallation(_ value: SourceInstallation, replacing expectedDigest: String? = nil,
+                                 resetConfigurationFor scope: SourceScope? = nil) throws {
         guard value.digest == SourceCoding.digest(Data(value.source.utf8)), value.source.utf8.count <= 2_097_152 else {
             throw SourceDomainError(.invalidData, "Source snapshot digest mismatch")
         }
         try transaction {
             let current = try installation(value.id)
             guard current?.digest == expectedDigest else { throw SourceDomainError(.storageConflict, "Installation changed; reload before saving") }
+            if let current {
+                guard current.publisherID == value.publisherID else { throw SourceDomainError(.invalidInput, "A different publisher ID needs a separate installation") }
+                if current.digest != value.digest {
+                    var history = try installationHistory(value.id)
+                    history.insert(current, at: 0)
+                    try put("installation-history", scope: "", key: value.id.uuidString, value: Array(history.prefix(8)))
+                }
+            }
+            if let scope {
+                guard scope.installationID == value.id else { throw SourceDomainError(.invalidInput, "Configuration scope does not match installation") }
+                try saveConfiguration(.object([:]), scope: scope)
+            }
             try put("installation", scope: "", key: value.id.uuidString, value: value)
         }
     }
     public func configuration(scope: SourceScope) throws -> SourceJSON? { try record("configuration", scope: scopeKey(scope), key: "values") }
-    public func saveConfiguration(_ value: SourceJSON, scope: SourceScope) throws {
+    public func saveConfiguration(_ value: SourceJSON, scope: SourceScope, expectedSourceDigest: String? = nil) throws {
         guard case .object = value else { throw SourceDomainError(.invalidInput, "Configuration must be an object") }
         _ = try value.validatedData(maximumBytes: 65_536)
-        try put("configuration", scope: scopeKey(scope), key: "values", value: value)
+        if let expectedSourceDigest {
+            try transaction {
+                guard try installation(scope.installationID)?.digest == expectedSourceDigest else {
+                    throw SourceDomainError(.storageConflict, "Source changed; reopen settings before saving")
+                }
+                try put("configuration", scope: scopeKey(scope), key: "values", value: value)
+            }
+        } else { try put("configuration", scope: scopeKey(scope), key: "values", value: value) }
     }
     public func books(scope: SourceScope) throws -> [SourceSavedBook] { try records("book", scope: scopeKey(scope), as: SourceSavedBook.self) }
     public func saveBook(_ value: SourceSavedBook) throws {

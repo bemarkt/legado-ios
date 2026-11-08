@@ -77,6 +77,12 @@ jobs:
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY='' \
             CODE_SIGN_ENTITLEMENTS='' DEVELOPMENT_TEAM='' \
             2>&1 | tee build/source-runtime-tests.log
+      - name: Export native reader screenshots
+        if: always()
+        run: |
+          if [ -d build/SourceRuntime.xcresult ]; then
+            xcrun xcresulttool export attachments --path build/SourceRuntime.xcresult --output-path build/source-ui-snapshots
+          fi
       - name: Upload simulator evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -86,5 +92,6 @@ jobs:
             build/source-runtime-tests.log
             build/source-fixtures.log
             build/SourceRuntime.xcresult
+            build/source-ui-snapshots
           if-no-files-found: ignore
           retention-days: 14

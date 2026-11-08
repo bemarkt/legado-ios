@@ -1,5 +1,7 @@
 import XCTest
 import WebKit
+import SwiftUI
+import UIKit
 @testable import Legado
 
 @MainActor
@@ -477,4 +479,81 @@ final class SourceRuntimeTests: XCTestCase {
         XCTAssertNil(late)
         XCTAssertEqual(finished?.value, .string("saved"))
     }
+    func testInstalledSourceEditRollbackAndPinnedProviderRemainIndependent() async throws {
+        let model = NativeSourceLibrary(databaseURL: FileManager.default.temporaryDirectory.appendingPathComponent("source-editor-\(UUID().uuidString)/native.sqlite3"))
+        let original = try await model.inspect(SourceAssets.script("OfflineExample.source"))
+        try await model.install(original)
+        let installation = try XCTUnwrap(model.installations.first)
+        let oldProvider = try await model.provider(installation)
+        let candidate = try await model.inspect(original.source.replacingOccurrences(of: "离线示例", with: "Edited fixture"))
+        try await model.replace(installation, with: candidate, resetConfiguration: false, originURL: nil, locallyModified: true)
+        let current = try XCTUnwrap(model.installations.first)
+        XCTAssertEqual(current.id, installation.id)
+        XCTAssertEqual(current.locallyModified, true)
+        let oldPage = try await oldProvider.search(.init(query: "test"))
+        let newProvider = try await model.provider(installation)
+        let newPage = try await newProvider.search(.init(query: "test"))
+        XCTAssertEqual(oldPage.items.first?.title, "离线示例")
+        XCTAssertEqual(newPage.items.first?.title, "Edited fixture")
+        let history = try await model.services().0.installationHistory(installation.id)
+        XCTAssertEqual(history.first?.source, original.source)
+        do {
+            try await model.replace(installation, with: original, resetConfiguration: true, originURL: nil, locallyModified: true)
+            XCTFail("A stale editor replaced a newer installation")
+        } catch let failure as SourceDomainError { XCTAssertEqual(failure.code, .storageConflict) }
+        try await model.replace(current, with: original, resetConfiguration: true, originURL: nil, locallyModified: true)
+        let restored = try XCTUnwrap(model.installations.first)
+        XCTAssertEqual(restored.digest, original.sha256)
+        XCTAssertEqual(restored.id, installation.id)
+    }
+
+    func testNativeReaderRendersOfflineAtPhoneAndTabletWidths() async throws {
+        let model = NativeSourceLibrary(databaseURL: FileManager.default.temporaryDirectory.appendingPathComponent("source-layout-\(UUID().uuidString)/native.sqlite3"))
+        let source = try await model.inspect(SourceAssets.script("OfflineExample.source"))
+        try await model.install(source)
+        let installation = try XCTUnwrap(model.installations.first)
+        let provider = try await model.provider(installation)
+        let (_, library) = try model.services()
+        for (name, size, category, dark) in [
+            ("phone", CGSize(width: 390, height: 844), UIContentSizeCategory.large, false),
+            ("phone-accessibility", CGSize(width: 390, height: 844), UIContentSizeCategory.accessibilityExtraExtraExtraLarge, true),
+            ("tablet", CGSize(width: 1024, height: 768), UIContentSizeCategory.large, false)
+        ] {
+            let book = try await library.addBook(provider: provider, ref: .init(id: name))
+            let catalog = try await library.refreshCatalog(provider: provider, book: book.details.ref)
+            _ = try await library.download(provider: provider, catalog: catalog)
+            let item = NativeSourceLibrary.ShelfBook(installation: installation, book: book)
+            let reader = NavigationStack {
+                NativeSourceReaderView(model: model, item: item, catalog: catalog, initialChapterID: catalog.chapters[0].ref.id, offline: true)
+            }.environment(\.dynamicTypeSize, dark ? .accessibility5 : .large)
+            let host = UIHostingController(rootView: reader)
+            host.traitOverrides.preferredContentSizeCategory = category
+            host.overrideUserInterfaceStyle = dark ? .dark : .light
+            let window = UIWindow(frame: CGRect(origin: .zero, size: size))
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            defer { window.isHidden = true }
+            window.layoutIfNeeded()
+            // Wait for the offline chapter's native anchor, not a timing assumption about WebKit startup.
+            var restored = false
+            for _ in 0..<100 {
+                if try await model.services().0.anchor(book: book.key) != nil { restored = true; break }
+                try await Task.sleep(for: .milliseconds(100))
+            }
+            XCTAssertTrue(restored, "Offline reader did not display content")
+            try await Task.sleep(for: .milliseconds(300))
+            window.layoutIfNeeded()
+            let image = UIGraphicsImageRenderer(size: size).image { _ in window.drawHierarchy(in: window.bounds, afterScreenUpdates: true) }
+            let attachment = XCTAttachment(image: image)
+            attachment.name = "native-reader-" + name
+            attachment.lifetime = .keepAlways
+            add(attachment)
+            XCTAssertEqual(host.view.bounds.width, size.width, accuracy: 1)
+            for scroll in descendants(host.view).compactMap({ $0 as? UIScrollView }) where scroll.bounds.width > 100 {
+                XCTAssertLessThanOrEqual(scroll.contentSize.width, scroll.bounds.width + 1, "Unexpected horizontal overflow at \(name)")
+            }
+        }
+    }
+    private func descendants(_ view: UIView) -> [UIView] { view.subviews.flatMap { [$0] + descendants($0) } }
+
 }

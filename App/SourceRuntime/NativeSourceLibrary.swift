@@ -19,6 +19,8 @@ final class NativeSourceLibrary: ObservableObject {
     @Published private(set) var searching = false
     @Published private(set) var searchFailures: [String] = []
     @Published var message: String?
+    private let databaseURL: URL
+    init(databaseURL: URL = SourceArchive.defaultURL()) { self.databaseURL = databaseURL }
     private var database: SourceArchive?
     private var service: SourceLibraryService?
     private var inspected: [String: SourceSnapshot] = [:]
@@ -29,7 +31,7 @@ final class NativeSourceLibrary: ObservableObject {
 
     func services() throws -> (SourceArchive, SourceLibraryService) {
         if let database, let service { return (database, service) }
-        let database = try SourceArchive(url: SourceArchive.defaultURL())
+        let database = try SourceArchive(url: databaseURL)
         let service = SourceLibraryService(archive: database)
         self.database = database; self.service = service
         return (database, service)
@@ -55,26 +57,55 @@ final class NativeSourceLibrary: ObservableObject {
         inspected[digest] = snapshot
         return snapshot
     }
-    func install(_ snapshot: SourceSnapshot) async throws {
+    func install(_ snapshot: SourceSnapshot, originURL: String? = nil) async throws {
         guard snapshot.inspection.unsupportedRequirements.isEmpty else { throw SourceFailure(code: "UNSUPPORTED", message: "此书源要求尚未支持的能力") }
         let metadata = snapshot.inspection.metadata
         let installation = try SourceInstallation(publisherID: metadata.id, name: metadata.name, version: metadata.version,
-                                                  source: snapshot.source, origins: metadata.origins)
+                                                  source: snapshot.source, origins: metadata.origins, originURL: originURL)
         try await services().0.saveInstallation(installation)
         await reload()
     }
     func provider(_ installation: SourceInstallation) async throws -> WebKitSourceProvider {
         let (archive, _) = try services()
-        let snapshot = try await inspect(installation.source)
-        let scope = try SourceScope(installationID: installation.id)
+        guard let current = try await archive.installation(installation.id) else {
+            throw SourceDomainError(.unavailable, "书源已不可用，请重新打开书架")
+        }
+        let snapshot = try await inspect(current.source)
+        let scope = try SourceScope(installationID: current.id)
         let configuration = try await archive.configuration(scope: scope)
-        return try WebKitSourceProvider(snapshot: snapshot, installation: installation, configuration: configuration, archive: archive)
+        return try WebKitSourceProvider(snapshot: snapshot, installation: current, configuration: configuration, archive: archive)
     }
     func saveConfiguration(_ configuration: SourceJSON, installation: SourceInstallation) async throws {
         let snapshot = try await inspect(installation.source)
         let value = try snapshot.configuration(overrides: configuration)
-        try await services().0.saveConfiguration(value, scope: .init(installationID: installation.id))
+        try await services().0.saveConfiguration(value, scope: .init(installationID: installation.id), expectedSourceDigest: installation.digest)
         cancelSearch()
+    }
+    func replace(_ installation: SourceInstallation, with snapshot: SourceSnapshot, resetConfiguration: Bool,
+                 originURL: String?, locallyModified: Bool) async throws {
+        guard snapshot.inspection.unsupportedRequirements.isEmpty else { throw SourceFailure(code: "UNSUPPORTED", message: "此书源要求尚未支持的能力") }
+        let (archive, _) = try services()
+        let scope = try SourceScope(installationID: installation.id)
+        if !resetConfiguration { _ = try snapshot.configuration(overrides: await archive.configuration(scope: scope)) }
+        let metadata = snapshot.inspection.metadata
+        let updated = try SourceInstallation(id: installation.id, publisherID: metadata.id, name: metadata.name, version: metadata.version,
+            source: snapshot.source, origins: metadata.origins, createdAt: installation.createdAt,
+            originURL: originURL, locallyModified: locallyModified)
+        try await archive.saveInstallation(updated, replacing: installation.digest, resetConfigurationFor: resetConfiguration ? scope : nil)
+        cancelSearch(clearResults: true)
+        await reload()
+    }
+    func downloadSource(_ address: String) async throws -> (source: String, url: String) {
+        guard let url = URL(string: address.trimmingCharacters(in: .whitespacesAndNewlines)), url.scheme == "https",
+              url.user == nil, url.password == nil, url.fragment == nil, let origin = SourceHTTPPolicy.origin(url) else {
+            throw SourceFailure(code: "INVALID_INPUT", message: "请输入不含账号密码或片段的 HTTPS 原始文件地址")
+        }
+        let response = try await SourceHTTP.fetch(.init(url: url.absoluteString, method: "GET", headers: [:], body: nil, redirect: "follow"),
+            policy: .init(origins: [origin], allowLoopbackHTTP: false, maximumBytes: 2_097_152, maximumRedirects: 3, timeout: 20))
+        guard response.status == 200, let data = Data(base64Encoded: response.body), let text = String(data: data, encoding: .utf8) else {
+            throw SourceFailure(code: "NETWORK", message: "未取得有效的 UTF-8 书源文件（HTTP \(response.status)）")
+        }
+        return (text, response.url)
     }
     func search(_ query: String) {
         cancelSearch()

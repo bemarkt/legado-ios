@@ -346,4 +346,46 @@ struct SourceDomainTests {
         #expect(try await archive.chapter(new.key, identity: provider.descriptor.identity) == new)
     }
 
+    @Test func sourceHistoryConfigurationResetAndConflictRemainAtomic() async throws {
+        let url = database(), archive = try SourceArchive(url: url)
+        let original = try SourceInstallation(publisherID: "org.example", name: "Original", version: "1", source: "original",
+            origins: ["https://example.org"], originURL: "https://example.org/source.js")
+        let scope = try SourceScope(installationID: original.id)
+        try await archive.saveInstallation(original)
+        try await archive.saveConfiguration(.object(["theme": .string("dark")]), scope: scope)
+        let state = try await archive.setState(scope: scope, key: "keep", value: .number(1))
+        let updated = try SourceInstallation(id: original.id, publisherID: original.publisherID, name: "Updated", version: "2", source: "updated",
+            origins: original.origins, locallyModified: true)
+        try await archive.saveInstallation(updated, replacing: original.digest, resetConfigurationFor: scope)
+        #expect(try await archive.configuration(scope: scope) == .object([:]))
+        #expect(try await archive.installationHistory(original.id) == [original])
+        await #expect(throws: SourceDomainError.self) {
+            try await archive.saveInstallation(original, replacing: original.digest, resetConfigurationFor: scope)
+        }
+        await #expect(throws: SourceDomainError.self) {
+            try await archive.saveConfiguration(.object(["obsolete": .bool(true)]), scope: scope, expectedSourceDigest: original.digest)
+        }
+        #expect(try await archive.installationHistory(original.id) == [original])
+        #expect(try await archive.configuration(scope: scope) == .object([:]))
+        try await archive.saveInstallation(original, replacing: updated.digest)
+        let reopened = try SourceArchive(url: url)
+        #expect(try await reopened.installation(original.id) == original)
+        #expect(try await reopened.installationHistory(original.id).first == updated)
+        #expect(try await reopened.state(scope: scope, key: "keep") == state)
+    }
+
+    @Test func replacementCannotChangePublisherAndLegacyInstallationsDecode() async throws {
+        let archive = try SourceArchive(url: database())
+        let original = try SourceInstallation(publisherID: "org.example", name: "Original", version: "1", source: "original", origins: ["https://example.org"])
+        try await archive.saveInstallation(original)
+        let foreign = try SourceInstallation(id: original.id, publisherID: "org.other", name: "Other", version: "2", source: "other", origins: original.origins)
+        await #expect(throws: SourceDomainError.self) { try await archive.saveInstallation(foreign, replacing: original.digest) }
+        #expect(try await archive.installationHistory(original.id).isEmpty)
+        var json = try #require(JSONSerialization.jsonObject(with: SourceCoding.encode(original)) as? [String: Any])
+        json.removeValue(forKey: "originURL"); json.removeValue(forKey: "locallyModified")
+        let restored = try SourceCoding.decode(SourceInstallation.self, from: JSONSerialization.data(withJSONObject: json))
+        #expect(restored.id == original.id)
+        #expect(restored.locallyModified == nil && restored.originURL == nil)
+    }
+
 }

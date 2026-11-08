@@ -229,4 +229,4 @@ CLI 的 Node/mock DOM 运行只给快速反馈，不能证明 WKWebView 行为�
 
 首版完成自有源、兼容边界、原生阅读和上述工具闭环。远程依赖管理、插件自定义页面、常驻服务、跨源调用、任意原生模块、多种 JS 后端等价执行均不作为前置需求。
 
-说明性示例已通过 Node AST/Schema 检查，没有执行其网站/DOM 操作；另有自造 JSON fixture 在 Node 跑通四项操作。当前 App 不具备本协议加载器，App 侧 AST 导入器和真机行为尚未实现或验证。
+初稿的说明性示例仅通过 Node AST/Schema 检查，没有执行其网站/DOM 操作；后续 P1/P2 已新增 App AST 导入、WebKit 操作、原生阅读和账号等实验实现。当前可运行范围与实际 CI 证据以 [P2 报告](reports/SOURCE_PROTOCOL_P2_REPORT.md) 为准，真机资源与发布门槛仍需独立验收。

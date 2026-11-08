@@ -1,6 +1,6 @@
 # 自有书源作者指南
 
-日期：2026-11-08。候选协议，尚未冻结为对外稳定 v1。最简单的源是一个可读的 `.source.js`；开发机工具可选，用户安装时不需要服务端、Node 或远程依赖。
+日期：2026-11-09。候选协议，尚未冻结为对外稳定 v1。最简单的源是一个可读的 `.source.js`；开发机工具可选，用户安装时不需要服务端、Node 或远程依赖。
 
 ## 直接写一个文件
 
@@ -48,10 +48,18 @@ node build-source.mjs ../../docs/examples/source-project/index.ts ../../build/bu
 
 源码回滚不等于 state 回滚。作者必须确认旧状态兼容，否则使用独立安装，不能写一个隐式安装钩子去修改用户状态。读取失败也不能通过修改 metadata 伪装为成功。导出应保持源码，不将令牌、配置、书架或下载正文拼进文件。
 
+## 登录与账号
+
+用户可在已安装书源的“账号与登录”建立本地账号，再选择一个 metadata.origins 网站进行网页登录，或输入该网站的 Bearer 令牌。凭据由原生 HTTP 按安装、账号与精确 origin 注入；书源使用原来的 ctx.http.fetch，无需增加密码字段或手工拼 Cookie。账号名称只作本机别名，源不接收用户输入的口令/令牌。
+
+登录过期时可抛出 ctx.errors.authRequired({message: "请在书源设置中重新登录"})。当前恢复入口是用户手动进入“账号与登录”后重试；尚未实现从认证错误自动跳转或恢复后台下载。不要把凭据放进 metadata、settings、storage、ref.state 或可分享源码。
+
+当前网页登录只支持一个选定网站的 Cookie 会话，不支持跨站 SSO、依赖站外资源的登录或导入 localStorage 里的令牌。令牌路径目前固定为 Bearer；不等同于完整的作者认证扩展。登录与设备验证范围见 [设备复核](SOURCE_RUNTIME_DEVICE_VALIDATION.md)。
+
 ## 验证层次
 
 1. Node 静态合同/生成/固定样本测试：作者可在 Windows 完成。
 2. 实际 WebKit 操作、storage、配置和阅读：GitHub 的手动 Source Runtime WebKit 与 App 实验入口。
 3. 真机资源、同步死循环恢复、键盘、VoiceOver 和 iPad：见 [设备验证步骤](SOURCE_RUNTIME_DEVICE_VALIDATION.md)。
 
-目前没有源码单步调试器、完整运行时行号映射、账号登录扩展和发布级资源预算。错误带字段/行列时先定位对应声明，修复后重新静态检查，再在固定样本或 App 中重跑相关操作。当前范围和待办见 [P2 报告](reports/SOURCE_PROTOCOL_P2_REPORT.md)。
+目前没有源码单步调试器、完整运行时行号映射、作者自定义认证流程和发布级资源预算。错误带字段/行列时先定位对应声明，修复后重新静态检查，再在固定样本或 App 中重跑相关操作。当前范围和待办见 [P2 报告](reports/SOURCE_PROTOCOL_P2_REPORT.md)。

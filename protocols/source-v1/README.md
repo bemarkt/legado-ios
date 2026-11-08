@@ -86,7 +86,7 @@ P1 运行时已按此区分 403 与 401。`retryAfterMs` 只接受 0–86,400,00
 - 同一键更新线性化；多键和整个 JS 操作没有隐含事务。操作结束前已提交写入保留，结束后的写入拒绝。取消不能撤销已发送的远端副作用。
 - 源更新保持状态，但源作者需维持旧状态兼容；v1 没有自动执行的状态迁移 hook。源码回滚不等于状态回滚。需要不兼容迁移的更新暂缓或另存安装实例，待明确状态迁移方案。
 
-settings 提供 text/boolean/enum/number，默认值必须有效。text 限长，enum 值唯一且包含默认值，number 有有限上下界。源读取不可变 config；敏感输入走后续凭据扩展，不把 text 字段当密码。
+settings 提供 text/boolean/enum/number，默认值必须有效。text 限长，enum 值唯一且包含默认值，number 有有限上下界。源读取不可变 config；敏感输入走原生账号凭据界面，不把 text 字段当密码。
 
 宿主操作状态：queued → initializing/running → succeeded/failed/cancelled/timedOut，终态只到达一次。session 状态单独管理。回调凭 operation/session 与快照身份验证，不能用源自行声称的 ID 绕过作用域。终态取消未等待工作，拒绝后续宿主写入；JS 停算与 WebContent 资源回收仍需 D03 的设备证据。
 
@@ -102,4 +102,4 @@ HTML：使用 DOM 解析片段，不执行其中代码。初版候选保留 p/di
 
 候选基础：Promise、URL/URLSearchParams、DOMParser 与基础 CSS 选择器、TextEncoder/TextDecoder、AbortSignal、Uint8Array、JSON、有限计时器。编码列表、计时器的结束清理和受控页面的 secure context 要在 iOS 26 验证；WebCrypto、XPath、真实浏览器导航、媒体、认证、explore 目前没有已开放扩展。
 
-静态允许 JS 语法并不授权动态代码、worker、脚本标签、全局网络或跨源 UI。运行时必须验证这些入口的策略。P1 已实现实验性的受控执行页和无账号原生 HTTP；不承诺完整沙箱隔离。实验版已接入安装实例隔离的 SQLite storage、有限配置、HTML 文档转换、文件/粘贴/HTTPS 安装、源码编辑导出与历史恢复和原生阅读预览。实验室单次执行没有安装作用域，storage 仍返回 UNSUPPORTED。账号登录与凭据、完整更新故障验收和旧库迁移尚未实现。当前放行的编码和资源边界见 [P1 报告](../../docs/reports/SOURCE_PROTOCOL_P1_REPORT.md)，D01–D10 尚未最终关闭。
+静态允许 JS 语法并不授权动态代码、worker、脚本标签、全局网络或跨源 UI。运行时必须验证这些入口的策略。P1 已实现实验性的受控执行页和无账号原生 HTTP；不承诺完整沙箱隔离。实验版已接入安装实例隔离的 SQLite storage、有限配置、HTML 文档转换、文件/粘贴/HTTPS 安装、源码编辑导出与历史恢复和原生阅读预览。实验室单次执行没有安装作用域，storage 仍返回 UNSUPPORTED。原生账号、Cookie/令牌与单网站临时网页登录已接入实验入口，集成与设备状态见 [P2 报告](../../docs/reports/SOURCE_PROTOCOL_P2_REPORT.md)；作者可编程认证扩展、完整更新故障验收和旧库迁移尚未实现。当前放行的编码和资源边界见 [P1 报告](../../docs/reports/SOURCE_PROTOCOL_P1_REPORT.md)，D01–D10 尚未最终关闭。

@@ -101,6 +101,7 @@ final class NativeSourceLibrary: ObservableObject {
         return try .init(installationID: installation.id, accountID: selected)
     }
     func provider(_ installation: SourceInstallation, scope expectedScope: SourceScope? = nil) async throws -> WebKitSourceProvider {
+        try requireStableAccount(installation.id)
         let (archive, _) = try services()
         let scope = try await selectedScope(installation)
         guard expectedScope == nil || expectedScope == scope else { throw SourceDomainError(.stale, "账号已切换，请从当前书架重新打开。") }
@@ -113,6 +114,7 @@ final class NativeSourceLibrary: ObservableObject {
         let snapshot = try await inspect(captured.installation.source)
         let session = scope.accountID == "guest" ? nil : try await credentials.session(scope: scope, allowedOrigins: Set(snapshot.inspection.metadata.origins))
         guard try await selectedScope(installation) == scope else { throw SourceDomainError(.stale, "账号已切换，请重试。") }
+        try requireStableAccount(installation.id)
         try activityGate?.check()
         return try WebKitSourceProvider(snapshot: snapshot, installation: captured.installation, accountID: scope.accountID,
                                        configuration: captured.configuration, archive: archive, credentials: session, activityGate: activityGate)
@@ -136,13 +138,18 @@ final class NativeSourceLibrary: ObservableObject {
         try await services().0.selectAccount(accountID, installationID: installation.id)
         await reload()
     }
+    private func requireStableAccount(_ installationID: UUID) throws {
+        guard !selectingAccounts.contains(installationID) else { throw SourceDomainError(.stale, "账号正在切换，请完成后重试。") }
+    }
     func credentialSession(_ installation: SourceInstallation, accountID: String) async throws -> SourceCredentialSession {
+        try requireStableAccount(installation.id)
         let scope = try await selectedScope(installation)
         guard scope.accountID == accountID, accountID != "guest" else { throw SourceDomainError(.stale, "请先选择独立账号。") }
         let captured = try await services().0.executionSnapshot(scope: scope)
         guard captured.installation.digest == installation.digest else { throw SourceDomainError(.stale, "书源已更新，请重新打开账号设置。") }
         let session = try await credentials.session(scope: scope, allowedOrigins: Set(captured.installation.origins))
         guard try await selectedScope(installation) == scope else { throw SourceDomainError(.stale, "账号已切换，请重新打开。") }
+        try requireStableAccount(installation.id)
         try session.commitGate.check()
         return session
     }

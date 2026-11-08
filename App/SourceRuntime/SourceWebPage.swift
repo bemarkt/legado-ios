@@ -12,6 +12,8 @@ final class SourceWebPage: NSObject, WKNavigationDelegate {
     private var arguments: [String: Any] = [:]
     private var executionTimeoutMs = 0
     private var executionTimeoutCode = "TIMEOUT"
+    private var allowedInitialNavigation = false
+    private var evaluated = false
     private var started = false
     private var finished = false
     var onClose: (() -> Void)?
@@ -86,7 +88,8 @@ final class SourceWebPage: NSObject, WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        guard !finished else { return }
+        guard !finished, !evaluated else { return }
+        evaluated = true
         resetDeadline(milliseconds: executionTimeoutMs, code: executionTimeoutCode)
         webView.callAsyncJavaScript(body, arguments: arguments, in: nil, contentWorld: .page) { [weak self] result in
             guard let self, !self.finished else { return }
@@ -104,10 +107,12 @@ final class SourceWebPage: NSObject, WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
-                 decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+                 decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void) {
         // Only the host's initial blank document may navigate. This also rejects new-window requests.
-        decisionHandler(!finished && navigationAction.request.url?.absoluteString == "about:blank"
-                        && navigationAction.targetFrame?.isMainFrame == true ? .allow : .cancel)
+        let allowed = !finished && !allowedInitialNavigation && navigationAction.request.url?.absoluteString == "about:blank"
+            && navigationAction.targetFrame?.isMainFrame == true
+        if allowed { allowedInitialNavigation = true }
+        decisionHandler(allowed ? .allow : .cancel)
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {

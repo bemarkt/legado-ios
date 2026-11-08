@@ -161,7 +161,7 @@ python3 -m unittest discover -s scripts/tests -v
 
 ## 自有书源协议原型（P0/P1）
 
-协议工具位于 [tools/source-protocol](../tools/source-protocol/README.md)，候选合同与共享样本位于 [protocols/source-v1](../protocols/source-v1/README.md)。它们独立于当前 App 运行路径，可在 Windows/macOS/Linux 的 Node 22+ 环境验证。
+协议工具位于 [tools/source-protocol](../tools/source-protocol/README.md)，候选合同与共享样本位于 [protocols/source-v1](../protocols/source-v1/README.md)。Node 工具可在 Windows/macOS/Linux 验证，App 中另有「其他设置 → 书源协议实验室」开发入口。现有 Legado 导入和阅读路径独立。
 
 ```sh
 cd tools/source-protocol
@@ -171,3 +171,5 @@ npm run validate -- ../../docs/examples/example.source.js
 ```
 
 在仓库根目录执行 `python scripts/source-protocol-baseline.py` 可检查合成旧库的静态 SQL 与结构。Node/SQLite 结果不能替代 Swift 构建、WebKit 或真机验收；进度与缺口见 [P0 阶段报告](reports/SOURCE_PROTOCOL_P0_REPORT.md)。
+
+P1 的原生验收由 `.github/workflows/source-runtime-ci.yml` 执行：选择 iOS 26 模拟器，启动 loopback fixture 服务，并实际运行 `LegadoReaderTests/SourceRuntimeTests`。不能把 `xcodebuild build` 当成 WebKit 执行结果。使用当前仓库 `bemarkt/legado-ios` 触发和查看 CI，Windows 本机不尝试 Xcode。内嵌 parser 修改后执行 `npm --prefix tools/source-protocol run bundle`，再运行 `check` 并提交生成文件。详情与未完成项见 [P1 报告](reports/SOURCE_PROTOCOL_P1_REPORT.md)。

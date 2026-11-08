@@ -2,7 +2,7 @@
 
 日期：2026-11-08（Asia/Hong_Kong）
 
-状态：实施计划；P0 已交付候选合同、工具和样本，原生基线/环境仍缺证据，P1-01 已有 Node 原型。具体完成范围见 [P0 报告](reports/SOURCE_PROTOCOL_P0_REPORT.md)，未标明通过的任务不得视为已实现。
+状态：P0 候选合同与原生 CI 基线已交付；P1 已实现 App 静态导入、WebKit 执行页与原生 HTTP 垂直原型，模拟器验收结果见 [P1 报告](reports/SOURCE_PROTOCOL_P1_REPORT.md)。G1 真机资源与故障恢复门槛仍开放。历史范围见 [P0 报告](reports/SOURCE_PROTOCOL_P0_REPORT.md)，未标明通过的任务不得视为已验收。
 
 目标：将已确认的设计方向落实为可验证、可维护的 iOS/iPadOS 26+ 阅读器，提供自有单文件书源协议与独立的 Android Legado 兼容能力。
 

@@ -4,10 +4,10 @@
 
 | 编号 | 当前候选/决定 | 已有证据 | 尚缺证据与关闭阶段 |
 | --- | --- | --- | --- |
-| D01 | Acorn 8.19.0 + ECMAScript 2022 AST，静态 JSON 字面量；Node worker 设 deadline/内存上限 | 共享正反例、Node parser 测试、锁文件 | App 端采用方式、资源限制、同语料一致性；P1 未关闭 |
-| D02 | 受控执行页与标准 ESM；原生桥与网站会话独立 | 候选 profile、入口语法和样本 | iOS 26 origin/CSP/ESM/API/桥接实测；P1 未关闭 |
+| D01 | Acorn 8.19.0 + ECMAScript 2022 AST，静态 JSON 字面量；Node worker 设 deadline/内存上限 | 共享正反例、Node parser 测试、锁文件 | App 采用共享离线 bundle；同语料实际 WebKit 测试已加入，资源限制与真机证据仍待补；P1 未关闭 |
+| D02 | 受控执行页与标准 ESM；原生桥与网站会话独立 | 候选 profile、入口语法和样本；一次性 ESM 执行页、原生桥原型 | iOS 26 真机 origin/CSP/ESM/API/桥接实测；P1 未关闭 |
 | D03 | 业务取消、网络取消、宿主写入截止、JS 停算、资源回收分别验收 | 四个故障源；Node fixture 取消测试 | 真机死循环影响、会话淘汰和总资源恢复；P1 未关闭 |
-| D04 | 原生 HTTP Fetch-like，单次消费、显式编码、origin 检查、不默认重试 | 合同文字、签名、固定 HTTP 响应 | Swift 桥与编码/重定向/大小/取消一致性；P1/P2 未关闭 |
+| D04 | 原生 HTTP Fetch-like，单次消费、显式编码、origin 检查、不默认重试 | 合同文字、签名、固定 HTTP 响应；URLSession 桥和模拟器测试 | 真实账号、更多编码与真机重定向/大小/取消一致性；P1/P2 未关闭 |
 | D05 | 安装/账号/源快照独立，ref ID 不依赖 URL，宿主包装游标 | Schema、领域草图、分页与 fresh-module JSON 样本 | 原生数据库/缓存、目录流程快照和升级映射；P2 未关闭 |
 | D06 | text 规则已给共享样本；HTML 转 block/mark，EPUB 独立 | text 实现与测试、HTML 预期 JSON | 实际 DOM/净化、UTF-16 mark/位置与设备回归；P2 未关闭 |
 | D07 | 可读单文件，原子活动快照、本地修改保留、回滚不等于状态回滚 | 候选合同与实施流程 | App 安装/编辑/更新与中断故障；P3 未关闭 |
@@ -20,3 +20,5 @@
 候选改变时同时更新协议文字、Schema/profile、类型、例子与对应测试。只修改实现不更新合同，或只改通过线不记录依据，均不能关闭决策。运行时选择不得把 Node 成功当成 WebKit 证据。
 
 D01–D10 均未标记最终关闭。当前交付解决的是候选细化和可重复的输入/诊断，不是设备层最终验证。
+
+P1 当前交付及 CI 证据单独记录于 [P1 报告](SOURCE_PROTOCOL_P1_REPORT.md)。资源上限不因原型可运行而自动成为发布承诺。

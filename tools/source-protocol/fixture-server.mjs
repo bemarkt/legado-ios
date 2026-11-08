@@ -40,7 +40,7 @@ export async function startFixtureServer({ port = 0 } = {}) {
       for (let index = 0; index < 9; index++) response.write(Buffer.alloc(1024 * 1024, 120));
       response.end(); return;
     }
-    if (url.pathname === '/encoding/utf16le') { send(200, Buffer.from('ÖÐÎÄ fixture', 'utf16le'), { 'Content-Type': 'text/plain; charset=utf-16le' }); return; }
+    if (url.pathname === '/encoding/utf16le') { send(200, Buffer.from('ä¸­æ–‡ fixture', 'utf16le'), { 'Content-Type': 'text/plain; charset=utf-16le' }); return; }
     if (url.pathname === '/encoding/invalid-utf8') { send(200, Buffer.from([0xff, 0xfe]), { 'Content-Type': 'text/plain; charset=utf-8' }); return; }
 
     if (url.pathname === '/failure/slow') {

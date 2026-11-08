@@ -20,7 +20,7 @@ private final class SourceHostBridge: NSObject, WKScriptMessageHandlerWithReply 
     private var count = 0
     private var seen = Set<String>()
     private var tasks: [String: Task<Void, Never>] = [:]
-    private var replies: [String: (Any?, String?) -> Void] = [:]
+    private var replies: [String: @MainActor @Sendable (Any?, String?) -> Void] = [:]
 
     init(snapshot: SourceSnapshot, profile: SourceProfile, allowLoopbackHTTP: Bool, timeoutMs: Int) {
         self.profile = profile
@@ -46,7 +46,7 @@ private final class SourceHostBridge: NSObject, WKScriptMessageHandlerWithReply 
     }
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage,
-                               replyHandler: @escaping (Any?, String?) -> Void) {
+                               replyHandler: @escaping @MainActor @Sendable (Any?, String?) -> Void) {
         do {
             guard active, message.webView === page?.webView, message.frameInfo.isMainFrame,
                   let text = message.body as? String, text.utf8.count <= 3_000_000 else {
@@ -58,7 +58,7 @@ private final class SourceHostBridge: NSObject, WKScriptMessageHandlerWithReply 
                 throw SourceFailure(code: "INVALID_INPUT", message: "Unknown bridge fields")
             }
             let envelope = try JSONDecoder().decode(Message.self, from: data)
-            guard envelope.session == session, envelope.operation == operation, envelope.id.utf8.count <= 128 else {
+            guard envelope.session == session, envelope.operation == operation, !envelope.id.isEmpty, envelope.id.utf8.count <= 128 else {
                 throw SourceFailure(code: "INVALID_INPUT", message: "Bridge identity mismatch")
             }
             if envelope.method == "ready" {
@@ -79,6 +79,10 @@ private final class SourceHostBridge: NSObject, WKScriptMessageHandlerWithReply 
             }
             guard count < profile.limits.operationHTTPRequests else {
                 throw SourceFailure(code: "RESOURCE_LIMIT", message: "Operation request budget exceeded")
+            }
+            guard let requestObject = object["request"] as? [String: Any],
+                  Set(requestObject.keys).isSubset(of: ["url", "method", "headers", "body", "redirect"]) else {
+                throw SourceFailure(code: "INVALID_INPUT", message: "Unknown HTTP bridge fields")
             }
             count += 1
             seen.insert(envelope.id)
@@ -123,7 +127,8 @@ final class SourceRuntime {
                                          arguments: ["source": snapshot.source, "operation": operation.rawValue,
                                                      "inputJSON": inputJSON, "configJSON": configJSON, "session": bridge.session, "operationID": bridge.operation],
                                          timeoutMs: profile.experimentalRuntimeBudgets.moduleInitializationMs)
-        guard raw.utf8.count <= profile.limits.outputBytes else {
+        // The envelope escapes the serialized result. Bound both wire and decoded sizes.
+        guard raw.utf8.count <= profile.limits.outputBytes * 2 + 4096 else {
             throw SourceFailure(code: "RESOURCE_LIMIT", message: "Output byte budget exceeded")
         }
         struct ResultEnvelope: Decodable { let json: String?; let error: SourceFailure? }

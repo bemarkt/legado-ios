@@ -97,14 +97,14 @@ final class SourceRuntimeTests: XCTestCase {
 
     func testHTTPResponseConsumptionStatusBodyAndEncoding() async throws {
         let snapshot = try await source("""
-        const echo = await ctx.http.fetch('\(origin)/api/echo', {method:'POST',headers:{'Content-Type':'text/plain'},body:'中文 body'});
+        const echo = await ctx.http.fetch('\(origin)/api/echo', {method:'POST',headers:{'Content-Type':'text/plain'},body:'涓枃 body'});
         const value = await echo.json();
-        if (value.body !== '中文 body' || !echo.bodyUsed) throw Error('POST/bodyUsed failed');
+        if (value.body !== '涓枃 body' || !echo.bodyUsed) throw Error('POST/bodyUsed failed');
         try { await echo.text(); throw Error('second consumption succeeded'); } catch (e) { if(e.code !== 'INVALID_INPUT') throw e; }
         const limited = await ctx.http.fetch('\(origin)/failure/rate-limited');
         if(limited.status !== 429 || limited.ok || limited.headers['retry-after'] !== '3') throw Error('HTTP status failed');
         const encoding = await ctx.http.fetch('\(origin)/encoding/utf16le');
-        if(await encoding.text() !== '中文 fixture') throw Error('UTF16 failed');
+        if(await encoding.text() !== '涓枃 fixture') throw Error('UTF16 failed');
         const invalid = await ctx.http.fetch('\(origin)/encoding/invalid-utf8');
         try { await invalid.text(); throw Error('bad UTF8 accepted'); } catch(e) { if(e.code !== 'PARSE') throw e; }
         return {items:[],nextCursor:null};
@@ -186,6 +186,31 @@ final class SourceRuntimeTests: XCTestCase {
         XCTAssertEqual(items.first?["title"] as? String, "function:function:function")
         let (data, _) = try await URLSession.shared.data(from: URL(string: origin + "/diagnostics")!)
         XCTAssertFalse(String(decoding: data, as: UTF8.self).contains(marker))
+    }
+
+    func testBridgeRejectsForeignIdentityAndBoundsRequestCount() async throws {
+        let snapshot = try await source("""
+        const forged = await window.webkit.messageHandlers.sourceHost.postMessage(JSON.stringify({session:'other',operation:'other',id:'forged',method:'http',request:{url:'\(origin)/health',method:'GET',headers:{},redirect:'follow'}}));
+        if(JSON.parse(forged).error?.code !== 'INVALID_INPUT') throw Error('Foreign bridge identity accepted');
+        for(let n=0;n<64;n++) await ctx.http.fetch('\(origin)/health');
+        try { await ctx.http.fetch('\(origin)/health'); throw Error('Request budget ignored'); }
+        catch(e) { if(e.code !== 'RESOURCE_LIMIT') throw e; }
+        return {items:[],nextCursor:null};
+        """)
+        _ = try await run(snapshot)
+    }
+
+    func testRequestAbortSignalDoesNotCancelOtherWork() async throws {
+        let snapshot = try await source("""
+        const abort = new AbortController();
+        const pending = ctx.http.fetch('\(origin)/failure/slow?ms=2000', {signal:abort.signal});
+        setTimeout(() => abort.abort(), 100);
+        try { await pending; throw Error('Abort ignored'); } catch(e) { if(e.code !== 'CANCELLED') throw e; }
+        const good = await ctx.http.fetch('\(origin)/health');
+        if(!good.ok) throw Error('Operation did not recover');
+        return {items:[],nextCursor:null};
+        """)
+        _ = try await run(snapshot)
     }
 
     func testGlobalsDoNotSurviveIntoNextOperation() async throws {

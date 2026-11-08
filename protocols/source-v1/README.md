@@ -98,4 +98,4 @@ HTML：使用 DOM 解析片段，不执行其中代码。初版候选保留 p/di
 
 候选基础：Promise、URL/URLSearchParams、DOMParser 与基础 CSS 选择器、TextEncoder/TextDecoder、AbortSignal、Uint8Array、JSON、有限计时器。编码列表、计时器的结束清理和受控页面的 secure context 要在 iOS 26 验证；WebCrypto、XPath、真实浏览器导航、媒体、认证、explore 目前没有已开放扩展。
 
-静态允许 JS 语法并不授权动态代码、worker、脚本标签、全局网络或跨源 UI。运行时必须验证这些入口的策略。本轮没有实现运行时沙箱、原生 HTTP、原生 storage、HTML sanitizer 或 App 安装更新；D01–D10 的状态见 [P0 报告](../../docs/reports/SOURCE_PROTOCOL_P0_REPORT.md)。
+静态允许 JS 语法并不授权动态代码、worker、脚本标签、全局网络或跨源 UI。运行时必须验证这些入口的策略。P1 已实现实验性的受控执行页和无账号原生 HTTP；不承诺完整沙箱隔离。原生 storage、HTML sanitizer、账号及 App 安装更新仍未实现。当前放行的编码和资源边界见 [P1 报告](../../docs/reports/SOURCE_PROTOCOL_P1_REPORT.md)，D01–D10 尚未最终关闭。

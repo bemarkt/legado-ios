@@ -386,11 +386,14 @@ final class SourceRuntimeTests: XCTestCase {
     }
 
     func testNativeTransportTimeoutRemainsDistinctFromNetworkFailure() async throws {
-        let policy = SourceHTTPPolicy(origins: [origin], allowLoopbackHTTP: true, maximumBytes: 1024,
-                                      maximumRedirects: 0, timeout: 0.1)
-        for (path, code) in [("/failure/slow?ms=2000", "TIMEOUT"), ("/failure/disconnect", "NETWORK")] {
+        for (path, method, timeout, code) in [("/failure/slow?ms=2000", "GET", 0.1, "TIMEOUT"),
+                                              ("/failure/disconnect", "POST", 5.0, "NETWORK")] {
+            // Give a connection failure time to arrive; a 100 ms deadline races URLSession's error delivery.
+            // POST and one host attempt avoid GET reconnect/retry behavior obscuring the socket failure.
+            let policy = SourceHTTPPolicy(origins: [origin], allowLoopbackHTTP: true, maximumBytes: 1024,
+                                          maximumRedirects: 0, timeout: timeout, maximumAttempts: 1)
             do {
-                _ = try await SourceHTTP.fetch(.init(url: origin + path, method: "GET", headers: [:], body: nil, redirect: "error"), policy: policy)
+                _ = try await SourceHTTP.fetch(.init(url: origin + path, method: method, headers: [:], body: nil, redirect: "error"), policy: policy)
                 XCTFail("Expected \(code)")
             } catch let error as SourceFailure { XCTAssertEqual(error.code, code) }
         }

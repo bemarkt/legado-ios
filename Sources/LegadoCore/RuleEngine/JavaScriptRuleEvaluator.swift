@@ -561,7 +561,7 @@ public struct JavaScriptRuleEvaluator: Sendable {
         if method.caseInsensitiveCompare("POST") == .orderedSame {
             request.httpBody = Data((body ?? "").utf8)
         }
-        if executionContext.source?.enabledCookieJar != false {
+        if executionContext.source?.enabledCookieJar != false, executionContext.environment?.networkHandlesCookies != true {
             let stored = try executionContext.hostEnvironment.cookies.cookieHeader(for: url.absoluteString)
             let explicit = request.value(forHTTPHeaderField: "Cookie") ?? ""
             let merged = Self.mergeCookieHeaders(stored, explicit)
@@ -577,7 +577,7 @@ public struct JavaScriptRuleEvaluator: Sendable {
             response = try loader.load(request)
         }
         try executionContext.environment?.control.check()
-        if let cookie = response.headers.first(where: { $0.key.caseInsensitiveCompare("Set-Cookie") == .orderedSame })?.value {
+        if executionContext.environment?.networkHandlesCookies != true, let cookie = response.headers.first(where: { $0.key.caseInsensitiveCompare("Set-Cookie") == .orderedSame })?.value {
             try executionContext.hostEnvironment.cookies.setCookie(cookie, for: response.finalURL.absoluteString)
         }
         return response
@@ -615,7 +615,7 @@ public struct JavaScriptRuleEvaluator: Sendable {
         var request = prepared.urlRequest(timeout: timeout,
             handleCookies: executionContext.environment == nil && source?.enabledCookieJar != false,
             useApplicationTimeout: executionContext.environment == nil)
-        if source?.enabledCookieJar != false {
+        if source?.enabledCookieJar != false, executionContext.environment?.networkHandlesCookies != true {
             let stored = try executionContext.hostEnvironment.cookies.cookieHeader(for: prepared.url.absoluteString)
             let explicit = request.value(forHTTPHeaderField: "Cookie") ?? ""
             let merged = Self.mergeCookieHeaders(stored, explicit)
@@ -633,7 +633,7 @@ public struct JavaScriptRuleEvaluator: Sendable {
                 try executionContext.environment?.control.check()
                 response.requestedCharset = prepared.charset
                 response.requestVariables = responseContext.variables
-                if let cookie = response.headers.first(where: { $0.key.caseInsensitiveCompare("Set-Cookie") == .orderedSame })?.value {
+                if executionContext.environment?.networkHandlesCookies != true, let cookie = response.headers.first(where: { $0.key.caseInsensitiveCompare("Set-Cookie") == .orderedSame })?.value {
                     try executionContext.hostEnvironment.cookies.setCookie(cookie, for: response.finalURL.absoluteString)
                 }
                 guard (200 ... 299).contains(response.statusCode) else {

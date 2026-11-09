@@ -82,8 +82,8 @@ public struct SourceCredentialCookie: Codable, Sendable, Equatable {
         if let expiresAt { properties[.expires] = expiresAt }
         return HTTPCookie(properties: properties)
     }
-    fileprivate var key: String { origin + "\n" + name + "\n" + path }
-    fileprivate func matches(_ url: URL, now: Date) -> Bool {
+    var key: String { origin + "\n" + name + "\n" + path }
+    func matches(_ url: URL, now: Date) -> Bool {
         guard SourceHostHTTPPolicy.origin(url) == origin, expiresAt.map({ $0 > now }) ?? true,
               !secure || url.scheme == "https" else { return false }
         let requestPath = url.path.isEmpty ? "/" : url.path
@@ -105,6 +105,13 @@ public struct SourceCredentialSession: Sendable {
     fileprivate let vault: SourceCredentialVault
     public func headers(for url: URL) async throws -> [String: String] { try await vault.headers(for: url, session: self) }
     public func receive(_ cookies: [SourceCredentialCookie]) async throws { try await vault.receive(cookies, session: self) }
+    public func receive(_ cookies: [SourceCredentialCookie], gate: SourceCommitGate) async throws {
+        try await vault.receive(cookies, session: self, gate: gate)
+    }
+    public func removeCompatibilityCookies(origin: String, gate: SourceCommitGate) async throws {
+        try await vault.removeCompatibilityCookies(origin: origin, session: self, gate: gate)
+    }
+
     /// These values are exposed only to the legacy adapter, never the native module bridge.
     public func legacyValue(key: String) async throws -> String { try await vault.legacyValue(key: key, session: self) }
     public func setLegacyValue(_ value: String, key: String, gate: SourceCommitGate) async throws {
@@ -257,7 +264,17 @@ public actor SourceCredentialVault {
         }
         return headers
     }
-    fileprivate func receive(_ cookies: [SourceCredentialCookie], session: SourceCredentialSession) throws {
+    fileprivate func removeCompatibilityCookies(origin: String, session: SourceCredentialSession, gate: SourceCommitGate) throws {
+        guard gate.inherits(session.commitGate), session.allowedOrigins.contains(origin) else {
+            throw SourceDomainError(.invalidInput, "Cookie removal is outside the operation scope")
+        }
+        var bundle = try validated(session).bundle
+        bundle.cookies.removeAll { $0.origin == origin }
+        try gate.withCommit { try persistence.write(encoded(bundle), scope: session.scope) }
+        entries[session.scope]?.bundle = bundle
+    }
+    fileprivate func receive(_ cookies: [SourceCredentialCookie], session: SourceCredentialSession, gate: SourceCommitGate? = nil) throws {
+        if let gate, !gate.inherits(session.commitGate) { throw SourceDomainError(.invalidInput, "Cookie writes require the session gate") }
         let entry = try validated(session)
         guard !cookies.isEmpty else { return }
         var values = Dictionary(uniqueKeysWithValues: entry.bundle.cookies.map { ($0.key, $0) })
@@ -271,7 +288,7 @@ public actor SourceCredentialVault {
         bundle.cookies = values.values.filter { $0.expiresAt.map { $0 > now } ?? true }.sorted { $0.key < $1.key }
         if bundle.cookies == entry.bundle.cookies { return }
         // Routine cookie rotation keeps the login generation; an explicit login change does not.
-        try session.commitGate.withCommit { try persistence.write(encoded(bundle), scope: session.scope) }
+        try (gate ?? session.commitGate).withCommit { try persistence.write(encoded(bundle), scope: session.scope) }
         entries[session.scope]?.bundle = bundle
     }
 }

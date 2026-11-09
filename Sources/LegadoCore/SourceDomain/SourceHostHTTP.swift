@@ -78,6 +78,13 @@ private final class SourceNoRedirectDelegate: NSObject, URLSessionTaskDelegate, 
                     completionHandler: @escaping (URLRequest?) -> Void) { completionHandler(nil) }
 }
 
+/// Host-owned authorization; native modules never receive the credential lease itself.
+public protocol SourceHTTPAuthorization: Sendable {
+    func headers(for url: URL) async throws -> [String: String]
+    func receive(_ cookies: [SourceCredentialCookie]) async throws
+}
+extension SourceCredentialSession: SourceHTTPAuthorization {}
+
 public struct SourceHostHTTPClient: Sendable {
     private struct Reply: Sendable {
         let status: Int
@@ -92,6 +99,37 @@ public struct SourceHostHTTPClient: Sendable {
     public func fetch(_ input: SourceHostHTTPRequest, policy: SourceHostHTTPPolicy,
                       priority: SourceWorkScheduler.Priority = .reading, deadline operationDeadline: ContinuousClock.Instant? = nil,
                       budget: SourceHTTPRequestBudget? = nil, credentials: SourceCredentialSession? = nil) async throws -> SourceHostHTTPResponse {
+        try await execute(input, policy: policy, priority: priority, deadline: operationDeadline, budget: budget, credentials: credentials)
+    }
+
+    /// Legacy host requests share the same policy, scheduler, redirect loop and byte limits.
+    /// Explicit Cookie headers are restricted to the initiating origin; native fetch still rejects them.
+    public func fetchCompatibility(_ request: URLRequest, followRedirects: Bool, policy: SourceHostHTTPPolicy,
+                                   deadline: ContinuousClock.Instant, budget: SourceHTTPRequestBudget,
+                                   credentials: any SourceHTTPAuthorization) async throws -> HTTPResponse {
+        guard let url = request.url, request.httpBodyStream == nil else { throw SourceHostHTTPFailure(.invalidInput, "Invalid compatibility request") }
+        var headers = request.allHTTPHeaderFields ?? [:]
+        let cookieName = headers.keys.first { $0.lowercased() == "cookie" }
+        let cookie = cookieName.flatMap { headers.removeValue(forKey: $0) }
+        if let cookie {
+            guard cookie.utf8.count <= 8192, cookie.utf8.allSatisfy({ $0 >= 32 && $0 < 127 }) else {
+                throw SourceHostHTTPFailure(.invalidInput, "Invalid compatibility Cookie header")
+            }
+        }
+        let result = try await execute(.init(url: url.absoluteString, method: request.httpMethod ?? "GET", headers: headers,
+                                             body: request.httpBody?.base64EncodedString()),
+            policy: policy, priority: .reading, deadline: deadline, budget: budget, credentials: credentials,
+            compatibility: true, cookie: cookie, returnRedirect: !followRedirects)
+        guard let finalURL = URL(string: result.url), let data = Data(base64Encoded: result.body) else {
+            throw SourceHostHTTPFailure(.network, "Invalid host response")
+        }
+        return .init(data: data, statusCode: result.status, headers: result.headers, finalURL: finalURL)
+    }
+
+    private func execute(_ input: SourceHostHTTPRequest, policy: SourceHostHTTPPolicy,
+                         priority: SourceWorkScheduler.Priority, deadline operationDeadline: ContinuousClock.Instant?,
+                         budget: SourceHTTPRequestBudget?, credentials: (any SourceHTTPAuthorization)?,
+                         compatibility: Bool = false, cookie: String? = nil, returnRedirect: Bool = false) async throws -> SourceHostHTTPResponse {
         do {
             guard policy.timeout.isFinite, policy.timeout > 0, policy.timeout <= 300,
                   (0...20).contains(policy.maximumRedirects), (1...3).contains(policy.maximumAttempts),
@@ -100,6 +138,7 @@ public struct SourceHostHTTPClient: Sendable {
                 throw SourceHostHTTPFailure(.invalidInput, "Invalid HTTP policy budget")
             }
             var request = try makeRequest(input, policy: policy)
+            let initialOrigin = SourceHostHTTPPolicy.origin(request.url!)
             let timeout = ContinuousClock.now.advanced(by: .seconds(policy.timeout))
             let deadline = operationDeadline.map { min($0, timeout) } ?? timeout
             let retryable = ["GET", "HEAD"].contains(input.method)
@@ -116,9 +155,19 @@ public struct SourceHostHTTPClient: Sendable {
                         if let credentials {
                             for (name, value) in try await credentials.headers(for: hop.url!) { authorized.setValue(value, forHTTPHeaderField: name) }
                         }
+                        if let cookie, SourceHostHTTPPolicy.origin(hop.url!) == initialOrigin {
+                            let explicit = cookie.split(separator: ";").map { $0.trimmingCharacters(in: .whitespaces) }
+                            let names = Set(explicit.map { $0.split(separator: "=", maxSplits: 1).first.map(String.init) ?? "" })
+                            let stored = (authorized.value(forHTTPHeaderField: "Cookie") ?? "").split(separator: ";")
+                                .map { $0.trimmingCharacters(in: .whitespaces) }
+                                .filter { !names.contains($0.split(separator: "=", maxSplits: 1).first.map(String.init) ?? "") }
+                            let merged = (stored + explicit).filter { !$0.isEmpty }.joined(separator: "; ")
+                            guard merged.utf8.count <= 16_384 else { throw SourceHostHTTPFailure(.resourceLimit, "Cookie header exceeds byte budget") }
+                            authorized.setValue(merged, forHTTPHeaderField: "Cookie")
+                        }
                         try Self.check(deadline)
                         try await budget?.consume()
-                        return try await Self.perform(authorized, policy: policy, deadline: deadline, captureCookies: credentials != nil)
+                        return try await Self.perform(authorized, policy: policy, deadline: deadline, captureCookies: credentials != nil, exposeCookies: compatibility, returnRedirect: returnRedirect)
                     }
                 } catch let error as URLError where retryable && retries + 1 < policy.maximumAttempts && error.code == .networkConnectionLost {
                     try Self.check(deadline)
@@ -129,7 +178,7 @@ public struct SourceHostHTTPClient: Sendable {
                 }
                 try Self.check(deadline)
                 try await credentials?.receive(reply.cookies)
-                if [301,302,303,307,308].contains(reply.status), let location = reply.headers["location"] {
+                if !returnRedirect, [301,302,303,307,308].contains(reply.status), let location = reply.headers["location"] {
                     guard input.redirect == "follow" else { throw SourceHostHTTPFailure(.network, "Redirect rejected by request policy") }
                     guard redirects < policy.maximumRedirects else { throw SourceHostHTTPFailure(.resourceLimit, "Redirect budget exceeded") }
                     guard let url = URL(string: location, relativeTo: reply.url)?.absoluteURL else { throw SourceHostHTTPFailure(.network, "Invalid redirect URL") }
@@ -236,7 +285,7 @@ public struct SourceHostHTTPClient: Sendable {
         return delay
     }
 
-    private static func perform(_ original: URLRequest, policy: SourceHostHTTPPolicy, deadline: ContinuousClock.Instant, captureCookies: Bool) async throws -> Reply {
+    private static func perform(_ original: URLRequest, policy: SourceHostHTTPPolicy, deadline: ContinuousClock.Instant, captureCookies: Bool, exposeCookies: Bool = false, returnRedirect: Bool = false) async throws -> Reply {
         try check(deadline)
         var request = original
         let timeout = remaining(deadline)
@@ -262,13 +311,14 @@ public struct SourceHostHTTPClient: Sendable {
                 if !["set-cookie", "set-cookie2"].contains(name) { headers[name] = String(describing: value) }
                 // Foundation’s cookie parser expects canonical field names on Darwin.
                 else if captureCookies { cookieHeaders[name == "set-cookie" ? "Set-Cookie" : "Set-Cookie2"] = String(describing: value) }
+                if exposeCookies && ["set-cookie", "set-cookie2"].contains(name) { headers[name] = String(describing: value) }
             }
             let cookies: [SourceCredentialCookie]
             if captureCookies, let origin = SourceHostHTTPPolicy.origin(url) {
                 cookies = try HTTPCookie.cookies(withResponseHeaderFields: cookieHeaders, for: url).compactMap { try SourceCredentialCookie.capture($0, origin: origin) }
             } else { cookies = [] }
             // Cancel/dispose this response before acquiring a permit for its redirect target.
-            if [301,302,303,307,308].contains(response.statusCode), headers["location"] != nil {
+            if !returnRedirect, [301,302,303,307,308].contains(response.statusCode), headers["location"] != nil {
                 return Reply(status: response.statusCode, url: url, headers: headers, data: Data(), cookies: cookies)
             }
             guard response.expectedContentLength <= Int64(policy.maximumBytes) else { throw SourceHostHTTPFailure(.resourceLimit, "HTTP response exceeds byte budget") }

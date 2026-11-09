@@ -88,6 +88,7 @@ public struct JavaScriptHostEnvironment: Sendable {
     public let control: JavaScriptExecutionControl
     public let sourceState: any JavaScriptSourceState
     public let cookies: any JavaScriptCookieState
+    public let networkHandlesCookies: Bool
     public let network: any JavaScriptNetworkLoading
     public let userAgent: String
     public let identifier: @Sendable () throws -> String
@@ -97,7 +98,7 @@ public struct JavaScriptHostEnvironment: Sendable {
 
     public init(sourceState: any JavaScriptSourceState, cookies: any JavaScriptCookieState,
                 control: JavaScriptExecutionControl = .init(),
-                network: any JavaScriptNetworkLoading, userAgent: String,
+                network: any JavaScriptNetworkLoading, userAgent: String, networkHandlesCookies: Bool = false,
                 identifier: @escaping @Sendable () throws -> String,
                 record: @escaping @Sendable (String) -> Void = { _ in },
                 renderWebPage: @escaping @Sendable (String) throws -> String = { _ in
@@ -107,6 +108,7 @@ public struct JavaScriptHostEnvironment: Sendable {
                     throw RuleEngineError.unsupportedRule(rule: "java.startBrowser", feature: "Browser UI requires host interaction")
                 }) {
         self.control = control
+        self.networkHandlesCookies = networkHandlesCookies
         self.sourceState = sourceState; self.cookies = cookies; self.network = network
         self.userAgent = userAgent; self.identifier = identifier; self.record = record
         self.renderWebPage = renderWebPage; self.openBrowser = openBrowser

@@ -258,7 +258,7 @@ struct WebKitSourceProvider: SourceProvider {
     private static let scheduler = SourceWorkScheduler(globalLimit: 2, perOriginLimit: 1)
     private var priorityOverride: SourceWorkScheduler.Priority?
 
-    init(snapshot: SourceSnapshot, installation: SourceInstallation, accountID: String = "guest", configuration: SourceJSON? = nil,
+    init(snapshot: SourceSnapshot, installation: SourceInstallation, accountID: String = "guest", configuration: SourceJSON? = nil, libraryScope: SourceScope? = nil,
          archive: SourceArchive, allowLoopbackHTTP: Bool = false, credentials: SourceCredentialSession? = nil, activityGate: SourceCommitGate? = nil) throws {
         guard snapshot.sha256 == installation.digest else { throw SourceFailure(code: "INVALID_INPUT", message: "Installed source digest mismatch") }
         self.snapshot = snapshot
@@ -268,7 +268,7 @@ struct WebKitSourceProvider: SourceProvider {
             throw SourceFailure(code: "INVALID_INPUT", message: "Credential scope does not match the source snapshot")
         }
         self.credentials = credentials
-        descriptor = SourceProviderDescriptor(identity: try .init(scope: scope, sourceDigest: snapshot.sha256, configuration: self.configuration, credentialRevision: credentials?.revision),
+        descriptor = SourceProviderDescriptor(identity: try .init(scope: scope, sourceDigest: snapshot.sha256, configuration: self.configuration, credentialRevision: credentials?.revision, libraryScope: libraryScope),
                                               name: snapshot.inspection.metadata.name, supportsSearch: snapshot.inspection.operations.contains("search"), commitGate: credentials?.commitGate ?? activityGate)
         state = SourceStateBinding(archive: archive, scope: scope)
         self.allowLoopbackHTTP = allowLoopbackHTTP

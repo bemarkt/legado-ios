@@ -46,7 +46,7 @@ public struct SourceCatalog: Codable, Sendable, Equatable {
         public let reordered: Bool
     }
     public func changes(from previous: Self) throws -> Changes {
-        guard identity.scope == previous.identity.scope, book.id == previous.book.id else {
+        guard identity.libraryScope == previous.identity.libraryScope, book.id == previous.book.id else {
             throw SourceDomainError(.invalidInput, "Catalogs belong to different books")
         }
         let old = Dictionary(previous.chapters.map { ($0.ref.id, $0) }, uniquingKeysWith: { first, _ in first })

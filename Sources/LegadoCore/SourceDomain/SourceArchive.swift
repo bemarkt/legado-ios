@@ -596,7 +596,7 @@ public actor SourceArchive {
         let payload = data(query, column: 0)
         var catalog = try SourceCoding.decode(SourceCatalog.self, from: payload)
         catalogDecodes += 1
-        guard catalog.identity.scope == book.scope, catalog.book.id == book.bookID else {
+        guard catalog.identity.libraryScope == book.scope, catalog.book.id == book.bookID else {
             throw SourceDomainError(.invalidData, "Corrupt catalog identity")
         }
         let fingerprint = SourceCoding.digest(try SourceCoding.encode(catalog))
@@ -636,7 +636,7 @@ public actor SourceArchive {
     @discardableResult
     public func saveCatalog(_ value: SourceCatalog, gate: SourceCommitGate? = nil) throws -> SourceCatalog {
         try transaction(gate: gate) {
-            let key = try SourceBookKey(scope: value.identity.scope, bookID: value.book.id)
+            let key = try SourceBookKey(scope: value.identity.libraryScope, bookID: value.book.id)
             let previous = try catalogIndex(book: key)?.catalog
             var saved = value
             if let previous, let revision = value.revision, !revision.isEmpty,
@@ -763,7 +763,7 @@ public actor SourceArchive {
     /// Without an expected request this is a diagnostic/cache lookup. Production online reads
     /// use prepareChapter so request validation and cache lookup share the same transaction.
     public func chapter(_ key: SourceChapterKey, identity: SourceExecutionIdentity, allowPreviousExtraction: Bool = false, retainOffline: Bool = false, gate: SourceCommitGate? = nil) throws -> SourceCachedChapter? {
-        guard key.book.scope == identity.scope else { throw SourceDomainError(.invalidInput, "Cache scope mismatch") }
+        guard key.book.scope == identity.libraryScope else { throw SourceDomainError(.invalidInput, "Cache scope mismatch") }
         return try transaction(gate: gate) {
             guard let cached = try storedChapter(key) else { return nil }
             if !allowPreviousExtraction {
@@ -778,7 +778,7 @@ public actor SourceArchive {
 
     func prepareChapter(identity: SourceExecutionIdentity, book: SourceWire.SourceRef, chapter: SourceWire.SourceRef,
                         expectedCatalog: SourceCatalog?, reload: Bool, retainOffline: Bool = false, gate: SourceCommitGate) throws -> SourceChapterPreparation {
-        let key = try SourceChapterKey(book: .init(scope: identity.scope, bookID: book.id), chapterID: chapter.id)
+        let key = try SourceChapterKey(book: .init(scope: identity.libraryScope, bookID: book.id), chapterID: chapter.id)
         return try transaction(gate: gate) {
             let current = try catalogIndex(book: key.book)
             if let expectedCatalog {
@@ -807,7 +807,7 @@ public actor SourceArchive {
     /// A response captured before another connection's commit cannot overwrite that commit.
     func saveChapter(_ value: SourceCachedChapter, request: SourceChapterRequest, gate: SourceCommitGate) throws {
         guard value.key == request.key, value.identity == request.identity, value.provenance == request.provenance,
-              value.key.book.scope == value.identity.scope else { throw SourceDomainError(.invalidInput, "Chapter request identity mismatch") }
+              value.key.book.scope == value.identity.libraryScope else { throw SourceDomainError(.invalidInput, "Chapter request identity mismatch") }
         try transaction(gate: gate) {
             guard try storageGeneration() == request.storageGeneration else {
                 throw SourceDomainError(.stale, "正文存储已被清理，请重新打开章节。")
@@ -863,6 +863,21 @@ public actor SourceArchive {
         case SQLITE_DONE: return nil
         case SQLITE_ROW: return SourceStateEntry(value: try SourceCoding.decode(SourceJSON.self, from: data(statement, column: 0)), revision: string(statement, column: 1))
         default: throw databaseError()
+        }
+    }
+    /// Called before creating an application provider. Login edits revoke the previous gate;
+    /// the next session clears only derived script state, retaining configuration and all books.
+    public func reconcileWebsiteSession(scope: SourceScope, revision: String, gate: SourceCommitGate) throws {
+        try transaction(gate: gate) {
+            let storageScope = try scopeKey(scope)
+            let previous: String? = try record("website-state-session", scope: storageScope, key: "revision")
+            guard previous != revision else { return }
+            if previous != nil {
+                let query = try prepare("DELETE FROM source_state WHERE scope=?", strings: [storageScope])
+                defer { sqlite3_finalize(query) }
+                try done(query)
+            }
+            try put("website-state-session", scope: storageScope, key: "revision", value: revision)
         }
     }
     @discardableResult

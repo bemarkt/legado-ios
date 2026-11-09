@@ -270,7 +270,7 @@ struct NativeSourceSettingsView: View {
             }
             Section("账号") {
                 NavigationLink { NativeSourceAccountsView(model: model, initialInstallation: installation) } label: {
-                    LabeledContent("账号与登录", value: model.activeAccounts[installation.id]?.name ?? "访客")
+                    Label("网站登录", systemImage: "person.crop.circle")
                 }.frame(minHeight: 44)
             }
             Section("源代码") {

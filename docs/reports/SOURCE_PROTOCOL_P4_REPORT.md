@@ -40,6 +40,7 @@
 | 原始 JSON 安装/更新与未知字段 | 已接入并通过自动化 | 静态审阅、批量原子导入、格式/权限校验、编辑和导出；不执行导入脚本 |
 | Cookie、HTTP 重定向、真实网络取消 | 生产装配与样本通过 | 69ec820 的 5 项真实 HTTP 测试；访客与账号范围、跨站重定向、迟到写入拒绝 |
 | HTML 书源完整链路与作者脚本 | 限定 HTML/JSON 样本通过 | 真实 HTTP HTML 和实际 iOS 集成；不代表任意线上源兼容 |
+| 字面量网页登录与空提取诊断 | 实现中，实际 WebKit 待复验 | 68b18b1 核心/App CI 通过；首次 WebKit 4 项登录因规则正则不支持失败；已改逐条规则。支持相对 loginUrl、静态 header、HTTPS 网站资源、已授权 origin Cookie；脚本登录/动态 header、loginUi/loginCheckJs、通用内容 WebView 未支持 |
 | 倒序多页目录、preUpdateJs、付费/补充正文、内容 WebView/回调 | 当前明确拒绝 | 返回 unsupported，不回传原页面假装完成；后续扩展按样本验证，不删减阶段任务 |
 | 安卓任意 Java 类、独有平台 UI | 不承诺 | 旧源适配按限定宿主集合，不是 Android/Java 运行环境 |
 

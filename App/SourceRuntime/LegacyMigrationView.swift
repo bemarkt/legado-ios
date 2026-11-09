@@ -150,7 +150,7 @@ struct LegacyMigrationView: View {
                             .disabled(!acknowledged || model.busy).frame(minHeight: 44)
                     }
                 } footer: {
-                    Text("登录状态需要在“旧版本导入”账号中重新确认。无法定位的笔记和未支持的数据保留在本机副本；恢复旧副本不会包含导入之后新增的进度或笔记。")
+                    Text("登录状态需在书源的“网站登录”中重新确认。无法定位的笔记和未支持的数据保留在本机副本；恢复旧副本不会包含导入之后新增的进度或笔记。")
                 }
             }
         }

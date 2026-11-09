@@ -565,6 +565,8 @@ final class SourceRuntimeTests: XCTestCase {
         let second = try await model.provider(installation)
         let details = try await second.book(.init(ref: XCTUnwrap(search.items.first?.ref)))
         XCTAssertEqual(details.title, "fixture-a")
+        let cover = try await model.cover(.init(url: origin + "/covers/private.png"), installation: installation, scope: second.descriptor.identity.libraryScope)
+        XCTAssertNotNil(UIImage(data: cover), "The default website session must also authenticate covers")
         let candidates = try await model.inspectCandidates(text, additionalOrigins: "https://unused.example", expectedFormat: .legado)
         try await model.replace(installation, with: candidates[0], resetConfiguration: false, originURL: nil, locallyModified: false)
         let updated = try XCTUnwrap(model.installations.first)
@@ -899,7 +901,7 @@ extension SourceRuntimeTests {
         }
     }
 
-    func testAccountSwitchKeepsShelvesSeparateAndRevokesGuestProvider() async throws {
+    func testWebsiteSessionSwitchPreservesLibraryAndRevokesOldProvider() async throws {
         let model = accountModel()
         try await model.install(model.inspect(SourceAssets.script("OfflineExample.source")))
         let installation = try XCTUnwrap(model.installations.first)
@@ -907,18 +909,23 @@ extension SourceRuntimeTests {
         let guestProvider = try await model.provider(installation)
         let guestBook = try await library.addBook(provider: guestProvider, ref: .init(id: "guest-book"))
         let account = try await archive.addAccount(name: "Reader A", installationID: installation.id)
+        let oldScope = try SourceScope(installationID: installation.id, accountID: account.id)
+        let oldBook = SourceSavedBook(key: try .init(scope: oldScope, bookID: "legacy-local-book"), details: .init(ref: .init(id: "legacy-local-book"), title: "Old local book"))
+        try await archive.saveBook(oldBook)
         try await model.selectAccount(account.id, installation: installation)
-        XCTAssertTrue(model.shelf.isEmpty)
+        XCTAssertEqual(Set(model.shelf.map(\.book.key)), [guestBook.key, oldBook.key])
         do { _ = try await guestProvider.search(.init(query: "stale")); XCTFail("Guest provider survived account selection") }
         catch let error as SourceDomainError { XCTAssertEqual(error.code, .stale) }
-        do { _ = try await model.provider(installation, scope: guestBook.key.scope); XCTFail("An old book used the newly selected account") }
-        catch let error as SourceDomainError { XCTAssertEqual(error.code, .stale) }
+        let rebound = try await model.provider(installation, scope: guestBook.key.scope)
+        XCTAssertEqual(rebound.descriptor.identity.libraryScope, guestBook.key.scope)
+        XCTAssertEqual(rebound.descriptor.identity.scope.accountID, account.id)
         let provider = try await model.provider(installation)
         let privateBook = try await library.addBook(provider: provider, ref: .init(id: "account-book"))
         await model.reload()
-        XCTAssertEqual(model.shelf.map(\.book.key), [privateBook.key])
+        XCTAssertEqual(Set(model.shelf.map(\.book.key)), [guestBook.key, privateBook.key, oldBook.key])
+        XCTAssertEqual(privateBook.key.scope, guestBook.key.scope, "New local book identity must not depend on website login")
         try await model.selectAccount("guest", installation: installation)
-        XCTAssertEqual(model.shelf.map(\.book.key), [guestBook.key])
+        XCTAssertEqual(Set(model.shelf.map(\.book.key)), [guestBook.key, privateBook.key, oldBook.key])
         do { _ = try await provider.search(.init(query: "stale")); XCTFail("Account provider survived deselection") }
         catch let error as SourceDomainError { XCTAssertEqual(error.code, .stale) }
     }
@@ -979,8 +986,6 @@ extension SourceRuntimeTests {
         var content = ContentRule(); content.content = "@css:article@text"; source.ruleContent = content
         try await model.install(model.inspectCandidates(String(decoding: try SourceCoding.encode(source), as: UTF8.self)))
         let installation = try XCTUnwrap(model.installations.first)
-        let account = try await model.services().0.addAccount(name: "Website", installationID: installation.id)
-        try await model.selectAccount(account.id, installation: installation)
         let initial = try await model.provider(installation)
         let results = try await initial.search(.init(query: "demo"))
         let (archive, library) = try model.services()
@@ -988,7 +993,7 @@ extension SourceRuntimeTests {
         do { _ = try await library.refreshCatalog(provider: initial, book: book.details.ref); XCTFail("Verification shell accepted as a catalog") }
         catch let error as SourceExtractionFailure { XCTAssertEqual(error.context.httpStatus, 202); XCTAssertEqual(error.context.field, .catalog) }
 
-        let context = try await model.credentialContext(installation, accountID: account.id)
+        let context = try await model.credentialContext(installation, accountID: "guest")
         let request = try model.websiteLoginRequest(installation, fallbackOrigin: origin)
         XCTAssertEqual(request.url?.path, "/website/login")
         let browser = NativeSourceLoginBrowser(origin: origin, request: request, credentialOrigins: context.session.allowedOrigins, allowLoopbackHTTP: true)
@@ -1029,6 +1034,14 @@ extension SourceRuntimeTests {
         XCTAssertEqual(offline.document, chapter.document)
         let restoredAnchor = try await reopened.services().0.anchor(book: book.key)
         XCTAssertEqual(restoredAnchor, anchor)
+        let logout = try await reopened.credentialContext(installation, accountID: "guest")
+        try await reopened.clearLogin(context: logout)
+        XCTAssertEqual(reopened.shelf.map(\.book.key), [book.key])
+        let signedOut = try await reopened.provider(installation, scope: book.key.scope)
+        let retained = try await reopened.services().1.chapter(provider: signedOut, book: book.details.ref, chapter: catalog.chapters[0].ref, policy: .offline)
+        XCTAssertEqual(retained.document, chapter.document)
+        do { _ = try await current.chapters(.init(book: book.details.ref)); XCTFail("Pre-logout provider survived") }
+        catch let error as SourceDomainError { XCTAssertEqual(error.code, .stale) }
     }
 
     func testWebsiteLoginExportsOnlyCookiesForApprovedSourceOrigins() async throws {
@@ -1176,8 +1189,6 @@ extension SourceRuntimeTests {
         let model = accountModel()
         try await model.install(model.inspect(SourceAssets.script("OfflineExample.source")))
         let installation = try XCTUnwrap(model.installations.first)
-        let account = try await model.services().0.addAccount(name: "日常阅读", installationID: installation.id)
-        try await model.selectAccount(account.id, installation: installation)
         for (name, size, category, dark) in [
             ("phone", CGSize(width: 390, height: 844), UIContentSizeCategory.large, false),
             ("accessibility", CGSize(width: 390, height: 844), UIContentSizeCategory.accessibilityExtraExtraExtraLarge, true)
@@ -1197,10 +1208,10 @@ extension SourceRuntimeTests {
             defer { window.isHidden = true; previous?.makeKeyAndVisible() }
             window.layoutIfNeeded(); host.view.layoutIfNeeded()
             for _ in 0..<150 {
-                if presentation.settings?.selectedID == account.id { break }
+                if presentation.settings?.selectedID == "guest" { break }
                 try await Task.sleep(for: .milliseconds(100))
             }
-            XCTAssertEqual(presentation.settings?.selectedID, account.id, "Account data must load before a screenshot counts as evidence")
+            XCTAssertEqual(presentation.settings?.selectedID, "guest", "Website login must be available without creating a local account")
             try await Task.sleep(for: .milliseconds(300))
             window.layoutIfNeeded(); host.view.layoutIfNeeded()
             var rendered = false

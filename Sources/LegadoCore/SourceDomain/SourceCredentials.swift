@@ -143,8 +143,8 @@ public actor SourceCredentialVault {
     public init(persistence: any SourceCredentialPersistence) { self.persistence = persistence }
 
     public func session(scope: SourceScope, allowedOrigins: Set<String>) throws -> SourceCredentialSession {
-        guard scope.accountID != "guest", !allowedOrigins.isEmpty, allowedOrigins.allSatisfy(SourceCredentialCookie.validOrigin) else {
-            throw SourceDomainError(.invalidInput, "凭据需要独立账号与有效访问范围。")
+        guard !allowedOrigins.isEmpty, allowedOrigins.allSatisfy(SourceCredentialCookie.validOrigin) else {
+            throw SourceDomainError(.invalidInput, "网站会话需要有效访问范围。")
         }
         let entry = try load(scope)
         return .init(scope: scope, revision: entry.bundle.revision, commitGate: entry.gate, allowedOrigins: allowedOrigins, vault: self)
@@ -209,7 +209,6 @@ public actor SourceCredentialVault {
     }
 
     private func load(_ scope: SourceScope) throws -> Entry {
-        guard scope.accountID != "guest" else { throw SourceDomainError(.invalidInput, "访客不保存登录凭据。") }
         if let entry = entries[scope] { return entry }
         let bundle: Bundle
         if let data = try persistence.read(scope: scope) {

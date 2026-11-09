@@ -167,11 +167,11 @@ struct LegadoSourceProviderTests {
         #expect(await fixture.requests.count == count)
     }
 
-    @Test func accountReferencesCursorsAndQueryBindingsCannotCrossScopes() async throws {
+    @Test func installationReferencesCursorsAndQueryBindingsCannotCrossScopes() async throws {
         let fixture = LegadoFlowFixture(), scope = try SourceScope(installationID: UUID(), accountID: "alice")
         let alice = try provider(fixture, scope: scope)
         let search = try await alice.search(.init(query: "q"))
-        let bob = try provider(fixture, scope: .init(installationID: scope.installationID, accountID: "bob"))
+        let bob = try provider(fixture, scope: .init(installationID: UUID(), accountID: "bob"))
         await #expect(throws: SourceDomainError.self) { try await bob.book(.init(ref: search.items[0].ref)) }
         await #expect(throws: SourceDomainError.self) { try await bob.search(.init(query: "q", cursor: search.nextCursor)) }
         await #expect(throws: SourceDomainError.self) { try await alice.search(.init(query: "other", cursor: search.nextCursor)) }

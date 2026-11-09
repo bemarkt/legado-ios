@@ -117,6 +117,7 @@ public struct LegadoSourceProvider: SourceProvider {
         var variables: [String: String]
         var index: Int?
         var nextChapter: String?
+        var credentialRevision: String? = nil
         var id: String { "legado." + kind + "." + SourceCoding.digest(Data((bookRequest + "\n" + request).utf8)) }
         func wire() throws -> SourceWire.SourceRef {
             .init(id: id, url: Operation.address(request), state: try Operation.json(self))
@@ -168,9 +169,15 @@ public struct LegadoSourceProvider: SourceProvider {
         func reference(_ wire: SourceWire.SourceRef, kind: String) throws -> Reference {
             guard let state = wire.state else { throw SourceDomainError(.invalidInput, "Missing compatibility reference context") }
             let ref = try SourceCoding.decode(Reference.self, from: state.validatedData())
-            guard ref.scope == descriptor.identity.scope, ref.kind == kind, ref.id == wire.id,
+            guard ref.scope.installationID == descriptor.identity.scope.installationID, ref.kind == kind, ref.id == wire.id,
                   wire.url == Self.address(ref.request) else { throw SourceDomainError(.stale, "Reference belongs to another source/account or was changed") }
+            if kind == "chapter", !matchesWebsiteSession(ref) {
+                throw SourceDomainError(.stale, "Website login changed; refresh the catalog before reading online")
+            }
             return ref
+        }
+        func matchesWebsiteSession(_ ref: Reference) -> Bool {
+            ref.scope == descriptor.identity.scope && ref.credentialRevision == descriptor.identity.credentialRevision
         }
         func cursor(_ value: SourceJSON?, binding: String) throws -> Cursor {
             guard let value, value != .null else { return Cursor(identity: descriptor.identity, binding: binding) }
@@ -255,7 +262,7 @@ public struct LegadoSourceProvider: SourceProvider {
                 let cover = try await string(rules.coverUrl, fragment)
                 let request = try resolve(link, base: document.base)
                 let ref = Reference(scope: descriptor.identity.scope, kind: "book", request: request, bookRequest: request,
-                                    title: title, author: author, variables: context.variables)
+                                    title: title, author: author, variables: context.variables, credentialRevision: descriptor.identity.credentialRevision)
                 items.append(.init(ref: try ref.wire(), title: title, author: author,
                                    cover: try cover.map { .init(url: try resolve($0, base: document.base)) }))
             }
@@ -264,6 +271,8 @@ public struct LegadoSourceProvider: SourceProvider {
         }
         mutating func book(_ input: SourceWire.BookInput) async throws -> SourceWire.BookDetails {
             var ref = try reference(input.ref, kind: "book")
+            if !matchesWebsiteSession(ref) { ref.variables = [:] }
+            ref.scope = descriptor.identity.scope; ref.credentialRevision = descriptor.identity.credentialRevision
             guard let rules = source.ruleBookInfo else { throw SourceDomainError(.invalidInput, "Source has no book detail rules") }
             try reject([("Direct-download books", rules.downloadUrls)])
             context.variables = ref.variables; context.book = ref.legacyBook(source: source)
@@ -283,7 +292,12 @@ public struct LegadoSourceProvider: SourceProvider {
                          cover: try cover.map { .init(url: try resolve($0, base: document.base)) }, description: description)
         }
         mutating func chapters(_ input: SourceWire.ChaptersInput) async throws -> SourceWire.ChapterPage {
-            let book = try reference(input.book, kind: "book")
+            var book = try reference(input.book, kind: "book")
+            if (input.cursor == nil || input.cursor == .null), !matchesWebsiteSession(book) {
+                // Re-resolve website detail/TOC state using the new session, retaining the local book ID.
+                let details = try await self.book(.init(ref: input.book))
+                book = try reference(details.ref, kind: "book")
+            }
             guard let rules = source.ruleToc, var listRule = rules.chapterList?.nonempty else {
                 throw SourceDomainError(.invalidInput, "Source has no catalog rules")
             }
@@ -322,7 +336,7 @@ public struct LegadoSourceProvider: SourceProvider {
                 }
                 references.append(Reference(scope: descriptor.identity.scope, kind: "chapter", request: request,
                                             bookRequest: book.bookRequest, title: title, variables: context.variables,
-                                            index: cursor.offset + references.count))
+                                            index: cursor.offset + references.count, credentialRevision: descriptor.identity.credentialRevision))
                 volumes.append(cursor.volume)
             }
             context.variables = pageVariables
@@ -351,7 +365,7 @@ public struct LegadoSourceProvider: SourceProvider {
             try reject([("Content WebView JS", rules.webJs), ("Content source switching", rules.sourceRegex),
                         ("Supplemental content", rules.subContent), ("Content image decoding", rules.imageDecode),
                         ("Paid content", rules.payAction), ("Content callback JS", rules.callBackJs)])
-            context.variables = book.variables.merging(chapter.variables) { _, new in new }
+            context.variables = (matchesWebsiteSession(book) ? book.variables : [:]).merging(chapter.variables) { _, new in new }
             context.book = book.legacyBook(source: source)
             context.chapter = .init(url: chapter.request, title: chapter.title, bookUrl: book.bookRequest, index: chapter.index ?? 0)
             var queue = [chapter.request], visited = Set<String>(), parts: [String] = [], bytes = 0

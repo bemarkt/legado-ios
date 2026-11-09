@@ -25,11 +25,18 @@ struct SourceCredentialTests {
     private func cookie(origin: String = "https://books.example", name: String = "session", value: String = "secret", path: String = "/", expires: Date? = nil) throws -> SourceCredentialCookie {
         try .init(origin: origin, name: name, value: value, path: path, expiresAt: expires)
     }
-    @Test func guestNeverStoresCredentials() async throws {
+    @Test func defaultWebsiteSessionPersistsWithoutCreatingLocalAccounts() async throws {
         let store = MemorySourceCredentials(), guest = try SourceScope(installationID: UUID())
         let vault = SourceCredentialVault(persistence: store)
-        await #expect(throws: SourceDomainError.self) { try await vault.session(scope: guest, allowedOrigins: [origin]) }
-        #expect(try store.read(scope: guest) == nil)
+        let session = try await vault.session(scope: guest, allowedOrigins: [origin])
+        try await vault.replaceBrowserCookies([cookie()], session: session)
+        let reopened = SourceCredentialVault(persistence: store)
+        let restored = try await reopened.session(scope: guest, allowedOrigins: [origin])
+        #expect(try await restored.headers(for: URL(string: origin)!)["Cookie"] == "session=secret")
+        try await vault.clear(scope: guest)
+        await #expect(throws: SourceDomainError.self) { try await session.headers(for: URL(string: origin)!) }
+        let signedOut = try await vault.session(scope: guest, allowedOrigins: [origin])
+        #expect(try await signedOut.headers(for: URL(string: origin)!).isEmpty)
     }
     @Test func originsPortsPathsAndExpiryAreEnforced() async throws {
         let vault = SourceCredentialVault(persistence: MemorySourceCredentials()), scope = try scope()

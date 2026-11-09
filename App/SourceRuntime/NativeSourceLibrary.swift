@@ -86,7 +86,7 @@ final class NativeSourceLibrary: ObservableObject {
         }
         let data = try await service.image(url: cover.url, identity: provider.descriptor.identity, origins: provider.coverOrigins,
             credentials: provider.coverCredentials, gate: provider.descriptor.commitGate, allowLoopbackHTTP: allowLoopbackHTTP)
-        guard try await selectedScope(installation) == scope else { throw SourceDomainError(.stale, "账号已切换。") }
+        guard try await selectedScope(installation) == provider.descriptor.identity.scope else { throw SourceDomainError(.stale, "网站登录已改变。") }
         try provider.descriptor.commitGate?.check()
         return data
     }
@@ -101,12 +101,17 @@ final class NativeSourceLibrary: ObservableObject {
             var disabled = Set<UUID>(), migratedOrder: [SourceBookKey: Int] = [:]
             for installation in installed {
                 if try await !archive.isSearchEnabled(installation.id) { disabled.insert(installation.id) }
-                let selected = try await archive.accountSettings(installationID: installation.id).selected
+                let settings = try await archive.accountSettings(installationID: installation.id)
+                let selected = settings.selected
                 accounts[installation.id] = selected
-                let scope = try SourceScope(installationID: installation.id, accountID: selected.id)
-                for book in try await archive.books(scope: scope) {
-                    shelf.append(.init(installation: installation, book: book))
-                    migratedOrder[book.key] = try await archive.importedBookMetadata(book.key)?.order
+                // Old local account namespaces remain readable together. Never move or merge
+                // potentially conflicting books, anchors or downloads merely because login changes.
+                for account in settings.accounts {
+                    let scope = try SourceScope(installationID: installation.id, accountID: account.id)
+                    for book in try await archive.books(scope: scope) {
+                        shelf.append(.init(installation: installation, book: book))
+                        migratedOrder[book.key] = try await archive.importedBookMetadata(book.key)?.order
+                    }
                 }
             }
             guard reloadGeneration == generation else { return }
@@ -167,7 +172,7 @@ final class NativeSourceLibrary: ObservableObject {
         if installation.origins.sorted() != updated.origins.sorted() {
             guestGates.removeValue(forKey: installation.id)?.invalidate()
             let accounts = try await archive.accountSettings(installationID: installation.id).accounts
-            for account in accounts where account.id != "guest" {
+            for account in accounts {
                 await credentials.suspend(scope: try SourceScope(installationID: installation.id, accountID: account.id))
             }
         }
@@ -183,20 +188,22 @@ final class NativeSourceLibrary: ObservableObject {
         try requireStableAccount(installation.id)
         let (archive, _) = try services()
         let scope = try await selectedScope(installation)
-        guard expectedScope == nil || expectedScope == scope else { throw SourceDomainError(.stale, "账号已切换，请从当前书架重新打开。") }
+        let libraryScope = try expectedScope ?? SourceScope(installationID: installation.id)
+        guard libraryScope.installationID == installation.id else { throw SourceDomainError(.stale, "书籍属于另一个书源。") }
         let activityGate: SourceCommitGate?
         if scope.accountID == "guest" {
             let gate = guestGates[installation.id] ?? SourceCommitGate()
             guestGates[installation.id] = gate; activityGate = gate
         } else { activityGate = nil }
         let captured = try await archive.executionSnapshot(scope: scope)
-        let session = scope.accountID == "guest" ? nil : try await credentials.session(scope: scope, allowedOrigins: Set(captured.installation.origins))
+        let session = try await credentials.session(scope: scope, allowedOrigins: Set(captured.installation.origins))
+        try await archive.reconcileWebsiteSession(scope: scope, revision: session.revision, gate: session.commitGate)
         guard try await selectedScope(installation) == scope else { throw SourceDomainError(.stale, "账号已切换，请重试。") }
         try requireStableAccount(installation.id)
         try activityGate?.check()
         if captured.installation.format == .legado {
             let identity = try SourceExecutionIdentity(scope: scope, sourceDigest: captured.installation.digest,
-                configuration: captured.configuration ?? .object([:]), credentialRevision: session?.revision, approvedOrigins: captured.installation.origins)
+                configuration: captured.configuration ?? .object([:]), credentialRevision: session.revision, approvedOrigins: captured.installation.origins, libraryScope: libraryScope)
             let jar: LegadoCookieJar
             if let existing = legacyCookies[identity] { jar = existing }
             else {
@@ -205,13 +212,13 @@ final class NativeSourceLibrary: ObservableObject {
                 legacyCookies[identity] = jar
             }
             let provider = try LegadoProviderHost.makeProvider(installation: captured.installation, scope: scope,
-                configuration: captured.configuration, archive: archive, credentials: session, activityGate: activityGate, cookieJar: jar,
+                configuration: captured.configuration, libraryScope: libraryScope, archive: archive, credentials: session, activityGate: activityGate, cookieJar: jar,
                 client: SourceHTTP.client, allowLoopbackHTTP: allowLoopbackHTTP)
             return LibrarySourceProvider(provider, origins: Set(captured.installation.origins), credentials: session)
         }
         let snapshot = try await inspect(captured.installation.source)
         return try LibrarySourceProvider(WebKitSourceProvider(snapshot: snapshot, installation: captured.installation, accountID: scope.accountID,
-                                       configuration: captured.configuration, archive: archive, allowLoopbackHTTP: allowLoopbackHTTP, credentials: session, activityGate: activityGate))
+                                       configuration: captured.configuration, libraryScope: libraryScope, archive: archive, allowLoopbackHTTP: allowLoopbackHTTP, credentials: session, activityGate: activityGate))
     }
     func saveConfiguration(_ configuration: SourceJSON, installation: SourceInstallation, scope: SourceScope) async throws {
         guard try await selectedScope(installation) == scope else { throw SourceDomainError(.stale, "账号已切换，请重新打开选项。") }
@@ -239,7 +246,7 @@ final class NativeSourceLibrary: ObservableObject {
     func credentialSession(_ installation: SourceInstallation, accountID: String) async throws -> SourceCredentialSession {
         try requireStableAccount(installation.id)
         let scope = try await selectedScope(installation)
-        guard scope.accountID == accountID, accountID != "guest" else { throw SourceDomainError(.stale, "请先选择独立账号。") }
+        guard scope.accountID == accountID else { throw SourceDomainError(.stale, "网站登录记录已改变，请重新打开。") }
         let captured = try await services().0.executionSnapshot(scope: scope)
         guard captured.installation.digest == installation.digest else { throw SourceDomainError(.stale, "书源已更新，请重新打开账号设置。") }
         let session = try await credentials.session(scope: scope, allowedOrigins: Set(captured.installation.origins))
@@ -416,10 +423,12 @@ final class NativeSourceLibrary: ObservableObject {
     }
     func pendingPositionWrites() async { await anchorWrite?.value }
     func add(_ hit: SearchHit) async throws {
-        let provider = try await provider(hit.installation, scope: hit.identity.scope)
+        let provider = try await provider(hit.installation)
         guard provider.descriptor.identity == hit.identity else {
             throw SourceDomainError(.stale, "书源或选项已经更新，请重新搜索后加入书架")
         }
+        // Preserve an existing local copy and its reading position, including old namespaces.
+        if shelf.contains(where: { $0.installation.id == hit.installation.id && $0.book.key.bookID == hit.book.ref.id }) { return }
         _ = try await services().1.addBook(provider: provider, ref: hit.book.ref)
         await reload()
     }

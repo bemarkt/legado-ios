@@ -63,7 +63,7 @@ public struct SourceIssue: Codable, Sendable, Equatable {
     }
     public var message: String {
         switch recovery {
-        case .login: return "请在此书源的账号设置中登录，再重新搜索或刷新目录。"
+        case .login: return "请打开此书源的网站登录，再重新搜索或刷新目录。"
         case .refreshCatalog: return "账号、书源或目录已经改变，请返回书籍详情刷新目录后重试。已下载正文仍可离线打开。"
         case .inspectSource:
             if ["EMPTY_CATALOG", "EMPTY_CONTENT"].contains(code) {
@@ -71,7 +71,7 @@ public struct SourceIssue: Codable, Sendable, Equatable {
             }
             return "请检查书源版本、访问范围或返回的数据。可以在书源设置中审阅源码，并在诊断记录中查看错误类别。"
         case .settings: return code == "RESOURCE_LIMIT" ? "请求、图片或存储达到上限。可在缓存与下载中查看容量，或检查书源返回的数据。" : "请解锁设备后重试；若刚修改过账号或书源，重新打开页面再保存。"
-        case .none: return code == "NOT_DOWNLOADED" ? "此账号尚未下载这一章，请联网获取后再尝试离线阅读。" : "已完成的内容会保留，可以重新开始操作。"
+        case .none: return code == "NOT_DOWNLOADED" ? "这本书尚未下载这一章，请联网获取后再尝试离线阅读。" : "已完成的内容会保留，可以重新开始操作。"
         case .retry: return code == "RATE_LIMITED" ? "请等待网站允许后再重试，避免连续刷新。" : "请检查网络后重试；已有离线副本仍可阅读。"
         }
     }

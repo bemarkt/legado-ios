@@ -2,7 +2,7 @@ import Foundation
 
 /// Production assembly for the independent provider. All calls share native services but keep their scope.
 public enum LegadoProviderHost {
-    public static func makeProvider(installation: SourceInstallation, scope: SourceScope, configuration: SourceJSON? = nil,
+    public static func makeProvider(installation: SourceInstallation, scope: SourceScope, configuration: SourceJSON? = nil, libraryScope: SourceScope? = nil,
                                     archive: SourceArchive, credentials: SourceCredentialSession? = nil,
                                     activityGate: SourceCommitGate? = nil, cookieJar: LegadoCookieJar? = nil, client: SourceHostHTTPClient = .init(),
                                     allowLoopbackHTTP: Bool = false, userAgent: String = LegadoURLBuilder.defaultUserAgent,
@@ -19,7 +19,7 @@ public enum LegadoProviderHost {
             }
         } else if scope.accountID != "guest" { throw SourceDomainError(.invalidInput, "Named account needs a credential session") }
         let identity = try SourceExecutionIdentity(scope: scope, sourceDigest: installation.digest,
-                                                   configuration: configuration ?? .object([:]), credentialRevision: credentials?.revision, approvedOrigins: installation.origins)
+                                                   configuration: configuration ?? .object([:]), credentialRevision: credentials?.revision, approvedOrigins: installation.origins, libraryScope: libraryScope)
         let gate = credentials?.commitGate ?? activityGate ?? SourceCommitGate()
         let descriptor = SourceProviderDescriptor(identity: identity, name: source.bookSourceName,
                                                   supportsSearch: source.searchUrl?.isEmpty == false, commitGate: gate)

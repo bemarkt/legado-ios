@@ -7,8 +7,8 @@ private actor DomainFixtureProvider: SourceProvider {
     let pages: [SourceWire.ChapterPage]
     private var offline = false
     private(set) var contentCalls = 0
-    init(scope: SourceScope, digest: String = String(repeating: "a", count: 64), configuration: SourceJSON = .object([:]), pages: [SourceWire.ChapterPage]? = nil) throws {
-        descriptor = .init(identity: try .init(scope: scope, sourceDigest: digest, configuration: configuration), name: "Synthetic")
+    init(scope: SourceScope, digest: String = String(repeating: "a", count: 64), configuration: SourceJSON = .object([:]), pages: [SourceWire.ChapterPage]? = nil, libraryScope: SourceScope? = nil, credentialRevision: String? = nil) throws {
+        descriptor = .init(identity: try .init(scope: scope, sourceDigest: digest, configuration: configuration, credentialRevision: credentialRevision, libraryScope: libraryScope), name: "Synthetic")
         self.pages = pages ?? [.init(items: [.init(ref: .init(id: "c1"), title: "Repeated")], nextCursor: .number(1), revision: "r1"),
                                .init(items: [.init(ref: .init(id: "c2"), title: "Repeated")], nextCursor: .null, revision: "r1")]
     }
@@ -68,6 +68,43 @@ private actor DelayedDomainProvider: SourceProvider {
 
 @Suite("Native source domain")
 struct SourceDomainTests {
+    @Test func websiteSessionsShareLocalBookIdentityButNotOnlineResultsOrScriptState() async throws {
+        let installation = UUID(), local = try SourceScope(installationID: UUID())
+        #expect(throws: SourceDomainError.self) {
+            try SourceExecutionIdentity(scope: .init(installationID: installation), sourceDigest: String(repeating: "a", count: 64), configuration: .object([:]), libraryScope: local)
+        }
+        let libraryScope = try SourceScope(installationID: installation, accountID: "old-local-namespace")
+        let alice = try DomainFixtureProvider(scope: .init(installationID: installation, accountID: "alice"), libraryScope: libraryScope, credentialRevision: "first")
+        let bob = try DomainFixtureProvider(scope: .init(installationID: installation, accountID: "bob"), libraryScope: libraryScope, credentialRevision: "second")
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("website-library-\(UUID().uuidString)/archive.sqlite")
+        let archive = try SourceArchive(url: url), service = SourceLibraryService(archive: archive)
+        let book = try await service.addBook(provider: alice, ref: .init(id: "book"))
+        let catalog = try await service.refreshCatalog(provider: alice, book: book.details.ref)
+        let saved = try await service.chapter(provider: alice, book: book.details.ref, chapter: catalog.chapters[0].ref, catalog: catalog, retainOffline: true)
+        let anchor = SourceReadingAnchor(chapter: saved.key, document: saved.document, offsetUTF16: 4)
+        try await archive.saveAnchor(anchor)
+        let oldGate = SourceCommitGate()
+        try await archive.reconcileWebsiteSession(scope: alice.descriptor.identity.scope, revision: "first", gate: oldGate)
+        try await archive.setState(scope: alice.descriptor.identity.scope, key: "website", value: .string("old"), gate: oldGate)
+        oldGate.invalidate()
+        try await archive.reconcileWebsiteSession(scope: alice.descriptor.identity.scope, revision: "signed-out", gate: .init())
+        #expect(try await archive.state(scope: alice.descriptor.identity.scope, key: "website") == nil)
+        await #expect(throws: SourceDomainError.self) { try await archive.setState(scope: alice.descriptor.identity.scope, key: "late", value: .bool(true), gate: oldGate) }
+        #expect(try await archive.books(scope: libraryScope) == [book])
+        #expect(try await archive.anchor(book: book.key) == anchor)
+        #expect(try await service.chapter(provider: bob, book: book.details.ref, chapter: catalog.chapters[0].ref, policy: .offline) == saved)
+        await #expect(throws: SourceDomainError.self) { try await service.chapter(provider: bob, book: book.details.ref, chapter: catalog.chapters[0].ref) }
+        let updated = try await service.refreshCatalog(provider: bob, book: book.details.ref)
+        let online = try await service.chapter(provider: bob, book: book.details.ref, chapter: updated.chapters[0].ref)
+        #expect(online.identity == bob.descriptor.identity && online.key == saved.key)
+        #expect(await bob.contentCalls == 1)
+        let reopened = try SourceArchive(url: url)
+        #expect(try await reopened.anchor(book: book.key) == anchor)
+        #expect(try await reopened.books(scope: libraryScope) == [book])
+        let oldIdentity = try SourceExecutionIdentity(scope: libraryScope, sourceDigest: String(repeating: "a", count: 64), configuration: .object([:]))
+        let decoded = try SourceCoding.decode(SourceExecutionIdentity.self, from: SourceCoding.encode(oldIdentity))
+        #expect(decoded.libraryScope == libraryScope)
+    }
     private func scope(_ account: String = "guest", id: UUID = UUID()) throws -> SourceScope { try .init(installationID: id, accountID: account) }
     private func database() -> URL { FileManager.default.temporaryDirectory.appendingPathComponent("source-domain-\(UUID().uuidString)/native.sqlite3") }
     private func chapter(_ id: String, title: String = "Repeated") -> SourceWire.Chapter { .init(ref: .init(id: id), title: title) }

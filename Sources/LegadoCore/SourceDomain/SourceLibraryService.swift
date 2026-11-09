@@ -19,7 +19,7 @@ public actor SourceLibraryService {
         let details = try await provider.book(.init(ref: ref))
         try Task.checkCancellation()
         guard details.ref.id == ref.id else { throw SourceDomainError(.invalidData, "Provider changed stable book identity") }
-        let saved = SourceSavedBook(key: try .init(scope: provider.descriptor.identity.scope, bookID: ref.id), details: details)
+        let saved = SourceSavedBook(key: try .init(scope: provider.descriptor.identity.libraryScope, bookID: ref.id), details: details)
         guard provider.descriptor.identity == descriptor.identity else { throw SourceDomainError(.stale, "Source changed during book loading") }
         try await archive.saveBook(saved, gate: gate)
         return saved
@@ -27,7 +27,7 @@ public actor SourceLibraryService {
 
     public func refreshCatalog(provider: any SourceProvider, book: SourceWire.SourceRef) async throws -> SourceCatalog {
         try Task.checkCancellation()
-        let key = try SourceBookKey(scope: provider.descriptor.identity.scope, bookID: book.id)
+        let key = try SourceBookKey(scope: provider.descriptor.identity.libraryScope, bookID: book.id)
         let operation = "catalog:" + SourceCoding.digest(try SourceCoding.encode(key))
         generations[operation]?.invalidate()
         let generation = SourceCommitGate(parent: provider.descriptor.commitGate)
@@ -46,7 +46,7 @@ public actor SourceLibraryService {
                         policy: ReadPolicy = .current, catalog: SourceCatalog? = nil, retainOffline: Bool = false) async throws -> SourceCachedChapter {
         try Task.checkCancellation()
         let identity = provider.descriptor.identity
-        let key = try SourceChapterKey(book: .init(scope: identity.scope, bookID: book.id), chapterID: chapter.id)
+        let key = try SourceChapterKey(book: .init(scope: identity.libraryScope, bookID: book.id), chapterID: chapter.id)
         let operation = "chapter:" + SourceCoding.digest(try SourceCoding.encode(key))
         generations[operation]?.invalidate()
         let generation = SourceCommitGate(parent: provider.descriptor.commitGate)
@@ -57,7 +57,7 @@ public actor SourceLibraryService {
         }
         if policy == .offline {
             guard let cached = try await archive.chapter(key, identity: identity, allowPreviousExtraction: true, retainOffline: retainOffline, gate: generation) else {
-                throw SourceDomainError(.notDownloaded, "This chapter has not been downloaded for this account")
+                throw SourceDomainError(.notDownloaded, "This chapter has not been downloaded for this book")
             }
             try Task.checkCancellation()
             guard generations[operation] === generation else { throw SourceDomainError(.stale, "Chapter read superseded") }

@@ -31,8 +31,6 @@ struct NativeSourceAccountsView: View {
         _presentation = StateObject(wrappedValue: presentation)
     }
     @State private var selectedOrigin = ""
-    @State private var adding = false
-    @State private var accountName = ""
     @State private var busy = false
     @State private var feedback: String?
     @State private var login: NativeSourceLoginRequest?
@@ -43,83 +41,67 @@ struct NativeSourceAccountsView: View {
 
     var body: some View {
         Form {
-            Section {
-                if let settings {
-                    ForEach(settings.accounts) { account in
-                        Button {
-                            perform {
-                                try await model.selectAccount(account.id, installation: installation)
-                                try await load()
-                            }
-                        } label: {
-                            HStack {
-                                Text(account.name).foregroundStyle(.primary)
-                                Spacer()
-                                if account.id == settings.selectedID { Image(systemName: "checkmark").accessibilityHidden(true) }
-                            }.frame(minHeight: 44).contentShape(Rectangle())
-                        }
-                        .accessibilityValue(account.id == settings.selectedID ? "已选中" : "")
-                    }
-                    Button("添加账号") { accountName = ""; adding = true }
-                        .frame(minHeight: 44).disabled(settings.accounts.count >= 32)
-                } else { ProgressView("正在载入账号…") }
-            } header: { Text("本地账号") } footer: {
-                Text("账号名称仅用于本机区分。各账号分别保存书架、阅读位置、书源选项和登录凭据；访客不保存登录凭据。")
-            }
-            if let settings, settings.selectedID != "guest" {
-                Section("登录状态") {
-                    LabeledContent("当前账号", value: settings.selected.name)
-                    if let status {
-                        LabeledContent("已保存 Cookie", value: "\(status.cookieCount) 个")
-                        LabeledContent("已保存令牌", value: "\(status.bearerOrigins.count) 个网站")
-                    }
+            if let settings {
+                Section {
                     if !origins.isEmpty {
                         Picker("登录网站", selection: $selectedOrigin) {
                             ForEach(origins, id: \.self) { Text($0).tag($0) }
                         }
-                        Button("打开网站登录") { prepareLogin(isToken: false) }.frame(minHeight: 44)
-                        Button("输入访问令牌") { prepareLogin(isToken: true) }.frame(minHeight: 44)
-                        if status?.bearerOrigins.contains(selectedOrigin) == true {
-                            Text("此网站已保存访问令牌，可重新输入或移除。").font(.footnote).foregroundStyle(.secondary)
-                        }
+                        Button("打开网站登录或验证", systemImage: "globe") { prepareLogin(isToken: false) }.frame(minHeight: 44)
                     }
+                } header: { Text("书源网站账号") } footer: {
+                    Text("直接在书源网站登录。更换网站账号时，重新打开网页退出并登录新账号，再保存登录。书架、下载和阅读位置始终保留。")
                 }
                 Section {
-                    Button("清除该账号的登录凭据", role: .destructive) {
+                    if let status {
+                        LabeledContent("本机保存的 Cookie", value: "\(status.cookieCount) 个")
+                        LabeledContent("本机保存的令牌", value: "\(status.bearerOrigins.count) 个网站")
+                    }
+                    Button("清除此书源的登录凭据", role: .destructive) {
                         perform { clearing = try await model.credentialContext(installation, accountID: settings.selectedID) }
                     }.frame(minHeight: 44)
-                } footer: {
-                    Text("凭据保存在本机系统钥匙串。清除后，书架、离线章节和阅读位置会保留。")
+                } header: { Text("已保存的登录信息") } footer: {
+                    Text("凭据保存在本机系统钥匙串。已保存 Cookie 不代表网站确认登录成功；登录状态以网页显示为准。")
                 }
-            }
+                if !origins.isEmpty {
+                    Section("其他登录方式") {
+                        Button("输入访问令牌") { prepareLogin(isToken: true) }.frame(minHeight: 44)
+                    }
+                }
+                if settings.accounts.count > 1 {
+                    Section {
+                        DisclosureGroup("恢复旧版保存的登录") {
+                            ForEach(settings.accounts) { account in
+                                Button {
+                                    perform { try await model.selectAccount(account.id, installation: installation); try await load() }
+                                } label: {
+                                    HStack {
+                                        Text(account.id == "guest" ? "默认网站会话" : account.name)
+                                        Spacer()
+                                        if account.id == settings.selectedID { Image(systemName: "checkmark") }
+                                    }.frame(minHeight: 44)
+                                }
+                            }
+                        }
+                    } footer: { Text("保留旧版登录记录及其书源选项，方便恢复；所有旧书架内容已统一显示，切换记录不会隐藏书籍。") }
+                }
+            } else { Section { ProgressView("正在载入网站登录…") } }
             if busy { Section { ProgressView("正在处理…") } }
             if let feedback { Section { Text(feedback).font(.footnote) } }
         }
         .disabled(busy)
-        .navigationTitle("账号与登录").navigationBarTitleDisplayMode(.inline)
+        .navigationTitle("网站登录").navigationBarTitleDisplayMode(.inline)
         .scrollDismissesKeyboard(.interactively)
         .task(id: installation.digest + ":" + accountID) {
             do { try await load() }
             catch is CancellationError { }
             catch { if !Task.isCancelled { feedback = error.localizedDescription } }
         }
-        .alert("添加本地账号", isPresented: $adding) {
-            TextField("账号名称", text: $accountName)
-            Button("添加") {
-                let name = accountName; accountName = ""
-                perform {
-                    let account = try await model.services().0.addAccount(name: name, installationID: installation.id)
-                    try await model.selectAccount(account.id, installation: installation)
-                    try await load()
-                }
-            }
-            Button("取消", role: .cancel) { accountName = "" }
-        } message: { Text("例如“日常阅读”。这不会在网站上注册账号。") }
         .sheet(item: $login, onDismiss: refresh) { request in NativeSourceLoginView(model: model, request: request) }
         .sheet(item: $token, onDismiss: refresh) { request in
             NativeSourceTokenView(model: model, request: request, hasToken: status?.bearerOrigins.contains(request.origin) == true)
         }
-        .confirmationDialog("清除该账号的全部登录凭据？", isPresented: Binding(get: { clearing != nil }, set: { if !$0 { clearing = nil } }), titleVisibility: .visible) {
+        .confirmationDialog("清除此书源已保存的登录凭据？", isPresented: Binding(get: { clearing != nil }, set: { if !$0 { clearing = nil } }), titleVisibility: .visible) {
             if let clearing {
                 Button("清除登录凭据", role: .destructive) {
                     self.clearing = nil
@@ -132,7 +114,7 @@ struct NativeSourceAccountsView: View {
     private func load() async throws {
         let source = installation
         let next = try await model.services().0.accountSettings(installationID: source.id)
-        let status = next.selectedID == "guest" ? nil : try await model.credentials.status(scope: .init(installationID: source.id, accountID: next.selectedID))
+        let status = try await model.credentials.status(scope: .init(installationID: source.id, accountID: next.selectedID))
         try Task.checkCancellation()
         guard try await model.services().0.accountSettings(installationID: source.id).selectedID == next.selectedID else { return }
         try Task.checkCancellation()

@@ -112,7 +112,8 @@ extension SourceWire {
     }
 }
 
-/// Installation identity is host-issued. Account "guest" is an explicit independent scope.
+/// Installation identity is host-issued. "guest" is the backward-compatible default website session key.
+/// SourceExecutionIdentity.libraryScope determines local book storage independently of this session.
 public struct SourceScope: Codable, Hashable, Sendable {
     public let installationID: UUID
     public let accountID: String
@@ -126,15 +127,23 @@ public struct SourceScope: Codable, Hashable, Sendable {
 
 public struct SourceExecutionIdentity: Codable, Hashable, Sendable {
     public let scope: SourceScope
+    /// The local shelf namespace is independent of the selected website session.
+    /// Old records keep their original namespace, so downloads, notes and anchors need no destructive rewrite.
+    private let libraryNamespace: SourceScope?
+    public var libraryScope: SourceScope { libraryNamespace ?? scope }
     public let sourceDigest: String
     public let configurationDigest: String
     public let credentialRevision: String?
     public let permissionDigest: String?
-    public init(scope: SourceScope, sourceDigest: String, configuration: SourceJSON, credentialRevision: String? = nil, approvedOrigins: [String]? = nil) throws {
+    public init(scope: SourceScope, sourceDigest: String, configuration: SourceJSON, credentialRevision: String? = nil, approvedOrigins: [String]? = nil, libraryScope: SourceScope? = nil) throws {
         guard sourceDigest.count == 64, sourceDigest.allSatisfy({ $0.isHexDigit }) else {
             throw SourceDomainError(.invalidInput, "Invalid source digest")
         }
         self.scope = scope
+        guard libraryScope == nil || libraryScope?.installationID == scope.installationID else {
+            throw SourceDomainError(.invalidInput, "Library and website session belong to different installations")
+        }
+        libraryNamespace = libraryScope == scope ? nil : libraryScope
         self.sourceDigest = sourceDigest
         self.credentialRevision = credentialRevision
         permissionDigest = try approvedOrigins.map { SourceCoding.digest(try SourceCoding.encode(Array(Set($0)).sorted())) }

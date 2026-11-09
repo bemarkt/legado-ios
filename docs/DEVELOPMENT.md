@@ -216,7 +216,7 @@ P2 的领域核心、独立原生源数据库与适配器可以在 G1 设备测�
 
 入口为「设置 → 其他设置 → 原生书源阅读」。添加 `.source.js` 文件、粘贴源码、下载 HTTPS 原始文本或载入离线示例，静态检查后审核名称/版本/声明网站，再保存。搜索后加入独立书架，在书籍详情加载目录、下载章节和打开阅读。仅离线模式读取已下载内容，缺章明确报错；重新打开 App 可读取书架、目录和文本锚点。
 
-数据库位于 `Application Support/Legado/native-sources.sqlite3`，使用安装 UUID 和账号 scope，未迁移旧 Legado 数据。当前支持 guest 和独立本地账号；网页登录使用临时 WKWebView，明确保存后将选定网站 Cookie 写入 Keychain，原生 HTTP 按精确 origin 注入。封面复用同一网络/账号策略，具有独立有界缩略图缓存；“书源诊断”只导出有限操作摘要。源码或配置改变会使在线缓存失配；显式离线可读以前下载的版本，界面会提示。设置改变后重新打开书籍以使用新配置。
+数据库位于 `Application Support/Legado/native-sources.sqlite3`。网站会话与本地书籍身份分开：书源设置可直接打开网站登录，无需创建本地账号；旧版各分区的书籍统一显示并保留原存储键，避免丢失下载、进度和笔记。已有重复书籍不会静默合并。网页登录使用临时 WKWebView，支持 HTTPS 网站资源和跳转，明确保存后仅将已授权 origins 的 Cookie 写入 Keychain；原生 HTTP 和封面按同一网站会话发送凭据。更改登录会撤销旧操作，下一次执行清除旧会话派生脚本状态，在线目录/正文重新获取；已保存的本地内容仍可离线打开。书源诊断仅导出有限操作摘要，空目录/正文附规则类别、状态码和响应字节数，不附网页或 Cookie。导入旧 Legado 数据仍通过副本审阅流程，默认入口未切换。
 
 新 Swift 核心文件必须同时登记到 `Legado.xcodeproj/project.pbxproj`。SwiftPM 会发现文件，App target 不会；通过 SwiftPM 不等于通过 App 编译。见 [P2 实施与验收报告](reports/SOURCE_PROTOCOL_P2_REPORT.md)。
 

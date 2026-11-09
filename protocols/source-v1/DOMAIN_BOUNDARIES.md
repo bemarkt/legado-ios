@@ -10,7 +10,7 @@
 | SourceSnapshot | 源码摘要、源版本、协议版本/兼容 profile、不可变源码位置、配置 schema |
 | AccountScope | installationID、accountID；访客也是显式范围，不泄露凭据 |
 | OperationSnapshot | operationID、installationID、源码摘要、accountID、configRevision、deadline、取消与诊断上下文 |
-| ScopedBookRef | installationID、accountID、SourceRef；源只看 SourceRef 部分 |
+| ScopedBookRef | installationID、稳定本地存储范围、SourceRef；本地身份不随网站登录改变，源只看 SourceRef 部分 |
 | ScopedChapterRef | ScopedBookRef、章节 SourceRef；章节 id 在一本书内唯一 |
 | CursorEnvelope | 操作类型、query/config/account 指纹、源码摘要、可选目录 revision、源游标 JSON |
 | ChapterDocument | 规范化版本、内容修订、顺序 block、有限 mark、纯文本索引 |
@@ -65,7 +65,7 @@ ReaderDocumentLoader
 
 - 正文保存完整请求的 book/chapter ref、执行身份，以及宿主目录缓存代次。宿主字段不进入 `.source.js`，也不增加作者 API。
 - 只有显式非空 revision、执行身份、book ref 和整个章节列表均未改变，目录刷新才保留缓存代次。缺失 revision、修订变化、标题/ref/state/顺序/成员变化会产生新代次；修订值随后恢复成旧字符串也不会复活旧缓存。
-- `current` 只复用身份、引用和代次均匹配的正文；`reload` 明确绕过缓存重新获取；`offline` 在同一安装/账号内读取已下载副本，不声称是网站最新内容。下载失败不会删除旧正文。
+- `current` 只复用网站会话身份、引用和代次均匹配的正文；`reload` 明确绕过缓存重新获取；`offline` 在同一本地书籍身份内读取已下载副本，不声称是网站最新内容。登录改变或下载失败不会删除旧正文。
 - 目录 revision 与正文 revision 是独立的不透明值，不能互相比较。未抓取正文前无法知道它是否被网站静默修改；缺少修订信息时需要刷新目录或显式刷新本章。
 - 在线缓存命中检查在单个数据库事务内完成。未命中的请求保存目录快照与旧缓存摘要，返回时在同一个 SQLite 事务中比较并写入；目录已改变或另一连接已写入新缓存则拒绝迟到结果。操作提交门禁仍负责终态/取消，目录检查负责快照一致性。
 - 旧数据库缺少缓存来源信息时仍可离线打开，在线重新获取后补齐。规范化版本变化只从保存的原始结果重新生成文档，不需要访问网络。

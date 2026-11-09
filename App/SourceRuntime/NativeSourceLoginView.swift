@@ -32,10 +32,13 @@ final class NativeSourceLoginBrowser: NSObject, ObservableObject, WKNavigationDe
         var rules: [[String: Any]] = [
             ["trigger": ["url-filter": ".*"], "action": ["type": "block"]],
             ["trigger": ["url-filter": "^https://"], "action": ["type": "ignore-previous-rules"]],
-            ["trigger": ["url-filter": "^(data|blob):"], "action": ["type": "ignore-previous-rules"]]
+            ["trigger": ["url-filter": "^data:"], "action": ["type": "ignore-previous-rules"]],
+            ["trigger": ["url-filter": "^blob:"], "action": ["type": "ignore-previous-rules"]]
         ]
         if allowLoopbackHTTP {
-            rules.append(["trigger": ["url-filter": #"^http://(127\.0\.0\.1|localhost|\[::1\])(:[0-9]+)?/"#], "action": ["type": "ignore-previous-rules"]])
+            for host in [#"127\.0\.0\.1"#, "localhost", #"\[::1\]"#] {
+                rules.append(["trigger": ["url-filter": "^http://" + host + "[:/]"], "action": ["type": "ignore-previous-rules"]])
+            }
         }
         let encoded = String(decoding: try JSONSerialization.data(withJSONObject: rules), as: UTF8.self)
         guard let store = WKContentRuleListStore.default(),

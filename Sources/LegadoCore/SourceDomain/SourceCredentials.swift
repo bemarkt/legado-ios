@@ -105,6 +105,12 @@ public struct SourceCredentialSession: Sendable {
     fileprivate let vault: SourceCredentialVault
     public func headers(for url: URL) async throws -> [String: String] { try await vault.headers(for: url, session: self) }
     public func receive(_ cookies: [SourceCredentialCookie]) async throws { try await vault.receive(cookies, session: self) }
+    /// These values are exposed only to the legacy adapter, never the native module bridge.
+    public func legacyValue(key: String) async throws -> String { try await vault.legacyValue(key: key, session: self) }
+    public func setLegacyValue(_ value: String, key: String, gate: SourceCommitGate) async throws {
+        try await vault.setLegacyValue(value, key: key, session: self, gate: gate)
+    }
+
 }
 
 public actor SourceCredentialVault {
@@ -113,6 +119,7 @@ public actor SourceCredentialVault {
         var revision: String
         var cookies: [SourceCredentialCookie]
         var bearer: [String: String]
+        var legacy: [String: String]?
     }
     private struct Entry { var bundle: Bundle; let gate: SourceCommitGate }
     private let persistence: any SourceCredentialPersistence
@@ -170,6 +177,21 @@ public actor SourceCredentialVault {
         _ = try load(scope)
         try replace(Bundle(revision: "", cookies: [], bearer: [:]), scope: scope)
     }
+    fileprivate func legacyValue(key: String, session: SourceCredentialSession) throws -> String {
+        guard ["loginInfo", "loginHeader"].contains(key) else { throw SourceDomainError(.invalidInput, "Unknown compatibility credential key") }
+        return try validated(session).bundle.legacy?[key] ?? ""
+    }
+    fileprivate func setLegacyValue(_ value: String, key: String, session: SourceCredentialSession, gate: SourceCommitGate) throws {
+        guard gate.inherits(session.commitGate) else { throw SourceDomainError(.invalidInput, "Credential writes require a gate bound to this session") }
+        _ = try legacyValue(key: key, session: session)
+        var bundle = try validated(session).bundle
+        if bundle.legacy == nil { bundle.legacy = [:] }
+        bundle.legacy?[key] = value.isEmpty ? nil : value
+        let data = try encoded(bundle)
+        try gate.withCommit { try persistence.write(data, scope: session.scope) }
+        entries[session.scope]?.bundle = bundle
+    }
+
     private func load(_ scope: SourceScope) throws -> Entry {
         guard scope.accountID != "guest" else { throw SourceDomainError(.invalidInput, "访客不保存登录凭据。") }
         if let entry = entries[scope] { return entry }
@@ -204,6 +226,12 @@ public actor SourceCredentialVault {
         for (origin, token) in bundle.bearer {
             guard SourceCredentialCookie.validOrigin(origin), !token.isEmpty, token.utf8.count <= 8192,
                   token.utf8.allSatisfy({ $0 > 32 && $0 < 127 }) else { throw SourceDomainError(.invalidData, "保存的令牌无效。") }
+        }
+        if let legacy = bundle.legacy {
+            guard Set(legacy.keys).isSubset(of: ["loginInfo", "loginHeader"]),
+                  legacy.values.allSatisfy({ $0.utf8.count <= 16_384 }) else {
+                throw SourceDomainError(.resourceLimit, "Compatibility login state exceeds storage limits")
+            }
         }
         let data = try SourceCoding.encode(bundle)
         guard data.count <= 65_536 else { throw SourceDomainError(.resourceLimit, "登录凭据超过容量限制。") }

@@ -703,7 +703,13 @@ public actor SourceArchive {
     public func anchor(book: SourceBookKey) throws -> SourceReadingAnchor? { try record("anchor", scope: scopeKey(book.scope), key: book.bookID) }
     public func saveAnchor(_ value: SourceReadingAnchor) throws { try put("anchor", scope: scopeKey(value.chapter.book.scope), key: value.chapter.book.bookID, value: value) }
 
-    public func state(scope: SourceScope, key: String) throws -> SourceStateEntry? {
+    public func state(scope: SourceScope, key: String, expectedIdentity: SourceExecutionIdentity? = nil) throws -> SourceStateEntry? {
+        if let expectedIdentity {
+            return try transaction {
+                try validateStateIdentity(expectedIdentity, scope: scope)
+                return try state(scope: scope, key: key)
+            }
+        }
         try validateStateKey(key)
         let statement = try prepare("SELECT payload,revision FROM source_state WHERE scope=? AND key=?", strings: [scopeKey(scope), key])
         defer { sqlite3_finalize(statement) }
@@ -714,10 +720,11 @@ public actor SourceArchive {
         }
     }
     @discardableResult
-    public func setState(scope: SourceScope, key: String, value: SourceJSON, condition: SourceStateCondition = .any, gate: SourceCommitGate? = nil) throws -> SourceStateEntry {
+    public func setState(scope: SourceScope, key: String, value: SourceJSON, condition: SourceStateCondition = .any, gate: SourceCommitGate? = nil, expectedIdentity: SourceExecutionIdentity? = nil) throws -> SourceStateEntry {
         try validateStateKey(key)
         let payload = try value.validatedData(maximumBytes: 65_536)
         return try transaction(gate: gate) {
+            if let expectedIdentity { try validateStateIdentity(expectedIdentity, scope: scope) }
             let current = try state(scope: scope, key: key)
             try check(condition, current: current)
             let query = try prepare("SELECT COALESCE(SUM(length(payload)),0) FROM source_state WHERE scope=? AND key<>?", strings: [scopeKey(scope), key])
@@ -752,6 +759,13 @@ public actor SourceArchive {
         case .revision(let value): matches = current?.revision == value
         }
         guard matches else { throw SourceDomainError(.storageConflict, "Source state revision changed") }
+    }
+    private func validateStateIdentity(_ identity: SourceExecutionIdentity, scope: SourceScope) throws {
+        guard identity.scope == scope, try installation(scope.installationID)?.digest == identity.sourceDigest,
+              try SourceCoding.digest((configuration(scope: scope) ?? .object([:])).validatedData(maximumBytes: 65_536)) == identity.configurationDigest,
+              try accountSettings(installationID: scope.installationID).selectedID == scope.accountID else {
+            throw SourceDomainError(.stale, "Source, configuration or selected account changed before state access")
+        }
     }
     private func validateStateKey(_ key: String) throws {
         guard !key.isEmpty, key.unicodeScalars.count <= 128, !key.contains("\0") else { throw SourceDomainError(.invalidInput, "Invalid source state key") }

@@ -25,12 +25,12 @@ public final class JavaScriptExecutionControl: @unchecked Sendable {
     private var failure: (any Error)?
     private var callbacks: [UUID: @Sendable (any Error) -> Void] = [:]
     private var remainingRequests: Int
-    private let gate: SourceCommitGate?
+    public let commitGate: SourceCommitGate
     public let deadline: ContinuousClock.Instant
 
     public init(timeout: Duration = .seconds(30), maximumRequests: Int = 64, gate: SourceCommitGate? = nil) {
         remainingRequests = max(0, maximumRequests)
-        self.gate = gate
+        commitGate = SourceCommitGate(parent: gate)
         deadline = ContinuousClock.now.advanced(by: timeout)
     }
 
@@ -38,7 +38,7 @@ public final class JavaScriptExecutionControl: @unchecked Sendable {
         do {
             try lock.withLock { if let failure { throw failure } }
             if ContinuousClock.now >= deadline { throw URLError(.timedOut) }
-            try gate?.check()
+            try commitGate.check()
         } catch { invalidate(error); throw error }
     }
 
@@ -62,6 +62,7 @@ public final class JavaScriptExecutionControl: @unchecked Sendable {
             callbacks.removeAll()
             return pending
         }
+        commitGate.invalidate()
         // Never call back into a task while holding the control lock.
         for callback in pending { callback(error) }
     }

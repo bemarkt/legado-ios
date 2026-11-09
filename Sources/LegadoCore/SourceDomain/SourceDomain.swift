@@ -182,6 +182,7 @@ public final class SourceCommitGate: @unchecked Sendable {
     private var active = true
     private let parent: SourceCommitGate?
     public init(parent: SourceCommitGate? = nil) { self.parent = parent }
+    func inherits(_ gate: SourceCommitGate) -> Bool { self === gate || parent?.inherits(gate) == true }
     public func check() throws { try withCommit { } }
     public func invalidate() { lock.lock(); active = false; lock.unlock() }
     public func withCommit<T>(_ body: () throws -> T) throws -> T {

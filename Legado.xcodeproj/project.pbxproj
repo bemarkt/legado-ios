@@ -194,6 +194,7 @@
 		FB100000000000000000006A /* NativeSourceIssueView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB200000000000000000006A; };
 		EA1000000000000000000010 /* LegadoAsyncBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA2000000000000000000010; };
 		EA1000000000000000000011 /* LegadoSourceProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA2000000000000000000011; };
+		EA1000000000000000000012 /* LegadoScopedSourceState.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA2000000000000000000012; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -383,6 +384,7 @@
 		FB200000000000000000006A /* NativeSourceIssueView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NativeSourceIssueView.swift; path = App/SourceRuntime/NativeSourceIssueView.swift; sourceTree = SOURCE_ROOT; };
 		EA2000000000000000000010 /* LegadoAsyncBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/LegadoCore/LegadoAdapter/LegadoAsyncBridge.swift; sourceTree = SOURCE_ROOT; };
 		EA2000000000000000000011 /* LegadoSourceProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/LegadoCore/LegadoAdapter/LegadoSourceProvider.swift; sourceTree = SOURCE_ROOT; };
+		EA2000000000000000000012 /* LegadoScopedSourceState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/LegadoCore/LegadoAdapter/LegadoScopedSourceState.swift; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -666,6 +668,7 @@
 				DE2000000000000000000002 /* JavaScriptHostInstaller.swift */,
 				EA2000000000000000000010 /* LegadoAsyncBridge.swift */,
 				EA2000000000000000000011 /* LegadoSourceProvider.swift */,
+				EA2000000000000000000012 /* LegadoScopedSourceState.swift */,
 				EA2000000000000000000009 /* JavaScriptHostEnvironment.swift */,
 				DF2000000000000000000001 /* BookSourceRuntimeStore.swift */,
 				EA2000000000000000000001 /* JavaScriptJsoupHost.swift */,
@@ -1041,6 +1044,7 @@
 				DE1000000000000000000002 /* JavaScriptHostInstaller.swift in Sources */,
 				EA1000000000000000000010 /* LegadoAsyncBridge.swift in Sources */,
 				EA1000000000000000000011 /* LegadoSourceProvider.swift in Sources */,
+				EA1000000000000000000012 /* LegadoScopedSourceState.swift in Sources */,
 				EA1000000000000000000009 /* JavaScriptHostEnvironment.swift in Sources */,
 				DF1000000000000000000001 /* BookSourceRuntimeStore.swift in Sources */,
 				EA1000000000000000000001 /* JavaScriptJsoupHost.swift in Sources */,

@@ -150,6 +150,28 @@ struct LegacyMigrationMapperTests {
         #expect(try await archive.chapterStorageUsage().offlineCount == 0)
     }
 
+    @Test func migratedNotesCanBeEditedAndDeletedWithoutChangingRecoveryEvidence() async throws {
+        let fixture = try await fixture(); try capture(fixture)
+        let report = try await LegacyMigrationMapper.prepare(snapshotAt: fixture.snapshot, destination: fixture.destination)
+        let url = fixture.root.appendingPathComponent("reading-notes.sqlite3"), archive = try SourceArchive(url: url)
+        _ = try await LegacyMigrationMapper.adopt(at: fixture.destination, snapshotAt: fixture.snapshot, into: archive)
+        let book = try #require(report.books.first?.key)
+        let original = try await archive.importedAnnotations(book: book)
+        let note = try #require(try await archive.readerBookmarks(book: book).first)
+        #expect(note.note == "保留的笔记")
+        let edited = try await archive.saveReaderBookmark(id: note.id, anchor: note.anchor, chapterTitle: note.chapterTitle,
+            selectedText: note.selectedText, note: "新的笔记", expectedRevision: note.revision)
+        #expect(try await archive.readerBookmarks(book: book) == [edited])
+        #expect(try await archive.importedAnnotations(book: book) == original)
+        try await archive.removeReaderBookmark(id: edited.id, book: book, expectedRevision: edited.revision)
+        let reopened = try SourceArchive(url: url)
+        #expect(try await reopened.readerBookmarks(book: book).isEmpty)
+        #expect(try await reopened.importedAnnotations(book: book) == original)
+        _ = try await LegacyMigrationMapper.adopt(at: fixture.destination, snapshotAt: fixture.snapshot, into: reopened)
+        #expect(try await reopened.readerBookmarks(book: book).isEmpty)
+        #expect(try LegacyMigrationMapper.verify(at: fixture.destination, snapshotAt: fixture.snapshot) == report)
+    }
+
     @Test func emptyHistoricalAndLargeLibrariesMapWithoutDroppingRows() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("migration-sizes-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

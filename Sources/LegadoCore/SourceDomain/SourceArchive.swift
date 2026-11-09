@@ -858,6 +858,128 @@ public actor SourceArchive {
     public func anchor(book: SourceBookKey) throws -> SourceReadingAnchor? { try record("anchor", scope: scopeKey(book.scope), key: book.bookID) }
     public func saveAnchor(_ value: SourceReadingAnchor) throws { try put("anchor", scope: scopeKey(value.chapter.book.scope), key: value.chapter.book.bookID, value: value) }
 
+    // Reader-owned state never passes through the website's storage or credential generation.
+    private func readerScope(_ book: SourceBookKey) throws -> String { SourceCoding.digest(try SourceCoding.encode(book)) }
+    private func requireReaderBook(_ book: SourceBookKey) throws {
+        let saved: SourceSavedBook? = try record("book", scope: scopeKey(book.scope), key: book.bookID)
+        guard saved?.key == book else { throw SourceDomainError(.stale, "书籍已不在本地书架中。") }
+    }
+
+    public func readerPreferences(book: SourceBookKey) throws -> SourceReaderPreferences {
+        try record("reader-preferences", scope: readerScope(book), key: "preferences") ?? .init()
+    }
+    @discardableResult
+    public func changeReaderPreference(_ change: SourceReaderPreferenceChange, book: SourceBookKey) throws -> SourceReaderPreferences {
+        try transaction {
+            try requireReaderBook(book)
+            var value = try readerPreferences(book: book)
+            switch change {
+            case .useReplaceRules(let choice): value.useReplaceRules = choice
+            case .pageAnimation(let choice):
+                if let choice, !(0...4).contains(choice) { throw SourceDomainError(.invalidInput, "无效的翻页方式。") }
+                value.pageAnimation = choice
+            case .ttsEngine(let choice):
+                if let choice, choice.isEmpty || choice.utf8.count > 1024 || choice.contains("\0") {
+                    throw SourceDomainError(.invalidInput, "无效的朗读引擎标识。")
+                }
+                value.ttsEngine = choice
+            }
+            try put("reader-preferences", scope: readerScope(book), key: "preferences", value: value)
+            return value
+        }
+    }
+
+    // A tombstone hides an imported bookmark without modifying the migration evidence.
+    private struct ReaderBookmarkEdit: Codable {
+        let id: String
+        let bookmark: SourceReaderBookmark?
+    }
+    private func importedReaderBookmark(_ value: ImportedAnnotation) throws -> SourceReaderBookmark {
+        .init(id: "import:" + value.id, revision: "import:" + SourceCoding.digest(try SourceCoding.encode(value)),
+              anchor: value.anchor, chapterTitle: value.chapterTitle, selectedText: value.selectedText, note: value.note,
+              createdAt: value.createdAt, updatedAt: value.createdAt)
+    }
+    private func readerBookmark(id: String, book: SourceBookKey) throws -> SourceReaderBookmark? {
+        if let edit: ReaderBookmarkEdit = try record("reader-bookmark", scope: readerScope(book), key: id) { return edit.bookmark }
+        guard id.hasPrefix("import:"),
+              let old = try importedAnnotations(book: book).first(where: { "import:" + $0.id == id }) else { return nil }
+        return try importedReaderBookmark(old)
+    }
+    public func readerBookmarks(book: SourceBookKey) throws -> [SourceReaderBookmark] {
+        try transaction {
+            let edits = try records("reader-bookmark", scope: readerScope(book), as: ReaderBookmarkEdit.self)
+            let edited = Set(edits.map(\.id))
+            let imported = try importedAnnotations(book: book).map { try importedReaderBookmark($0) }.filter { !edited.contains($0.id) }
+            return (edits.compactMap(\.bookmark) + imported).sorted {
+                $0.createdAt == $1.createdAt ? $0.id < $1.id : $0.createdAt > $1.createdAt
+            }
+        }
+    }
+    @discardableResult
+    public func saveReaderBookmark(id: String = UUID().uuidString, anchor: SourceReadingAnchor, chapterTitle: String,
+                                   selectedText: String, note: String = "", expectedRevision: String? = nil,
+                                   now: Date = Date()) throws -> SourceReaderBookmark {
+        try transaction {
+            let book = anchor.chapter.book
+            try requireReaderBook(book); try SourceBookKey.validateID(id)
+            guard chapterTitle.utf8.count <= 8192, selectedText.utf8.count <= 16_384, note.utf8.count <= 65_536,
+                  now.timeIntervalSince1970.isFinite else { throw SourceDomainError(.invalidInput, "书签内容超出保存范围。") }
+            let previous = try readerBookmark(id: id, book: book)
+            guard previous?.revision == expectedRevision else { throw SourceDomainError(.storageConflict, "书签已改变，请重新载入后编辑。") }
+            // An imported bookmark is editable but cannot be recreated after deletion by a stale editor.
+            if id.hasPrefix("import:"), previous == nil { throw SourceDomainError(.stale, "迁移书签已删除。") }
+            let value = SourceReaderBookmark(id: id, revision: UUID().uuidString, anchor: anchor, chapterTitle: chapterTitle,
+                selectedText: selectedText, note: note, createdAt: previous?.createdAt ?? now, updatedAt: now)
+            try put("reader-bookmark", scope: readerScope(book), key: id, value: ReaderBookmarkEdit(id: id, bookmark: value))
+            return value
+        }
+    }
+    public func removeReaderBookmark(id: String, book: SourceBookKey, expectedRevision: String) throws {
+        try transaction {
+            guard let previous = try readerBookmark(id: id, book: book), previous.revision == expectedRevision else {
+                throw SourceDomainError(.storageConflict, "书签已改变或删除，请刷新列表。")
+            }
+            try put("reader-bookmark", scope: readerScope(book), key: id, value: ReaderBookmarkEdit(id: id, bookmark: nil))
+        }
+    }
+
+    public func beginReaderSession(book: SourceBookKey, now: Date = Date()) throws -> SourceReaderSession {
+        try transaction {
+            try requireReaderBook(book)
+            guard now.timeIntervalSince1970.isFinite else { throw SourceDomainError(.invalidInput, "无效的阅读时间。") }
+            let session = SourceReaderSession(id: UUID(), book: book, startedAt: now)
+            try put("reader-session", scope: readerScope(book), key: session.id.uuidString,
+                    value: SourceReaderCheckpoint(session: session, sequence: 0, elapsedMilliseconds: 0, updatedAt: now))
+            try put("reader-active-session", scope: readerScope(book), key: "active", value: session)
+            return session
+        }
+    }
+    public func saveReaderCheckpoint(_ value: SourceReaderCheckpoint) throws {
+        try transaction {
+            let scope = try readerScope(value.session.book)
+            guard value.elapsedMilliseconds >= 0, value.updatedAt.timeIntervalSince1970.isFinite,
+                  value.anchor == nil || value.anchor?.chapter.book == value.session.book else {
+                throw SourceDomainError(.invalidInput, "阅读记录或位置不属于本书。")
+            }
+            let active: SourceReaderSession? = try record("reader-active-session", scope: scope, key: "active")
+            let previous: SourceReaderCheckpoint? = try record("reader-session", scope: scope, key: value.session.id.uuidString)
+            guard active == value.session, let previous, previous.session == value.session else {
+                throw SourceDomainError(.stale, "阅读会话已被新的阅读窗口替代。")
+            }
+            if value == previous { return }
+            guard !previous.ended, value.sequence > previous.sequence, value.elapsedMilliseconds >= previous.elapsedMilliseconds else {
+                throw SourceDomainError(.stale, "较旧的阅读记录不能覆盖当前位置。")
+            }
+            try put("reader-session", scope: scope, key: value.session.id.uuidString, value: value)
+            if let anchor = value.anchor { try saveAnchor(anchor) }
+        }
+    }
+    public func readerHistory(book: SourceBookKey) throws -> [SourceReaderCheckpoint] {
+        try records("reader-session", scope: readerScope(book), as: SourceReaderCheckpoint.self).sorted {
+            $0.updatedAt == $1.updatedAt ? $0.session.id.uuidString < $1.session.id.uuidString : $0.updatedAt > $1.updatedAt
+        }
+    }
+
     public func state(scope: SourceScope, key: String, expectedIdentity: SourceExecutionIdentity? = nil) throws -> SourceStateEntry? {
         if let expectedIdentity {
             return try transaction {

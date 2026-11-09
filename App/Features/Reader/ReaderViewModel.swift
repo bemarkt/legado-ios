@@ -70,6 +70,7 @@ final class ReaderViewModel: ObservableObject {
     private let localService: LocalBookService
     private let sanitizer = ContentSanitizer()
     private let contentCoordinator: ChapterContentCoordinator
+    private var chapterAccess: (any ReaderChapterAccess)?
     private var demoChapterContent: String?
     private var previousLoadedIndex: Int?
     private var continuationLoadedIndex: Int?
@@ -218,6 +219,13 @@ final class ReaderViewModel: ObservableObject {
         hasLoadedCurrentChapter = true
     }
 
+    /// Book/BookChapter here are presentation values. Content identifiers are handed unchanged
+    /// to this port; neither the legacy network coordinator nor its URL-keyed cache is consulted.
+    convenience init(book: Book, chapters: [BookChapter], initialIndex: Int, chapterAccess: any ReaderChapterAccess) {
+        self.init(book: book, chapters: chapters, initialIndex: initialIndex)
+        self.chapterAccess = chapterAccess
+    }
+
     init(
         book: Book,
         chapters: [BookChapter],
@@ -259,7 +267,7 @@ final class ReaderViewModel: ObservableObject {
               currentChapter?.isVolume != true else { return nil }
         return scrollChapters.first(where: { $0.id == currentIndex })?.error
             ?? diagnostics.first(where: { $0.severity == .error })?.message
-            ?? (source != nil && content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "当前书源没有返回正文。" : nil)
+            ?? ((source != nil || chapterAccess != nil) && content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "当前书源没有返回正文。" : nil)
     }
 
     func bookForSourceSwitch(position: Int) -> Book {
@@ -272,6 +280,7 @@ final class ReaderViewModel: ObservableObject {
     }
 
     func applySourceSwitch(_ report: BookSourceSwitchReport, source: BookSource) {
+        guard chapterAccess == nil else { return }
         book = report.book
         chapters = report.chapters
         self.source = source
@@ -305,7 +314,17 @@ final class ReaderViewModel: ObservableObject {
             guard requestedGeneration == chapterLoadGeneration, !Task.isCancelled else { return }
             sourceCacheNeedsInvalidation = false
         }
-        if let demoChapterContent {
+        if let chapterAccess {
+            do {
+                let snapshot = try await chapterAccess.load(chapterID: chapter.url, reload: forceRefresh)
+                fromCache = snapshot.loadedFromCache
+                report = .init(title: snapshot.title ?? chapter.title, content: snapshot.text)
+            } catch is CancellationError { return }
+            catch {
+                fromCache = false
+                report = .init(diagnostics: [.init(severity: .error, code: "reader.content", message: error.localizedDescription, rule: chapter.url)])
+            }
+        } else if let demoChapterContent {
             fromCache = true
             report = .init(title: chapter.title, content: demoChapterContent)
         } else if let verified = pendingSourceContent, let source, !forceRefresh {
@@ -408,7 +427,12 @@ final class ReaderViewModel: ObservableObject {
         forceRefresh: Bool = false
     ) async -> (title: String, content: String, error: String?) {
         let report: ChapterContentReport
-        if let demoChapterContent {
+        if let chapterAccess {
+            do {
+                let snapshot = try await chapterAccess.load(chapterID: chapter.url, reload: forceRefresh)
+                report = .init(title: snapshot.title ?? chapter.title, content: snapshot.text)
+            } catch { return (chapter.title, "", error.localizedDescription) }
+        } else if let demoChapterContent {
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-uiScrollRegression") {
                 try? await Task.sleep(nanoseconds: 80_000_000)
@@ -441,7 +465,7 @@ final class ReaderViewModel: ObservableObject {
             rules: usesReplaceRules ? rules : []
         )
         let error = (report.diagnostics + processed.diagnostics).first(where: { $0.severity == .error })?.message
-            ?? (processed.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && source != nil && !chapter.isVolume
+            ?? (processed.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && (source != nil || chapterAccess != nil) && !chapter.isVolume
                 ? "当前书源没有返回正文。" : nil)
         return (processed.title, processed.content, error)
     }
@@ -459,8 +483,15 @@ final class ReaderViewModel: ObservableObject {
 
     func nextSpeechContent(rules: [ReplaceRule]) async -> String? {
         guard let chapter = nextReadableChapter(after: currentIndex) else { return nil }
+        let requestedGeneration = chapterLoadGeneration
+        let requestedIndex = currentIndex
         let report: ChapterContentReport
-        if let source {
+        if let chapterAccess {
+            do {
+                let snapshot = try await chapterAccess.load(chapterID: chapter.url, reload: false)
+                report = .init(title: snapshot.title ?? chapter.title, content: snapshot.text)
+            } catch { return nil }
+        } else if let source {
             report = await contentCoordinator.load(
                 book: book,
                 chapter: chapter,
@@ -476,6 +507,8 @@ final class ReaderViewModel: ObservableObject {
                 return nil
             }
         }
+        guard requestedGeneration == chapterLoadGeneration, requestedIndex == currentIndex,
+              !Task.isCancelled, !report.diagnostics.contains(where: { $0.severity == .error }) else { return nil }
         var effectiveChapter = chapter
         if let resolvedTitle = report.title { effectiveChapter.title = resolvedTitle }
         let value = sanitizer.process(

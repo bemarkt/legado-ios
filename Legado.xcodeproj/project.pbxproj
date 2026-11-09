@@ -177,6 +177,7 @@
 		FB1000000000000000000003 /* SourceCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB2000000000000000000003; };
 		FB1000000000000000000004 /* SourceDomain.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB2000000000000000000004; };
 		FB1000000000000000000005 /* SourceLibraryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB2000000000000000000005; };
+		FB100000000000000000002F /* ReaderChapterAccess.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB200000000000000000002F; };
 		FB1000000000000000000006 /* SourceWire.generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB2000000000000000000006; };
 		FB1000000000000000000007 /* SourceWorkScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB2000000000000000000007; };
 		FB1000000000000000000008 /* SourceSearchPager.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB2000000000000000000008; };
@@ -374,6 +375,7 @@
 		FB2000000000000000000003 /* SourceCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SourceCatalog.swift; path = Sources/LegadoCore/SourceDomain/SourceCatalog.swift; sourceTree = SOURCE_ROOT; };
 		FB2000000000000000000004 /* SourceDomain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SourceDomain.swift; path = Sources/LegadoCore/SourceDomain/SourceDomain.swift; sourceTree = SOURCE_ROOT; };
 		FB2000000000000000000005 /* SourceLibraryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SourceLibraryService.swift; path = Sources/LegadoCore/SourceDomain/SourceLibraryService.swift; sourceTree = SOURCE_ROOT; };
+		FB200000000000000000002F /* ReaderChapterAccess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ReaderChapterAccess.swift; path = Sources/LegadoCore/SourceDomain/ReaderChapterAccess.swift; sourceTree = SOURCE_ROOT; };
 		FB2000000000000000000006 /* SourceWire.generated.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SourceWire.generated.swift; path = Sources/LegadoCore/SourceDomain/SourceWire.generated.swift; sourceTree = SOURCE_ROOT; };
 		FB2000000000000000000007 /* SourceWorkScheduler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SourceWorkScheduler.swift; path = Sources/LegadoCore/SourceDomain/SourceWorkScheduler.swift; sourceTree = SOURCE_ROOT; };
 		FB2000000000000000000008 /* SourceSearchPager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SourceSearchPager.swift; path = Sources/LegadoCore/SourceDomain/SourceSearchPager.swift; sourceTree = SOURCE_ROOT; };
@@ -445,6 +447,7 @@
 				FB2000000000000000000003 /* SourceCatalog.swift */,
 				FB2000000000000000000004 /* SourceDomain.swift */,
 				FB2000000000000000000005 /* SourceLibraryService.swift */,
+				FB200000000000000000002F /* ReaderChapterAccess.swift */,
 				FB2000000000000000000006 /* SourceWire.generated.swift */,
 				FB2000000000000000000007 /* SourceWorkScheduler.swift */,
 				FB2000000000000000000008 /* SourceSearchPager.swift */,
@@ -950,6 +953,7 @@
 				FB1000000000000000000003 /* SourceCatalog.swift in Sources */,
 				FB1000000000000000000004 /* SourceDomain.swift in Sources */,
 				FB1000000000000000000005 /* SourceLibraryService.swift in Sources */,
+				FB100000000000000000002F /* ReaderChapterAccess.swift in Sources */,
 				FB1000000000000000000006 /* SourceWire.generated.swift in Sources */,
 				FB1000000000000000000007 /* SourceWorkScheduler.swift in Sources */,
 				FB1000000000000000000008 /* SourceSearchPager.swift in Sources */,

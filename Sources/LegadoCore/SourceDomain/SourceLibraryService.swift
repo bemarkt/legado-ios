@@ -6,6 +6,12 @@ public struct SourceDownloadProgress: Sendable, Equatable {
     public let currentChapter: SourceWire.Chapter?
 }
 
+public struct SourceChapterRead: Sendable {
+    public enum Origin: Sendable, Equatable { case offline, cache, network }
+    public let chapter: SourceCachedChapter
+    public let origin: Origin
+}
+
 public actor SourceLibraryService {
     public enum ReadPolicy: Sendable, Equatable { case current, reload, offline }
     public let archive: SourceArchive
@@ -44,6 +50,11 @@ public actor SourceLibraryService {
 
     public func chapter(provider: any SourceProvider, book: SourceWire.SourceRef, chapter: SourceWire.SourceRef,
                         policy: ReadPolicy = .current, catalog: SourceCatalog? = nil, retainOffline: Bool = false) async throws -> SourceCachedChapter {
+        try await readChapter(provider: provider, book: book, chapter: chapter, policy: policy, catalog: catalog, retainOffline: retainOffline).chapter
+    }
+
+    public func readChapter(provider: any SourceProvider, book: SourceWire.SourceRef, chapter: SourceWire.SourceRef,
+                           policy: ReadPolicy = .current, catalog: SourceCatalog? = nil, retainOffline: Bool = false) async throws -> SourceChapterRead {
         try Task.checkCancellation()
         let identity = provider.descriptor.identity
         let key = try SourceChapterKey(book: .init(scope: identity.libraryScope, bookID: book.id), chapterID: chapter.id)
@@ -61,7 +72,7 @@ public actor SourceLibraryService {
             }
             try Task.checkCancellation()
             guard generations[operation] === generation else { throw SourceDomainError(.stale, "Chapter read superseded") }
-            return cached
+            return .init(chapter: cached, origin: .offline)
         }
         let prepared = try await archive.prepareChapter(identity: identity, book: book, chapter: chapter,
             expectedCatalog: catalog, reload: policy == .reload, retainOffline: retainOffline, gate: generation)
@@ -69,7 +80,7 @@ public actor SourceLibraryService {
         guard generations[operation] === generation else { throw SourceDomainError(.stale, "Chapter read superseded") }
         let request: SourceChapterRequest
         switch prepared {
-        case .cached(let cached): return cached
+        case .cached(let cached): return .init(chapter: cached, origin: .cache)
         case .fetch(let value): request = value
         }
         let content = try await provider.content(.init(book: book, chapter: chapter))
@@ -80,7 +91,7 @@ public actor SourceLibraryService {
         let value = SourceCachedChapter(key: key, identity: identity, content: content, document: try ChapterNormalizer.normalize(content), provenance: request.provenance)
         try Task.checkCancellation()
         try await archive.saveChapter(value, request: request, gate: generation)
-        return value
+        return .init(chapter: value, origin: .network)
     }
 
     /// A failed download preserves completed chapters; cancellation is checked between chapters.

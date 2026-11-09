@@ -192,6 +192,8 @@
 		FB1000000000000000000069 /* NativeSourceCoverView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB2000000000000000000069; };
 		FB100000000000000000000D /* SourceDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB200000000000000000000D; };
 		FB100000000000000000006A /* NativeSourceIssueView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB200000000000000000006A; };
+		EA1000000000000000000010 /* LegadoAsyncBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA2000000000000000000010; };
+		EA1000000000000000000011 /* LegadoSourceProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA2000000000000000000011; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -379,6 +381,8 @@
 		FB2000000000000000000069 /* NativeSourceCoverView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NativeSourceCoverView.swift; path = App/SourceRuntime/NativeSourceCoverView.swift; sourceTree = SOURCE_ROOT; };
 		FB200000000000000000000D /* SourceDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SourceDiagnostics.swift; path = Sources/LegadoCore/SourceDomain/SourceDiagnostics.swift; sourceTree = SOURCE_ROOT; };
 		FB200000000000000000006A /* NativeSourceIssueView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NativeSourceIssueView.swift; path = App/SourceRuntime/NativeSourceIssueView.swift; sourceTree = SOURCE_ROOT; };
+		EA2000000000000000000010 /* LegadoAsyncBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/LegadoCore/LegadoAdapter/LegadoAsyncBridge.swift; sourceTree = SOURCE_ROOT; };
+		EA2000000000000000000011 /* LegadoSourceProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/LegadoCore/LegadoAdapter/LegadoSourceProvider.swift; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -660,6 +664,8 @@
 				DD2000000000000000000003 /* JavaScriptEntityHosts.swift */,
 				DE2000000000000000000001 /* JavaScriptJavaHosts.swift */,
 				DE2000000000000000000002 /* JavaScriptHostInstaller.swift */,
+				EA2000000000000000000010 /* LegadoAsyncBridge.swift */,
+				EA2000000000000000000011 /* LegadoSourceProvider.swift */,
 				EA2000000000000000000009 /* JavaScriptHostEnvironment.swift */,
 				DF2000000000000000000001 /* BookSourceRuntimeStore.swift */,
 				EA2000000000000000000001 /* JavaScriptJsoupHost.swift */,
@@ -1033,6 +1039,8 @@
 				DD1000000000000000000003 /* JavaScriptEntityHosts.swift in Sources */,
 				DE1000000000000000000001 /* JavaScriptJavaHosts.swift in Sources */,
 				DE1000000000000000000002 /* JavaScriptHostInstaller.swift in Sources */,
+				EA1000000000000000000010 /* LegadoAsyncBridge.swift in Sources */,
+				EA1000000000000000000011 /* LegadoSourceProvider.swift in Sources */,
 				EA1000000000000000000009 /* JavaScriptHostEnvironment.swift in Sources */,
 				DF1000000000000000000001 /* BookSourceRuntimeStore.swift in Sources */,
 				EA1000000000000000000001 /* JavaScriptJsoupHost.swift in Sources */,

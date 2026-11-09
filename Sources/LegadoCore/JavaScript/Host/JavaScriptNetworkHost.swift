@@ -64,8 +64,8 @@ struct JavaScriptNetworkHost {
                 let response = try loadAjax(rawURL, [:], timeout)
                 return QuickJSValueConverter.stringValue(response.decodedText, in: ctx)
             } catch {
-                // 与既有行为一致：失败返回错误描述文本，不抛异常。
-                // 书源常把返回值直接喂给 `java.getString`，抛异常会让整条规则链断掉。
+                if propagateFailures { throw error }
+                // Only old application entry points retain their historical text fallback.
                 return QuickJSValueConverter.stringValue(error.localizedDescription, in: ctx)
             }
         }
@@ -117,6 +117,7 @@ struct JavaScriptNetworkHost {
                     "callTime": .number(0)
                 ]), in: ctx)
             } catch {
+                if propagateFailures { throw error }
                 return QuickJSValueConverter.value(from: .object([
                     "url": .string(rawURL),
                     "body": .string(error.localizedDescription),

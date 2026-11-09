@@ -222,6 +222,16 @@ public struct JavaScriptRuleEvaluator: Sendable {
         self.urlBuilder = urlBuilder
     }
 
+    /// Top-level compatibility requests use the same URL/header/body hosts as nested JS calls.
+    public func request(_ url: String, context: RuleExecutionContext) async throws -> HTTPResponse {
+        try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            return try await RuleExecutionWorker.run {
+                try loadJavaScriptRequest(url, extraHeaders: [:], timeoutMilliseconds: nil, executionContext: context)
+            }
+        } onCancel: { context.environment?.control.cancel() }
+    }
+
     public func evaluateAsync(
         script: String,
         result: JSONValue,
@@ -560,6 +570,7 @@ public struct JavaScriptRuleEvaluator: Sendable {
         try executionContext.environment?.control.check()
         let response: HTTPResponse
         let loader = executionContext.environment?.network ?? networkLoader
+        try executionContext.environment?.control.consumeRequest()
         if let redirectLoader = loader as? any JavaScriptRedirectNetworkLoading {
             response = try redirectLoader.load(request, followRedirects: false)
         } else {
@@ -587,12 +598,18 @@ public struct JavaScriptRuleEvaluator: Sendable {
         headers.merge(extraHeaders) { _, extra in extra }
         let base = URL(string: executionContext.baseURL.isEmpty ? source?.bookSourceUrl ?? "" : executionContext.baseURL)
         let prepared = try urlBuilder.prepare(rawURL, context: .init(
+            key: executionContext.key, page: executionContext.page,
             variables: executionContext.variables, source: source, book: executionContext.book,
             chapter: executionContext.chapter, environment: executionContext.environment
         ), baseURL: base, defaultHeaders: headers)
         if prepared.useWebView || prepared.webJavaScript != nil {
             throw RuleEngineError.unsupportedRule(rule: rawURL, feature: "JS 内 WKWebView 请求")
         }
+        if executionContext.environment != nil, prepared.proxy != nil || prepared.dnsIP != nil || prepared.serverID != nil {
+            throw RuleEngineError.unsupportedRule(rule: rawURL, feature: "Source-specific proxy, DNS or server overrides")
+        }
+        var responseContext = executionContext
+        responseContext.variables.merge(prepared.variables) { _, new in new }
         let timeout = timeoutMilliseconds.map { min(max($0 / 1_000, 1), 180) }
             ?? min(max(Double(source?.respondTime ?? 30_000) / 1_000, 5), 180)
         var request = prepared.urlRequest(timeout: timeout,
@@ -611,9 +628,11 @@ public struct JavaScriptRuleEvaluator: Sendable {
         for attempt in 0..<attempts {
             do {
                 try executionContext.environment?.control.check()
+                try executionContext.environment?.control.consumeRequest()
                 var response = try loader.load(request)
                 try executionContext.environment?.control.check()
                 response.requestedCharset = prepared.charset
+                response.requestVariables = responseContext.variables
                 if let cookie = response.headers.first(where: { $0.key.caseInsensitiveCompare("Set-Cookie") == .orderedSame })?.value {
                     try executionContext.hostEnvironment.cookies.setCookie(cookie, for: response.finalURL.absoluteString)
                 }
@@ -627,7 +646,7 @@ public struct JavaScriptRuleEvaluator: Sendable {
                     let transformed = try evaluate(
                         script: bodyScript,
                         result: .string(response.decodedText),
-                        executionContext: executionContext,
+                        executionContext: responseContext,
                         stringifyResult: true,
                         depth: 0
                     )

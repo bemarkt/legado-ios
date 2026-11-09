@@ -23,24 +23,60 @@ extension LegadoCookieStore: JavaScriptCookieState {}
 public final class JavaScriptExecutionControl: @unchecked Sendable {
     private let lock = NSLock()
     private var failure: (any Error)?
+    private var callbacks: [UUID: @Sendable (any Error) -> Void] = [:]
+    private var remainingRequests: Int
+    private let gate: SourceCommitGate?
     public let deadline: ContinuousClock.Instant
 
-    public init(timeout: Duration = .seconds(30)) {
+    public init(timeout: Duration = .seconds(30), maximumRequests: Int = 64, gate: SourceCommitGate? = nil) {
+        remainingRequests = max(0, maximumRequests)
+        self.gate = gate
         deadline = ContinuousClock.now.advanced(by: timeout)
     }
 
     public func check() throws {
-        try lock.withLock {
-            if let failure { throw failure }
+        do {
+            try lock.withLock { if let failure { throw failure } }
             if ContinuousClock.now >= deadline { throw URLError(.timedOut) }
+            try gate?.check()
+        } catch { invalidate(error); throw error }
+    }
+
+    public func consumeRequest() throws {
+        try check()
+        try lock.withLock {
+            guard remainingRequests > 0 else {
+                throw SourceDomainError(.resourceLimit, "Compatibility request budget exceeded")
+            }
+            remainingRequests -= 1
         }
     }
 
     public func cancel() { invalidate(CancellationError()) }
 
     public func invalidate(_ error: any Error) {
-        lock.withLock { if failure == nil { failure = error } }
+        let pending: [@Sendable (any Error) -> Void] = lock.withLock {
+            guard failure == nil else { return [] }
+            failure = error
+            let pending = Array(callbacks.values)
+            callbacks.removeAll()
+            return pending
+        }
+        // Never call back into a task while holding the control lock.
+        for callback in pending { callback(error) }
     }
+
+    func onTermination(_ callback: @escaping @Sendable (any Error) -> Void) -> UUID {
+        let token = UUID()
+        let terminal: (any Error)? = lock.withLock {
+            if let failure { return failure }
+            callbacks[token] = callback
+            return nil
+        }
+        if let terminal { callback(terminal) }
+        return token
+    }
+    func removeObserver(_ token: UUID) { _ = lock.withLock { callbacks.removeValue(forKey: token) } }
 
     public var shouldInterrupt: Bool {
         do { try check(); return false } catch { return true }

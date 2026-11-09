@@ -21,16 +21,32 @@ public struct RuleEngine: Sendable {
         self.javaScript = javaScript
     }
 
+    /// Legacy listMode selects elements. String-list extraction uses the explicit mode overload.
+    public func evaluate(
+        _ rule: String, in input: JSONValue, listMode: Bool = false,
+        context: RuleExecutionContext = .init()
+    ) async -> RuleEvaluation {
+        await evaluate(rule, in: input, mode: listMode ? .elements : .string, context: context)
+    }
+
+    public func evaluate(
+        _ rule: String, inText input: String, baseURL: String = "", listMode: Bool = false,
+        context: RuleExecutionContext = .init()
+    ) async -> RuleEvaluation {
+        await evaluate(rule, inText: input, baseURL: baseURL,
+                       mode: listMode ? .elements : .string, context: context)
+    }
+
     public func evaluate(
         _ rule: String,
         in input: JSONValue,
-        listMode: Bool = false,
+        mode: RuleEvaluationMode,
         context: RuleExecutionContext = .init()
     ) async -> RuleEvaluation {
         var context = context
         if context.content == nil { context.content = input }
         if let pipeline = splitJavaScriptPipeline(rule) {
-            return await evaluatePipeline(pipeline, input: input, listMode: listMode, context: context)
+            return await evaluatePipeline(pipeline, input: input, mode: mode, context: context)
         }
         do {
             let extracted = try extractPutRules(rule)
@@ -47,7 +63,7 @@ public struct RuleEngine: Sendable {
                 if extracted.rule.isEmpty {
                     return .init(values: [input], diagnostics: diagnostics, variables: nextContext.variables)
                 }
-                var result = await evaluate(extracted.rule, in: input, listMode: listMode, context: nextContext)
+                var result = await evaluate(extracted.rule, in: input, mode: mode, context: nextContext)
                 result.diagnostics = diagnostics + result.diagnostics
                 result.variables = nextContext.variables.merging(result.variables) { _, new in new }
                 return result
@@ -57,11 +73,11 @@ public struct RuleEngine: Sendable {
                 return literalEvaluation(rendered.rule, context: rendered.context)
             }
             if rendered.context.variables != context.variables {
-                var result = await evaluatePrepared(rendered.rule, in: input, listMode: listMode, context: rendered.context)
+                var result = await evaluatePrepared(rendered.rule, in: input, mode: mode, context: rendered.context)
                 result.variables = rendered.context.variables.merging(result.variables) { _, new in new }
                 return result
             }
-            return await evaluatePrepared(rendered.rule, in: input, listMode: listMode, context: rendered.context)
+            return await evaluatePrepared(rendered.rule, in: input, mode: mode, context: rendered.context)
         } catch let error as RuleEngineError {
             return .init(diagnostics: [error.diagnostic], variables: context.variables)
         } catch {
@@ -72,7 +88,7 @@ public struct RuleEngine: Sendable {
     private func evaluatePrepared(
         _ rule: String,
         in input: JSONValue,
-        listMode: Bool,
+        mode: RuleEvaluationMode,
         context: RuleExecutionContext
     ) async -> RuleEvaluation {
         do {
@@ -82,7 +98,7 @@ public struct RuleEngine: Sendable {
             for branch in plan.branches {
                 do {
                     var values = try await evaluate(branch, in: input, context: context)
-                    if plan.combination == .fallback, isEmpty(values, listMode: listMode) { values = [] }
+                    if plan.combination == .fallback, isEmpty(values, mode: mode) { values = [] }
                     results.append(values)
                     if plan.combination == .fallback, !values.isEmpty { break }
                 } catch let error as RuleEngineError {
@@ -99,7 +115,7 @@ public struct RuleEngine: Sendable {
                 }
             }
             return .init(
-                values: try applyingReplacement(to: combine(results, with: plan.combination), plan: plan, listMode: listMode),
+                values: try applyingReplacement(to: combine(results, with: plan.combination), plan: plan, mode: mode),
                 diagnostics: diagnostics,
                 variables: context.variables
             )
@@ -123,14 +139,14 @@ public struct RuleEngine: Sendable {
         _ rule: String,
         inText input: String,
         baseURL: String = "",
-        listMode: Bool = false,
+        mode: RuleEvaluationMode,
         context: RuleExecutionContext = .init()
     ) async -> RuleEvaluation {
         var context = context
         if context.baseURL.isEmpty { context.baseURL = baseURL }
         if context.content == nil { context.content = .string(input) }
         if let pipeline = splitJavaScriptPipeline(rule) {
-            return await evaluatePipeline(pipeline, input: .string(input), listMode: listMode, context: context)
+            return await evaluatePipeline(pipeline, input: .string(input), mode: mode, context: context)
         }
         do {
             let extracted = try extractPutRules(rule)
@@ -139,7 +155,7 @@ public struct RuleEngine: Sendable {
                 var diagnostics: [RuleDiagnostic] = []
                 for key in extracted.puts.keys.sorted() {
                     guard let valueRule = extracted.puts[key] else { continue }
-                    let value = await evaluate(valueRule, inText: input, baseURL: baseURL, listMode: false, context: nextContext)
+                    let value = await evaluate(valueRule, inText: input, baseURL: baseURL, mode: .string, context: nextContext)
                     diagnostics += value.diagnostics
                     nextContext.variables.merge(value.variables) { _, new in new }
                     nextContext.variables[key] = value.strings.joined(separator: "\n")
@@ -147,7 +163,7 @@ public struct RuleEngine: Sendable {
                 if extracted.rule.isEmpty {
                     return .init(values: [.string(input)], diagnostics: diagnostics, variables: nextContext.variables)
                 }
-                var result = await evaluate(extracted.rule, inText: input, baseURL: baseURL, listMode: listMode, context: nextContext)
+                var result = await evaluate(extracted.rule, inText: input, baseURL: baseURL, mode: mode, context: nextContext)
                 result.diagnostics = diagnostics + result.diagnostics
                 result.variables = nextContext.variables.merging(result.variables) { _, new in new }
                 return result
@@ -157,11 +173,11 @@ public struct RuleEngine: Sendable {
                 return literalEvaluation(rendered.rule, context: rendered.context)
             }
             if rendered.context.variables != context.variables {
-                var result = await evaluatePrepared(rendered.rule, inText: input, baseURL: baseURL, listMode: listMode, context: rendered.context)
+                var result = await evaluatePrepared(rendered.rule, inText: input, baseURL: baseURL, mode: mode, context: rendered.context)
                 result.variables = rendered.context.variables.merging(result.variables) { _, new in new }
                 return result
             }
-            return await evaluatePrepared(rendered.rule, inText: input, baseURL: baseURL, listMode: listMode, context: rendered.context)
+            return await evaluatePrepared(rendered.rule, inText: input, baseURL: baseURL, mode: mode, context: rendered.context)
         } catch let error as RuleEngineError {
             return .init(diagnostics: [error.diagnostic], variables: context.variables)
         } catch {
@@ -173,13 +189,13 @@ public struct RuleEngine: Sendable {
         _ rule: String,
         inText input: String,
         baseURL: String,
-        listMode: Bool,
+        mode: RuleEvaluationMode,
         context: RuleExecutionContext
     ) async -> RuleEvaluation {
         if let root = try? JSONValue.decode(data: Data(input.utf8)),
            let plan = try? parser.parse(rule, inputLooksLikeJSON: true),
            plan.branches.allSatisfy({ $0.mode == .jsonPath }) {
-            return await evaluatePrepared(rule, in: root, listMode: listMode, context: context)
+            return await evaluatePrepared(rule, in: root, mode: mode, context: context)
         }
         if rule.hasPrefix(":"), rule.count > 1 {
             do {
@@ -213,7 +229,7 @@ public struct RuleEngine: Sendable {
                         branch,
                         input: input,
                         baseURL: baseURL,
-                        listMode: listMode,
+                        mode: mode,
                         context: context
                     )
                     results.append(strings.map(JSONValue.string))
@@ -224,7 +240,7 @@ public struct RuleEngine: Sendable {
                 }
             }
             return .init(
-                values: try applyingReplacement(to: combine(results, with: plan.combination), plan: plan, listMode: listMode),
+                values: try applyingReplacement(to: combine(results, with: plan.combination), plan: plan, mode: mode),
                 diagnostics: diagnostics,
                 variables: context.variables
             )
@@ -276,7 +292,7 @@ public struct RuleEngine: Sendable {
         _ branch: RuleBranch,
         input: String,
         baseURL: String,
-        listMode: Bool,
+        mode: RuleEvaluationMode,
         context: RuleExecutionContext
     ) async throws -> [String] {
         try Task.checkCancellation()
@@ -286,11 +302,11 @@ public struct RuleEngine: Sendable {
         }
         switch branch.mode {
         case .css:
-            raw = try listMode
+            raw = try mode == .elements
                 ? html.selectCSSFragments(branch.expression, html: input, baseURL: baseURL, isFragment: context.isHTMLFragment)
                 : html.extractCSS(branch.expression, html: input, baseURL: baseURL, isFragment: context.isHTMLFragment)
         case .xpath:
-            raw = try listMode
+            raw = try mode == .elements
                 ? html.selectXPathFragments(branch.expression, html: input, isFragment: context.isHTMLFragment)
                 : html.extractXPath(branch.expression, html: input, isFragment: context.isHTMLFragment)
         case .jsonPath:
@@ -317,17 +333,17 @@ public struct RuleEngine: Sendable {
         return raw
     }
 
-    private func isEmpty(_ values: [JSONValue], listMode: Bool) -> Bool {
+    private func isEmpty(_ values: [JSONValue], mode: RuleEvaluationMode) -> Bool {
         let result = RuleEvaluation(values: values)
-        return listMode
+        return mode != .string
             ? result.listItems(rule: "").filter { $0 != .null }.isEmpty
             : result.strings.joined(separator: "\n").isEmpty
     }
 
-    private func applyingReplacement(to values: [JSONValue], plan: RulePlan, listMode: Bool) throws -> [JSONValue] {
+    private func applyingReplacement(to values: [JSONValue], plan: RulePlan, mode: RuleEvaluationMode) throws -> [JSONValue] {
         guard let branch = plan.branches.first, let pattern = branch.replacePattern, !pattern.isEmpty else { return values }
         let strings = RuleEvaluation(values: values).strings
-        let inputs = listMode ? strings : [strings.joined(separator: "\n")]
+        let inputs = mode != .string ? strings : [strings.joined(separator: "\n")]
         return try inputs.map {
             .string(try regex.replacing(pattern: pattern, in: $0, with: branch.replacement, firstOnly: branch.replaceFirst))
         }
@@ -350,7 +366,7 @@ public struct RuleEngine: Sendable {
     private func evaluatePipeline(
         _ pipeline: JavaScriptPipeline,
         input: JSONValue,
-        listMode: Bool,
+        mode: RuleEvaluationMode,
         context: RuleExecutionContext
     ) async -> RuleEvaluation {
         var execution = context
@@ -358,14 +374,14 @@ public struct RuleEngine: Sendable {
         if pipeline.prefix.isEmpty {
             initial = .init(values: [input], variables: context.variables)
         } else {
-            initial = await evaluateValue(pipeline.prefix, input: input, listMode: listMode, context: context)
+            initial = await evaluateValue(pipeline.prefix, input: input, mode: mode, context: context)
         }
         execution.variables = initial.variables
         var diagnostics = initial.diagnostics
         let scriptInput: JSONValue
         if pipeline.prefix.isEmpty {
             scriptInput = input
-        } else if listMode {
+        } else if mode != .string {
             if initial.values.count == 1, case .array = initial.values[0] {
                 scriptInput = initial.values[0]
             } else {
@@ -379,7 +395,7 @@ public struct RuleEngine: Sendable {
             // 列表模式 + CSS 前缀：Legado 的 result 是 Element 数组，书源会直接写
             // `$[i].select('li')` / `.attr('href')` / `.text()`。这里把 HTML 片段提升成
             // org.jsoup 元素对象；脚本只用字符串方法时不注入，原语义不变。
-            let script = listMode && !pipeline.prefix.isEmpty && Self.mentionsElementAPI(rendered.rule)
+            let script = mode == .elements && !pipeline.prefix.isEmpty && Self.mentionsElementAPI(rendered.rule)
                 ? Self.htmlListPrologue + rendered.rule
                 : rendered.rule
             let result = try await javaScript.evaluateAsync(
@@ -390,7 +406,7 @@ public struct RuleEngine: Sendable {
                 return .init(values: result.value == .null ? [] : [result.value], diagnostics: diagnostics, variables: execution.variables)
             }
             execution.isHTMLFragment = false
-            var next = await evaluateValue(pipeline.suffix, input: result.value, listMode: listMode, context: execution)
+            var next = await evaluateValue(pipeline.suffix, input: result.value, mode: mode, context: execution)
             next.diagnostics = diagnostics + next.diagnostics
             return next
         } catch let error as RuleEngineError {
@@ -401,11 +417,11 @@ public struct RuleEngine: Sendable {
         return .init(diagnostics: diagnostics, variables: execution.variables)
     }
 
-    private func evaluateValue(_ rule: String, input: JSONValue, listMode: Bool, context: RuleExecutionContext) async -> RuleEvaluation {
+    private func evaluateValue(_ rule: String, input: JSONValue, mode: RuleEvaluationMode, context: RuleExecutionContext) async -> RuleEvaluation {
         if case .string(let text) = input {
-            return await evaluate(rule, inText: text, baseURL: context.baseURL, listMode: listMode, context: context)
+            return await evaluate(rule, inText: text, baseURL: context.baseURL, mode: mode, context: context)
         }
-        return await evaluate(rule, in: input, listMode: listMode, context: context)
+        return await evaluate(rule, in: input, mode: mode, context: context)
     }
 
     private func splitJavaScriptPipeline(_ rule: String) -> JavaScriptPipeline? {
@@ -494,7 +510,7 @@ public struct RuleEngine: Sendable {
                 let expression = String(source[scriptRange]).trimmingCharacters(in: .whitespacesAndNewlines)
                 if expression.hasPrefix("@") || expression.hasPrefix("$.") || expression.hasPrefix("$[") || expression.hasPrefix("//") {
                     captureLiteral = true
-                    let nested = await evaluateValue(expression, input: context.content ?? result, listMode: false, context: nextContext)
+                    let nested = await evaluateValue(expression, input: context.content ?? result, mode: .string, context: nextContext)
                     if let error = nested.diagnostics.first(where: { $0.severity == .error }) {
                         throw RuleEngineError.malformedRule(rule: expression, detail: error.message)
                     }

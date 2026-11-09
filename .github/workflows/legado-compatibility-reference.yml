@@ -43,7 +43,7 @@ jobs:
         run: |
           set -o pipefail
           chmod +x build/android-reference/checkout/gradlew
-          build/android-reference/checkout/gradlew -p build/android-reference/checkout :app:assembleAppDebug :app:assembleAppDebugAndroidTest --no-daemon --max-workers=2 -Dorg.gradle.jvmargs="-Xmx4g -Dfile.encoding=UTF-8" 2>&1 | tee build/legado-compatibility/android-build.log
+          build/android-reference/checkout/gradlew -p build/android-reference/checkout -I "$GITHUB_WORKSPACE/tools/legado-compatibility/android/reference.init.gradle" :app:assembleAppDebug :app:assembleAppDebugAndroidTest --no-daemon --max-workers=2 -Dorg.gradle.jvmargs="-Xmx4g -Dfile.encoding=UTF-8" 2>&1 | tee build/legado-compatibility/android-build.log
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules

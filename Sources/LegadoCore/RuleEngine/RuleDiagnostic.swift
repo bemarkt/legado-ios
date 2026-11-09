@@ -62,6 +62,15 @@ public enum RuleEngineError: Error, Equatable, LocalizedError, Sendable {
     }
 }
 
+/// Mirrors the distinction between scalar extraction, string lists and element selection.
+/// Replacements and JavaScript receive a list in either list mode, but only elements
+/// promote selected HTML fragments into the legacy element bridge.
+public enum RuleEvaluationMode: Sendable, Equatable {
+    case string
+    case stringList
+    case elements
+}
+
 public struct RuleEvaluation: Sendable {
     public var values: [JSONValue]
     public var diagnostics: [RuleDiagnostic]

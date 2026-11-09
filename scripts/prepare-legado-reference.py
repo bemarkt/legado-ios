@@ -39,6 +39,9 @@ def main():
         if target.exists() and target.read_bytes() != data:
             raise ValueError('Different overlay already exists: ' + relative)
         planned.append((source, relative, target, data))
+    init_data = (root / 'tools/legado-compatibility/android/reference.init.gradle').read_bytes()
+    report['buildOverlay'] = {'minSdk': 26, 'sourceAlgorithms': 'unchanged',
+                              'initSHA256': hashlib.sha256(init_data).hexdigest()}
     report['overlay'] = []
     for source, relative, target, data in planned:
         target.parent.mkdir(parents=True, exist_ok=True)

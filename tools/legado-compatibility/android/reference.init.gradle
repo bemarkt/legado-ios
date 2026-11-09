@@ -1,0 +1,12 @@
+// Test-build overlay only. The pinned debug Rhino JAR requires Android O for
+// MethodHandle.invoke; the reference is measured on an API 35 emulator.
+// Source algorithms, dependencies, target SDK and compile SDK remain untouched.
+gradle.beforeProject { project ->
+    ['com.android.application', 'com.android.library'].each { plugin ->
+        project.pluginManager.withPlugin(plugin) {
+            project.extensions.getByName('androidComponents').finalizeDsl { android ->
+                android.defaultConfig.minSdk = 26
+            }
+        }
+    }
+}

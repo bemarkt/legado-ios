@@ -12,6 +12,40 @@ struct RuleEngineTests {
 
     private let engine = RuleEngine()
 
+    @Test func explicitStringListsExtractAttributesWithoutSelectingFragments() async {
+        let input = "<ul><li><a href='/a'>甲</a></li><li><a href='/b'>乙</a></li></ul>"
+        let css = await engine.evaluate("@css:li a@href", inText: input, mode: .stringList)
+        let xpath = await engine.evaluate("@XPath://a/@href", inText: input, mode: .stringList)
+        #expect(css.diagnostics.isEmpty)
+        #expect(xpath.diagnostics.isEmpty)
+        #expect(css.strings == ["/a", "/b"])
+        #expect(xpath.strings == ["/a", "/b"])
+        let elements = await engine.evaluate("@css:li a", inText: input, mode: .elements)
+        let legacy = await engine.evaluate("@css:li a", inText: input, listMode: true)
+        #expect(elements.strings == legacy.strings)
+        #expect(elements.strings.count == 2)
+        #expect(elements.strings.allSatisfy { $0.contains("<a href=") })
+    }
+
+    @Test func stringListReplacementsRunPerItemAndKeepFallbackOrder() async {
+        let result = await engine.evaluate("@css:p@text##^第##", inText: "<p>第一</p><p>第二</p>", mode: .stringList)
+        #expect(result.diagnostics.isEmpty)
+        #expect(result.strings == ["一", "二"])
+        let fallback = await engine.evaluate("@css:.missing@text||@css:p@text", inText: "<p>甲</p><p>乙</p>", mode: .stringList)
+        #expect(fallback.diagnostics.isEmpty)
+        #expect(fallback.strings == ["甲", "乙"])
+    }
+
+    @Test func stringListJavaScriptReceivesExtractedStrings() async {
+        let result = await engine.evaluate(
+            "@css:a@href<js>result.map(function (value) { return value.toUpperCase(); }).reverse()</js>",
+            inText: "<a href='/a'>甲</a><a href='/b'>乙</a>", mode: .stringList
+        )
+        #expect(result.diagnostics.isEmpty)
+        #expect(result.strings == ["/B", "/A"])
+    }
+
+
     @Test func javaScriptStagesContinueIntoSelectorsAndReplacementOnlyRules() async {
         let result = await engine.evaluate(
             "<js>result.replace('旧', '新')</js>class.body@text<js>result + ' 广告'</js>## 广告",

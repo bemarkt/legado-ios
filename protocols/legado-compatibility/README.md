@@ -43,8 +43,14 @@
 
 ## 第一轮离线探针
 
-`corpus.json` 是本项目构造的 28 项规则样本，没有私有站点或真实正文。Android 通过 `prepare-legado-reference.py` 只添加一个 instrumentation 测试类和一个 asset，不修改参考实现；在 Android 35 x86_64 模拟器运行固定提交的 AnalyzeRule。SwiftPM 的 `LegadoDifferentialProbe` 调用现有 RuleEngine/QuickJS，每项新建上下文并禁止 JS HTTP。它不加入 iOS App，也不代表新 provider 已接入。
+`corpus.json` 是本项目构造的 28 项规则样本，没有私有站点或真实正文。Android 通过 `prepare-legado-reference.py` 只添加一个 instrumentation 测试类和一个 asset，不修改参考算法；在 Android 35 x86_64 模拟器运行固定提交的 AnalyzeRule。该提交的 debug 构建在 minSdk 23 下因 Rhino MethodHandle 字节码失败；仓库自有 Gradle init overlay 仅将测试构建 minSdk 提到 26，保留 compile/target SDK、依赖和算法字节。报告记录 overlay 摘要，因此这是特定测试构建的结果，不声称与上游 Release APK 完全一致。SwiftPM 的 `LegadoDifferentialProbe` 调用现有 RuleEngine/QuickJS，每项新建上下文并禁止 JS HTTP。它不加入 iOS App，也不代表新 provider 已接入。
 
 手动运行 `Legado Compatibility Reference` 工作流。每个报告保留 corpus SHA-256、参考提交、环境、逐项输出数组、所观察变量和原始错误类别。比较器拒绝错版本、错摘要、缺失/重复样本、错误类型和空执行；独立的 `1 + 2 = 3` 哨兵避免把空结果当作成功。两端都失败的正常样本仍是 unexpected-outcome；两端均抛错只记 error-outcome-only，不能证明异常语义等价。输出顺序、空字符串、换行和变量值不做宽松归一化。
 
 首轮为 discovery：工作流成功仅表示采集、证据校验与比较完成，差异完整写入 comparison.json；不是“兼容通过”。`compare-legado-reference.py --strict` 会对差异、意外结果和需复核的诊断返回失败。待确认每项原因与可支持边界后，再建立要求严格等价的 profile。网络请求、账号、取消、分页、重启引用和完整书源链路不在这 28 项的结论内。
+
+### 首轮发现与修复记录
+
+- 955fe4d / 42543312680：Swift 探针运行成功；Android 因 setup-android 默认请求已不可用的 tools 包而失败，未执行规则。改为显式 platform-tools。
+- 2ca12ca / 42546394582：Android 引用校验与 SDK 准备通过；debug dex 编译因 MethodHandle 需要 minSdk 26 失败。测试构建改用显式 init overlay，不改上游源码，待重新运行。
+- 审查 Swift 结果发现原有 listMode 表示元素提取，不能用于模拟 getStringList。新增明确的 string/stringList/elements 模式，并保留旧 Bool 入口；探针使用 stringList。首次 CSS/XPath 列表输出不是有效差分基准，需要在修复后重采。

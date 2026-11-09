@@ -65,7 +65,7 @@ struct LegadoDifferentialProbe {
             let engine = RuleEngine(javaScript: JavaScriptRuleEvaluator(networkLoader: OfflineNetworkLoader()))
             let result = await engine.evaluate(
                 fixture.rule, inText: fixture.input, baseURL: fixture.baseURL,
-                listMode: fixture.mode == "list",
+                mode: fixture.mode == "list" ? .stringList : .string,
                 context: .init(variables: fixture.variables, baseURL: fixture.baseURL)
             )
             let failures = result.diagnostics.filter { $0.severity == .error }

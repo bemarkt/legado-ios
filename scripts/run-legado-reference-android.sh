@@ -16,6 +16,7 @@ collect_evidence() {
 }
 trap collect_evidence EXIT
 build/android-reference/checkout/gradlew -p build/android-reference/checkout \
+  -I "$GITHUB_WORKSPACE/tools/legado-compatibility/android/reference.init.gradle" \
   :app:connectedAppDebugAndroidTest \
   -Pandroid.testInstrumentationRunnerArguments.class=io.legado.app.compatibility.LegadoDifferentialTest \
   --no-daemon --max-workers=2 -Dorg.gradle.jvmargs="-Xmx4g -Dfile.encoding=UTF-8" \

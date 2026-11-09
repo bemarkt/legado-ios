@@ -13,3 +13,6 @@
 
 /Sources/LegadoCore/SourceDomain/** text eol=lf
 /Tests/LegadoCoreTests/Fixtures/SourceProtocol/** text eol=lf
+
+/tools/source-recovery/** text eol=lf
+/scripts/verify-source-process-recovery.py text eol=lf

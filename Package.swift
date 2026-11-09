@@ -10,7 +10,8 @@ let package = Package(
         .macOS(.v14)
     ],
     products: [
-        .library(name: "LegadoCore", targets: ["LegadoCore"])
+        .library(name: "LegadoCore", targets: ["LegadoCore"]),
+        .executable(name: "SourceRecoveryProbe", targets: ["SourceRecoveryProbe"])
     ],
     dependencies: [
         .package(url: "https://github.com/scinfu/SwiftSoup.git", exact: "2.13.5"),
@@ -19,6 +20,7 @@ let package = Package(
         .package(path: "Vendor/QuickJS")
     ],
     targets: [
+        .executableTarget(name: "SourceRecoveryProbe", dependencies: ["LegadoCore"], path: "tools/source-recovery"),
         .target(
             name: "LegadoCore",
             dependencies: [

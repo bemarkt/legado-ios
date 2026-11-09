@@ -12,8 +12,8 @@ struct SourceCookieScopeTests {
     @Test func browserCaptureKeepsParentDomainAndHostCookiesWithTheSameName() async throws {
         let parent = try #require(HTTPCookie(properties: [.name: "sid", .value: "parent", .domain: ".books.example", .path: "/", .secure: "TRUE"]))
         let host = try #require(HTTPCookie(properties: [.name: "sid", .value: "host", .domain: "www.books.example", .path: "/", .secure: "TRUE"]))
-        let a = try #require(SourceCredentialCookie.capture(parent, origin: web))
-        let b = try #require(SourceCredentialCookie.capture(host, origin: web))
+        let a = try #require(try SourceCredentialCookie.capture(parent, origin: web))
+        let b = try #require(try SourceCredentialCookie.capture(host, origin: web))
         #expect(a.key != b.key)
         #expect(a.domain == "books.example")
         #expect(b.domain == nil)
@@ -26,7 +26,7 @@ struct SourceCookieScopeTests {
         #expect(before.contains("sid=parent")); #expect(before.contains("sid=host"))
         // A host-only Set-Cookie deletion must not remove its parent-domain sibling.
         let deletion = try #require(HTTPCookie.cookies(withResponseHeaderFields: ["Set-Cookie": "sid=; Max-Age=0; Path=/"], for: URL(string: web)!).first)
-        try await session.receive([try #require(SourceCredentialCookie.capture(deletion, origin: web))])
+        try await session.receive([try #require(try SourceCredentialCookie.capture(deletion, origin: web))])
         #expect(try await session.headers(for: URL(string: web)!)["Cookie"] == "sid=parent")
     }
 

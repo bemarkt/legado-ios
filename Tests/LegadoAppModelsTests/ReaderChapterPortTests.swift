@@ -137,7 +137,7 @@ struct ReaderChapterPortTests {
         await reader.load(rules: [])
         await reader.prepareContinuousReading(rules: [])
         reader.updateContinuousPosition(chapter: 2)
-        #expect(reader.currentChapterError == "本章没有离线副本。")
+        #expect(reader.currentChapterError == SourceDomainError(.notDownloaded, "本章没有离线副本。").localizedDescription)
         await access.recover()
         await reader.retryContinuousChapter(index: 2, rules: [])
         #expect(reader.currentChapterError == nil)

@@ -16,3 +16,11 @@
 
 /tools/source-recovery/** text eol=lf
 /scripts/verify-source-process-recovery.py text eol=lf
+
+# Compatibility corpus and runtime observations are matched by exact bytes.
+/protocols/legado-compatibility/** text eol=lf
+/tools/legado-compatibility/** text eol=lf
+/scripts/*legado-reference* text eol=lf
+/scripts/run-legado-reference-android.sh text eol=lf
+/scripts/tests/test_legado_comparison.py text eol=lf
+/.github/workflows/legado-compatibility-reference.yml text eol=lf

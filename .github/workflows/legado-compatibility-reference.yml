@@ -1,0 +1,121 @@
+name: Legado Compatibility Reference
+
+# A deliberate milestone measurement. No per-push Android/emulator build.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: legado-compatibility-reference-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check out fixed Android implementation
+        uses: actions/checkout@v4
+        with:
+          repository: LegadoTeam/legado
+          ref: a7d37f1707a70a459ad708f4fe79341d1e42d716
+          path: build/android-reference/checkout
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Validate pinned bytes and add isolated instrumentation
+        run: |
+          python3 -m unittest discover -s scripts/tests -p 'test_legado_comparison.py'
+          python3 scripts/prepare-legado-reference.py build/android-reference/checkout --output build/legado-compatibility/reference.json
+          java -version
+          sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Build reference app and tests
+        run: |
+          set -o pipefail
+          chmod +x build/android-reference/checkout/gradlew
+          build/android-reference/checkout/gradlew -p build/android-reference/checkout :app:assembleAppDebug :app:assembleAppDebugAndroidTest --no-daemon --max-workers=2 -Dorg.gradle.jvmargs="-Xmx4g -Dfile.encoding=UTF-8" 2>&1 | tee build/legado-compatibility/android-build.log
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Execute the actual Android rule engine
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          script: bash scripts/run-legado-reference-android.sh
+      - name: Verify reference production files remained unchanged
+        if: always()
+        run: |
+          python3 scripts/verify-legado-reference.py build/android-reference/checkout --output build/legado-compatibility/reference-after.json
+          git -C build/android-reference/checkout diff --exit-code HEAD --
+      - name: Upload Android observations and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Legado-Android-Reference
+          path: |
+            build/legado-compatibility/
+            build/android-reference/checkout/app/build/reports/androidTests/
+            build/android-reference/checkout/app/build/outputs/androidTest-results/
+          retention-days: 14
+
+  swift:
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/cache@v4
+        with:
+          path: .build
+          key: ${{ runner.os }}-spm-${{ hashFiles('Package.resolved') }}
+          restore-keys: ${{ runner.os }}-spm-
+      - name: Run the existing native rule engine with the same offline corpus
+        run: |
+          set -o pipefail
+          mkdir -p build/legado-compatibility
+          swift --version
+          swift run LegadoDifferentialProbe protocols/legado-compatibility/corpus.json build/legado-compatibility/swift.json 2>&1 | tee build/legado-compatibility/swift.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Legado-Swift-Reference
+          path: build/legado-compatibility/
+          retention-days: 14
+
+  compare:
+    needs: [android, swift]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: Legado-Android-Reference
+          path: build/observations/android
+      - uses: actions/download-artifact@v4
+        with:
+          name: Legado-Swift-Reference
+          path: build/observations/swift
+      - name: Record differences without claiming provider compatibility
+        run: |
+          python3 scripts/compare-legado-reference.py protocols/legado-compatibility/corpus.json build/observations/android/legado-compatibility/android.json build/observations/swift/swift.json --output build/legado-compatibility/comparison.json
+          python3 -c "import json,os; p=json.load(open('build/legado-compatibility/comparison.json')); open(os.environ['GITHUB_STEP_SUMMARY'],'a').write('Offline discovery counts: '+json.dumps(p['counts'])+'\n\nIndependent provider compatibility: **not evaluated**.\n')"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Legado-Compatibility-Comparison
+          path: build/legado-compatibility/comparison.json
+          retention-days: 14

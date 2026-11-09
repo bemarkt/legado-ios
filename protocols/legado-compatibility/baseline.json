@@ -1,0 +1,131 @@
+{
+  "schemaVersion": 1,
+  "selectedAt": "2026-11-09",
+  "reference": {
+    "repository": "https://github.com/LegadoTeam/legado",
+    "tag": "3.26101819",
+    "commit": "a7d37f1707a70a459ad708f4fe79341d1e42d716",
+    "commitDate": "2026-10-18T07:55:48Z",
+    "releasePublishedAt": "2026-10-18T11:11:35Z",
+    "license": "GPL-3.0",
+    "selection": "Fixed non-prerelease compatibility reference; not a claim of equivalence with every historical gedoor/legado version"
+  },
+  "files": [
+    {
+      "path": "LICENSE",
+      "bytes": 35139,
+      "sha256": "35d3f26265f7c262a524602f72efda71f69d390086d6d0b74c70c8b07251227c"
+    },
+    {
+      "path": "build.gradle",
+      "bytes": 1355,
+      "sha256": "eb6cb4d500ec1d9dcebc69be576242d1307532b0e449638cbbeb5e19f05539e9"
+    },
+    {
+      "path": "app/build.gradle",
+      "bytes": 12470,
+      "sha256": "49b1f81aceea0d2a645bc178659c031254167ef7eccf625baad116d6c14a7e60"
+    },
+    {
+      "path": "gradle/wrapper/gradle-wrapper.properties",
+      "bytes": 233,
+      "sha256": "4902d2f43be5faf601a687c1a216e35dc0eb86f010347618edfeee05d1e7a40d"
+    },
+    {
+      "path": "app/src/main/java/io/legado/app/model/analyzeRule/AnalyzeRule.kt",
+      "bytes": 38127,
+      "sha256": "5441d6d00064059519add3e5a81d85b1776f575bd0e5d30f3b5763d90af9e8a9"
+    },
+    {
+      "path": "app/src/main/java/io/legado/app/model/analyzeRule/AnalyzeUrl.kt",
+      "bytes": 35401,
+      "sha256": "f7ba074137c8e3a847dc7bbf9465c7fd9318646c5670c144300e7959fb931a9b"
+    },
+    {
+      "path": "app/src/main/java/io/legado/app/help/JsExtensions.kt",
+      "bytes": 45719,
+      "sha256": "b587bd35e58898a0197abedb352a2acbe8c1a3c5c24573d77d2b7a98b6d7be6c"
+    },
+    {
+      "path": "app/src/main/java/io/legado/app/data/entities/BookSource.kt",
+      "bytes": 11979,
+      "sha256": "6f2e9b400f2417dc17e19969c386607097bc00c2dbde3e03ba8cad23811c8a3d"
+    },
+    {
+      "path": "app/src/androidTest/java/io/legado/app/model/webBook/SourceContentCompatibilityTest.kt",
+      "bytes": 4053,
+      "sha256": "de739d7d4ee89af57f946853b3b6f6b56939a9ead1419ea43abbd1d31361cb9c"
+    },
+    {
+      "path": "gradle/libs.versions.toml",
+      "bytes": 12512,
+      "sha256": "23e466b4a691ebd2503b27f940cb5407d053b4ff85b30e0441afec39239ebe2e"
+    },
+    {
+      "path": "gradle.properties",
+      "bytes": 2794,
+      "sha256": "8163c7d6ff7bcef4e1697a49992e0ba5031cedaf1f676c1f4c1e78a662d11736"
+    },
+    {
+      "path": "settings.gradle",
+      "bytes": 2364,
+      "sha256": "fe100ace32579099bfc08337fb36d16d4285ded7a51d874a9f67d6235dd1a096"
+    },
+    {
+      "path": "modules/rhino/build.gradle",
+      "bytes": 1150,
+      "sha256": "66141c1fe5c7cf87146f4b8ebeae03c612b5e6d653bb4faf78e934d18be68b91"
+    },
+    {
+      "path": "app/src/main/java/io/legado/app/model/webBook/BookContent.kt",
+      "bytes": 14702,
+      "sha256": "b1a685ca969174ecc83886cde3a37ba7155f828ccbfe7507d87d02fb53c8dc07"
+    }
+  ],
+  "releaseArtifacts": [
+    {
+      "name": "legado_app_3.26101819_release.apk",
+      "bytes": 21846149,
+      "sha256": "1ad8da49d82e979e49eb19d1b32b46a1c3c10dead93ee16890f3f9422808a52e",
+      "url": "https://github.com/LegadoTeam/legado/releases/download/3.26101819/legado_app_3.26101819_release.apk"
+    },
+    {
+      "name": "legado_app_3.26101819_releaseA.apk",
+      "bytes": 21846149,
+      "sha256": "012fd3f6b5cdbc57dc4cb93348620b3a488f15462bc0c99387e4cb0b91e83672",
+      "url": "https://github.com/LegadoTeam/legado/releases/download/3.26101819/legado_app_3.26101819_releaseA.apk"
+    },
+    {
+      "name": "legado_app_3.26101819_universal_release.apk",
+      "bytes": 27796964,
+      "sha256": "ccbf4871ceecd7c31023ea7ed7201ca1623509c07fc287ab2f1afc3e7e09eb8e",
+      "url": "https://github.com/LegadoTeam/legado/releases/download/3.26101819/legado_app_3.26101819_universal_release.apk"
+    },
+    {
+      "name": "legado_app_3.26101819_universal_releaseA.apk",
+      "bytes": 27796967,
+      "sha256": "04f441436c0f5921561886cc530aeafe84e3dcc611f4daacb002b70897acd565",
+      "url": "https://github.com/LegadoTeam/legado/releases/download/3.26101819/legado_app_3.26101819_universal_releaseA.apk"
+    }
+  ],
+  "verification": {
+    "referenceBytes": "verified",
+    "androidExecution": "not-run",
+    "iosAdapter": "not-implemented",
+    "differential": "not-run",
+    "checkout": "verified locally at pinned commit"
+  },
+  "observations": [
+    {
+      "repository": "https://github.com/gedoor/legado",
+      "date": "2026-11-09",
+      "releases": 0,
+      "tags": 0,
+      "rootContents": [
+        "README.md",
+        "公告链接.png"
+      ],
+      "effect": "Do not depend on a moving branch of this repository for the Android compatibility baseline."
+    }
+  ]
+}

@@ -1,0 +1,328 @@
+{
+  "schemaVersion": 1,
+  "referenceCommit": "a7d37f1707a70a459ad708f4fe79341d1e42d716",
+  "scope": "Offline rule semantics only; no network, app provider, account, cancellation or whole-source compatibility claim",
+  "cases": [
+    {
+      "id": "css-text",
+      "family": "html",
+      "rule": "@css:h1@text",
+      "input": "<html><body><h1 class=\"title\">山海 &amp; 星河</h1><ul><li><a href=\"/book/a\">甲书</a></li><li><a href=\"/book/b\">乙书</a></li></ul><div class=\"body\">第一段<br>第二段</div></body></html>",
+      "mode": "string",
+      "baseURL": "https://fixture.invalid/books/",
+      "variables": {},
+      "inspectVariables": [],
+      "expectedOutcome": "success"
+    },
+    {
+      "id": "css-list-attributes",
+      "family": "html",
+      "rule": "@css:li a@href",
+      "input": "<html><body><h1 class=\"title\">山海 &amp; 星河</h1><ul><li><a href=\"/book/a\">甲书</a></li><li><a href=\"/book/b\">乙书</a></li></ul><div class=\"body\">第一段<br>第二段</div></body></html>",
+      "mode": "list",
+      "baseURL": "https://fixture.invalid/books/",
+      "variables": {},
+      "inspectVariables": [],
+      "expectedOutcome": "success"
+    },
+    {
+      "id": "default-class",
+      "family": "html",
+      "rule": "class.title@text",
+      "input": "<html><body><h1 class=\"title\">山海 &amp; 星河</h1><ul><li><a href=\"/book/a\">甲书</a></li><li><a href=\"/book/b\">乙书</a></li></ul><div class=\"body\">第一段<br>第二段</div></body></html>",
+      "mode": "string",
+      "baseURL": "https://fixture.invalid/books/",
+      "variables": {},
+      "inspectVariables": [],
+      "expectedOutcome": "success"
+    },
+    {
+      "id": "html-multiline-text",
+      "family": "html",
+      "rule": "class.body@text",
+      "input": "<html><body><h1 class=\"title\">山海 &amp; 星河</h1><ul><li><a href=\"/book/a\">甲书</a></li><li><a href=\"/book/b\">乙书</a></li></ul><div class=\"body\">第一段<br>第二段</div></body></html>",
+      "mode": "string",
+      "baseURL": "https://fixture.invalid/books/",
+      "variables": {},
+      "inspectVariables": [],
+      "expectedOutcome": "success"
+    },
+    {
+      "id": "xpath-text",
+      "family": "xpath",
+      "rule": "@XPath://h1/text()",
+      "input": "<html><body><h1 class=\"title\">山海 &amp; 星河</h1><ul><li><a href=\"/book/a\">甲书</a></li><li><a href=\"/book/b\">乙书</a></li></ul><div class=\"body\">第一段<br>第二段</div></body></html>",
+      "mode": "string",
+      "baseURL": "https://fixture.invalid/books/",
+      "variables": {},
+      "inspectVariables": [],
+      "expectedOutcome": "success"
+    },
+    {
+      "id": "xpath-attributes",
+      "family": "xpath",
+      "rule": "@XPath://a/@href",
+      "input": "<html><body><h1 class=\"title\">山海 &amp; 星河</h1><ul><li><a href=\"/book/a\">甲书</a></li><li><a href=\"/book/b\">乙书</a></li></ul><div class=\"body\">第一段<br>第二段</div></body></html>",
+      "mode": "list",
+      "baseURL": "https://fixture.invalid/books/",
+      "variables": {},
+      "inspectVariables": [],
+      "expectedOutcome": "success"
+    },
+    {
+      "id": "json-string",
+      "family": "json",
+      "rule": "$.title",
+      "input": "{\"title\":\"第12章 山海\",\"a\":[\"甲\",\"乙\"],\"b\":[\"一\",\"二\",\"三\"],\"books\":[{\"name\":\"山海\",\"id\":1},{\"name\":\"星河\",\"id\":2}],\"empty\":\"\",\"selector\":\"title\"}",
+      "mode": "string",
+      "baseURL": "https://fixture.invalid/books/",
+      "variables": {},
+      "inspectVariables": [],
+      "expectedOutcome": "success"
+    },
+    {
+      "id": "json-list",
+      "family": "json",
+      "rule": "$.books[*].name",
+      "input": "{\"title\":\"第12章 山海\",\"a\":[\"甲\",\"乙\"],\"b\":[\"一\",\"二\",\"三\"],\"books\":[{\"name\":\"山海\",\"id\":1},{\"name\":\"星河\",\"id\":2}],\"empty\":\"\",\"selector\":\"title\"}",
+      "mode": "list",
+      "baseURL": "https://fixture.invalid/books/",
+      "variables": {},
+      "inspectVariables": [],
+      "expectedOutcome": "success"
+    },
+    {
+      "id": "json-index",
+      "family": "json",
+      "rule": "$.books[1].name",
+      "input": "{\"title\":\"第12章 山海\",\"a\":[\"甲\",\"乙\"],\"b\":[\"一\",\"二\",\"三\"],\"books\":[{\"name\":\"山海\",\"id\":1},{\"name\":\"星河\",\"id\":2}],\"empty\":\"\",\"selector\":\"title\"}",
+      "mode": "string",
+      "baseURL": "https://fixture.invalid/books/",
+      "variables": {},
+      "inspectVariables": [],
+      "expectedOutcome": "success"
+    },
+    {
+      "id": "json-empty",
+      "family": "json",
+      "rule": "$.empty",
+      "input": "{\"title\":\"第12章 山海\",\"a\":[\"甲\",\"乙\"],\"b\":[\"一\",\"二\",\"三\"],\"books\":[{\"name\":\"山海\",\"id\":1},{\"name\":\"星河\",\"id\":2}],\"empty\":\"\",\"selector\":\"title\"}",
+      "mode": "string",
+      "baseURL": "https://fixture.invalid/books/",
+      "variables": {},
+      "inspectVariables": [],
+      "expectedOutcome": "success"
+    },
+    {
+      "id": "json-missing",
+      "family": "json",
+      "rule": "$.missing",
+      "input": "{\"title\":\"第12章 山海\",\"a\":[\"甲\",\"乙\"],\"b\":[\"一\",\"二\",\"三\"],\"books\":[{\"name\":\"山海\",\"id\":1},{\"name\":\"星河\",\"id\":2}],\"empty\":\"\",\"selector\":\"title\"}",
+      "mode": "string",
+      "baseURL": "https://fixture.invalid/books/",
+      "variables": {},
+      "inspectVariables": [],
+      "expectedOutcome": "success"
+    },
+    {
+      "id": "fallback",
+      "family": "composition",
+      "rule": "$.missing||$.title",
+      "input": "{\"title\":\"第12章 山海\",\"a\":[\"甲\",\"乙\"],\"b\":[\"一\",\"二\",\"三\"],\"books\":[{\"name\":\"山海\",\"id\":1},{\"name\":\"星河\",\"id\":2}],\"empty\":\"\",\"selector\":\"title\"}",
+      "mode": "string",
+      "baseURL": "https://fixture.invalid/books/",
+      "variables": {},
+      "inspectVariables": [],
+      "expectedOutcome": "success"
+    },
+    {
+      "id": "concatenate",
+      "family": "composition",
+      "rule": "$.books[0].name&&$.books[1].name",
+      "input": "{\"title\":\"第12章 山海\",\"a\":[\"甲\",\"乙\"],\"b\":[\"一\",\"二\",\"三\"],\"books\":[{\"name\":\"山海\",\"id\":1},{\"name\":\"星河\",\"id\":2}],\"empty\":\"\",\"selector\":\"title\"}",
+      "mode": "list",
+      "baseURL": "https://fixture.invalid/books/",
+      "variables": {},
+      "inspectVariables": [],
+      "expectedOutcome": "success"
+    },
+    {
+      "id": "zip-uneven",
+      "family": "composition",
+      "rule": "$.a[*]%%$.b[*]",
+      "input": "{\"title\":\"第12章 山海\",\"a\":[\"甲\",\"乙\"],\"b\":[\"一\",\"二\",\"三\"],\"books\":[{\"name\":\"山海\",\"id\":1},{\"name\":\"星河\",\"id\":2}],\"empty\":\"\",\"selector\":\"title\"}",
+      "mode": "list",
+      "baseURL": "https://fixture.invalid/books/",
+      "variables": {},
+      "inspectVariables": [],
+      "expectedOutcome": "success"
+    },
+    {
+      "id": "regex-replace",
+      "family": "replacement",
+      "rule": "$.title##^第\\d+章\\s*##",
+      "input": "{\"title\":\"第12章 山海\",\"a\":[\"甲\",\"乙\"],\"b\":[\"一\",\"二\",\"三\"],\"books\":[{\"name\":\"山海\",\"id\":1},{\"name\":\"星河\",\"id\":2}],\"empty\":\"\",\"selector\":\"title\"}",
+      "mode": "string",
+      "baseURL": "https://fixture.invalid/books/",
+      "variables": {},
+      "inspectVariables": [],
+      "expectedOutcome": "success"
+    },
+    {
+      "id": "regex-captures",
+      "family": "replacement",
+      "rule": "$.title##(山)(海)##$2$1",
+      "input": "{\"title\":\"第12章 山海\",\"a\":[\"甲\",\"乙\"],\"b\":[\"一\",\"二\",\"三\"],\"books\":[{\"name\":\"山海\",\"id\":1},{\"name\":\"星河\",\"id\":2}],\"empty\":\"\",\"selector\":\"title\"}",
+      "mode": "string",
+      "baseURL": "https://fixture.invalid/books/",
+      "variables": {},
+      "inspectVariables": [],
+      "expectedOutcome": "success"
+    },
+    {
+      "id": "variable-read",
+      "family": "variables",
+      "rule": "@get:{token}",
+      "input": "<html><body><h1 class=\"title\">山海 &amp; 星河</h1><ul><li><a href=\"/book/a\">甲书</a></li><li><a href=\"/book/b\">乙书</a></li></ul><div class=\"body\">第一段<br>第二段</div></body></html>",
+      "mode": "string",
+      "baseURL": "https://fixture.invalid/books/",
+      "variables": {
+        "token": "synthetic-token"
+      },
+      "inspectVariables": [
+        "token"
+      ],
+      "expectedOutcome": "success"
+    },
+    {
+      "id": "variable-put",
+      "family": "variables",
+      "rule": "@put:{\"saved\":\"$.title\"}$.title",
+      "input": "{\"title\":\"第12章 山海\",\"a\":[\"甲\",\"乙\"],\"b\":[\"一\",\"二\",\"三\"],\"books\":[{\"name\":\"山海\",\"id\":1},{\"name\":\"星河\",\"id\":2}],\"empty\":\"\",\"selector\":\"title\"}",
+      "mode": "string",
+      "baseURL": "https://fixture.invalid/books/",
+      "variables": {},
+      "inspectVariables": [
+        "saved"
+      ],
+      "expectedOutcome": "success"
+    },
+    {
+      "id": "js-arithmetic",
+      "family": "javascript",
+      "rule": "@js:1 + 2",
+      "input": "unused",
+      "mode": "string",
+      "baseURL": "https://fixture.invalid/books/",
+      "variables": {},
+      "inspectVariables": [],
+      "sanityValues": [
+        "3"
+      ],
+      "expectedOutcome": "success"
+    },
+    {
+      "id": "js-result",
+      "family": "javascript",
+      "rule": "@js:result.toUpperCase()",
+      "input": "abc",
+      "mode": "string",
+      "baseURL": "https://fixture.invalid/books/",
+      "variables": {},
+      "inspectVariables": [],
+      "expectedOutcome": "success"
+    },
+    {
+      "id": "js-list",
+      "family": "javascript",
+      "rule": "@js:[\"甲\", \"乙\"]",
+      "input": "unused",
+      "mode": "list",
+      "baseURL": "https://fixture.invalid/books/",
+      "variables": {},
+      "inspectVariables": [],
+      "expectedOutcome": "success"
+    },
+    {
+      "id": "js-base-url",
+      "family": "javascript",
+      "rule": "@js:baseUrl",
+      "input": "unused",
+      "mode": "string",
+      "baseURL": "https://fixture.invalid/books/",
+      "variables": {},
+      "inspectVariables": [],
+      "expectedOutcome": "success"
+    },
+    {
+      "id": "js-put-get",
+      "family": "bridge",
+      "rule": "@js:java.put(\"token\", \"changed\"); java.get(\"token\")",
+      "input": "unused",
+      "mode": "string",
+      "baseURL": "https://fixture.invalid/books/",
+      "variables": {
+        "token": "before"
+      },
+      "inspectVariables": [
+        "token"
+      ],
+      "expectedOutcome": "success"
+    },
+    {
+      "id": "js-md5",
+      "family": "bridge",
+      "rule": "@js:java.md5Encode(\"abc\")",
+      "input": "unused",
+      "mode": "string",
+      "baseURL": "https://fixture.invalid/books/",
+      "variables": {},
+      "inspectVariables": [],
+      "expectedOutcome": "success"
+    },
+    {
+      "id": "js-base64",
+      "family": "bridge",
+      "rule": "@js:java.base64Encode(\"山海\")",
+      "input": "unused",
+      "mode": "string",
+      "baseURL": "https://fixture.invalid/books/",
+      "variables": {},
+      "inspectVariables": [],
+      "expectedOutcome": "success"
+    },
+    {
+      "id": "js-nested-rule",
+      "family": "bridge",
+      "rule": "@js:java.getString(\"$.title\", result)",
+      "input": "{\"title\":\"第12章 山海\",\"a\":[\"甲\",\"乙\"],\"b\":[\"一\",\"二\",\"三\"],\"books\":[{\"name\":\"山海\",\"id\":1},{\"name\":\"星河\",\"id\":2}],\"empty\":\"\",\"selector\":\"title\"}",
+      "mode": "string",
+      "baseURL": "https://fixture.invalid/books/",
+      "variables": {},
+      "inspectVariables": [],
+      "expectedOutcome": "success"
+    },
+    {
+      "id": "js-throw",
+      "family": "errors",
+      "rule": "@js:throw new Error(\"synthetic-failure\")",
+      "input": "unused",
+      "mode": "string",
+      "baseURL": "https://fixture.invalid/books/",
+      "variables": {},
+      "inspectVariables": [],
+      "expectedOutcome": "error"
+    },
+    {
+      "id": "js-syntax",
+      "family": "errors",
+      "rule": "@js:var = ;",
+      "input": "unused",
+      "mode": "string",
+      "baseURL": "https://fixture.invalid/books/",
+      "variables": {},
+      "inspectVariables": [],
+      "expectedOutcome": "error"
+    }
+  ]
+}

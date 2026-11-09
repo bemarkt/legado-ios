@@ -86,8 +86,8 @@ Legado 样本整理、旧数据盘点、测试站点准备可以在 P0 开始；
 | P0 | 范围清单、候选 Schema、固定样本、现状基线、风险清单 | G0：最小源和预期行为可以明确说明与复现 | G0 已通过；环境/原生基线待补 |
 | P1 | iOS 原型、受控执行页、桥接、失败恢复、设备测量报告 | G1：运行方案有可复核的通过证据 | P1-01 Node 原型完成；G1 缺证据 |
 | P2 | 原生领域接口、调度/存储/正文、完整阅读链路 | G2：重启和离线后仍保持正确阅读状态 | 进行中：阅读、账号、封面及诊断已实现；完整设备证据未关闭 |
-| P3 | validator、类型、可选 builder、device runner、安装编辑更新 | G3：作者与用户的单文件使用闭环完成 | 进行中：静态检查、构建器、导入/编辑/更新已接入；构建源设备、定位与中断恢复仍缺 |
-| P4 | 独立适配器、兼容矩阵、差分夹具、诊断 | G4：发布承诺范围内的 Legado 行为通过 | 待开展 |
+| P3 | validator、类型、可选 builder、device runner、安装编辑更新 | G3：作者与用户的单文件使用闭环完成 | 进行中：错误摘要定位、可选 source map 与实际进程中断恢复已接入；构建源 WebKit 验证和设备体验见 P3 报告 |
+| P4 | 独立适配器、兼容矩阵、差分夹具、诊断 | G4：发布承诺范围内的 Legado 行为通过 | 基准已固定；独立 adapter/Android 差分仍待实施 |
 | P5 | 数据迁移、故障恢复、功能去留清单、App 整合 | G5：旧用户可迁移，失败可恢复 | 待开展 |
 | P6 | 候选规范、设备回归、试用报告、发布说明 | G6：三个独立验收维度同时通过 | 待开展 |
 
@@ -526,3 +526,9 @@ xcodebuild -project Legado.xcodeproj -scheme Legado \
 可独立开展的核心/作者工具工作继续进行；涉及默认入口切换、旧库写入或稳定协议发布，必须等待相应门槛。每个实现工作包先完成合同/核心检查，跨 WebKit、UI 和持久化的整合再合并运行较长工作流；失败只复跑受影响范围。
 
 详细行为与边界同步在 [P2 报告](reports/SOURCE_PROTOCOL_P2_REPORT.md)、[领域边界](../protocols/source-v1/DOMAIN_BOUNDARIES.md) 和 [设备验证步骤](SOURCE_RUNTIME_DEVICE_VALIDATION.md)。
+
+### P3 调试与恢复、P4 基准的推进记录
+
+P3 新增实际运行错误行列、按准确摘要查看当前/历史源码、显式实验室重试，以及作者侧可选映射。多文件成品仍是独立可读 .source.js。进程中断通过真实 Swift SourceArchive 子进程进行，已经验证 before/during/after 三种恢复。验证细节、首次失败与限制见 [P3 报告](reports/SOURCE_PROTOCOL_P3_REPORT.md)。
+
+P4 已固定 LegadoTeam/legado 3.26101819 / a7d37f1707a70a459ad708f4fe79341d1e42d716，14 个关键文件字节和本地 checkout 通过校验；新增 28 项离线合成语料、Android instrumentation、Swift 规则探针和手动差分工作流，实际对照待执行。P3 c3af1d0 的 59 项 WebKit/阅读器测试和完整常规 CI 已通过。下一项是采集并解释两端差异、实现独立 provider，再扩展请求/账号/取消和完整链路。来源、许可和矩阵见 [独立兼容基准](../protocols/legado-compatibility/README.md)。

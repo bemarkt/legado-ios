@@ -11,7 +11,8 @@ let package = Package(
     ],
     products: [
         .library(name: "LegadoCore", targets: ["LegadoCore"]),
-        .executable(name: "SourceRecoveryProbe", targets: ["SourceRecoveryProbe"])
+        .executable(name: "SourceRecoveryProbe", targets: ["SourceRecoveryProbe"]),
+        .executable(name: "LegadoDifferentialProbe", targets: ["LegadoDifferentialProbe"])
     ],
     dependencies: [
         .package(url: "https://github.com/scinfu/SwiftSoup.git", exact: "2.13.5"),
@@ -20,6 +21,7 @@ let package = Package(
         .package(path: "Vendor/QuickJS")
     ],
     targets: [
+        .executableTarget(name: "LegadoDifferentialProbe", dependencies: ["LegadoCore"], path: "tools/legado-compatibility/swift"),
         .executableTarget(name: "SourceRecoveryProbe", dependencies: ["LegadoCore"], path: "tools/source-recovery"),
         .target(
             name: "LegadoCore",

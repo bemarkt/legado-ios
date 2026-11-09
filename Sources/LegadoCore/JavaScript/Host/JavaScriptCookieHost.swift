@@ -9,12 +9,13 @@ import CQuickJS
 /// `cookie.getCookie(url)` / `cookie.setCookie(url, v)` / `cookie.cookieToMap(header)`，
 /// 形状一变就是全量书源失效，不是「风格差异」。
 struct JavaScriptCookieHost {
+    let cookies: any JavaScriptCookieState
     func install(into context: QuickJSContext) {
         // `java.getCookieHeader` / `java.__getCookieValue` / `java.setCookie`
         // 是 `java.getCookie(...)` 胶水的底层实现，必须先注册，否则胶水里调用不到。
         context.defineFunction("__legadoGetCookieHeader", argumentCount: 1) { ctx, _, args in
             let url = args.first.map { JavaScriptByteCoding.text(from: $0, in: ctx) } ?? ""
-            let header = LegadoCookieStore.shared.cookieHeader(for: url)
+            let header = try cookies.cookieHeader(for: url)
             return QuickJSValueConverter.stringValue(header, in: ctx)
         }
 
@@ -22,20 +23,20 @@ struct JavaScriptCookieHost {
             guard args.count == 2 else { return QuickJSValueConverter.stringValue("", in: ctx) }
             let url = JavaScriptByteCoding.text(from: args[0], in: ctx)
             let key = JavaScriptByteCoding.text(from: args[1], in: ctx)
-            return QuickJSValueConverter.stringValue(LegadoCookieStore.shared.cookie(for: url, key: key), in: ctx)
+            return QuickJSValueConverter.stringValue(try cookies.cookie(for: url, key: key), in: ctx)
         }
 
         context.defineFunction("__legadoSetCookie", argumentCount: 2) { ctx, _, args in
             guard args.count == 2 else { return qjs_undefined() }
             let url = JavaScriptByteCoding.text(from: args[0], in: ctx)
             let value = JavaScriptByteCoding.text(from: args[1], in: ctx)
-            LegadoCookieStore.shared.setCookie(value, for: url)
+            try cookies.setCookie(value, for: url)
             return qjs_undefined()
         }
 
         context.defineFunction("__legadoRemoveCookie", argumentCount: 1) { ctx, _, args in
             guard let first = args.first else { return qjs_undefined() }
-            LegadoCookieStore.shared.removeCookies(for: JavaScriptByteCoding.text(from: first, in: ctx))
+            try cookies.removeCookies(for: JavaScriptByteCoding.text(from: first, in: ctx))
             return qjs_undefined()
         }
 

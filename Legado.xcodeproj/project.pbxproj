@@ -161,6 +161,7 @@
 		DD1000000000000000000003 /* JavaScriptEntityHosts.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD2000000000000000000003 /* JavaScriptEntityHosts.swift */; };
 		DE1000000000000000000001 /* JavaScriptJavaHosts.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE2000000000000000000001 /* JavaScriptJavaHosts.swift */; };
 		DE1000000000000000000002 /* JavaScriptHostInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE2000000000000000000002 /* JavaScriptHostInstaller.swift */; };
+		EA1000000000000000000009 /* JavaScriptHostEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA2000000000000000000009 /* JavaScriptHostEnvironment.swift */; };
 		DF1000000000000000000001 /* BookSourceRuntimeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF2000000000000000000001 /* BookSourceRuntimeStore.swift */; };
 		EA1000000000000000000001 /* JavaScriptJsoupHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA2000000000000000000001 /* JavaScriptJsoupHost.swift */; };
 		FA1000000000000000000001 /* SourceContracts.swift */ = {isa = PBXBuildFile; fileRef = FA2000000000000000000001; };
@@ -347,6 +348,7 @@
 		DD2000000000000000000003 /* JavaScriptEntityHosts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/LegadoCore/JavaScript/Host/JavaScriptEntityHosts.swift; sourceTree = SOURCE_ROOT; };
 		DE2000000000000000000001 /* JavaScriptJavaHosts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/LegadoCore/JavaScript/Host/JavaScriptJavaHosts.swift; sourceTree = SOURCE_ROOT; };
 		DE2000000000000000000002 /* JavaScriptHostInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/LegadoCore/JavaScript/Core/JavaScriptHostInstaller.swift; sourceTree = SOURCE_ROOT; };
+		EA2000000000000000000009 /* JavaScriptHostEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/LegadoCore/JavaScript/Core/JavaScriptHostEnvironment.swift; sourceTree = SOURCE_ROOT; };
 		DF2000000000000000000001 /* BookSourceRuntimeStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/LegadoCore/JavaScript/Host/BookSourceRuntimeStore.swift; sourceTree = SOURCE_ROOT; };
 		EA2000000000000000000001 /* JavaScriptJsoupHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/LegadoCore/JavaScript/Host/JavaScriptJsoupHost.swift; sourceTree = SOURCE_ROOT; };
 		FA2000000000000000000001 /* SourceContracts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SourceContracts.swift; path = App/SourceRuntime/SourceContracts.swift; sourceTree = SOURCE_ROOT; };
@@ -658,6 +660,7 @@
 				DD2000000000000000000003 /* JavaScriptEntityHosts.swift */,
 				DE2000000000000000000001 /* JavaScriptJavaHosts.swift */,
 				DE2000000000000000000002 /* JavaScriptHostInstaller.swift */,
+				EA2000000000000000000009 /* JavaScriptHostEnvironment.swift */,
 				DF2000000000000000000001 /* BookSourceRuntimeStore.swift */,
 				EA2000000000000000000001 /* JavaScriptJsoupHost.swift */,
 			);
@@ -1030,6 +1033,7 @@
 				DD1000000000000000000003 /* JavaScriptEntityHosts.swift in Sources */,
 				DE1000000000000000000001 /* JavaScriptJavaHosts.swift in Sources */,
 				DE1000000000000000000002 /* JavaScriptHostInstaller.swift in Sources */,
+				EA1000000000000000000009 /* JavaScriptHostEnvironment.swift in Sources */,
 				DF1000000000000000000001 /* BookSourceRuntimeStore.swift in Sources */,
 				EA1000000000000000000001 /* JavaScriptJsoupHost.swift in Sources */,
 				C10000000000000000000015 /* ExploreKind.swift in Sources */,

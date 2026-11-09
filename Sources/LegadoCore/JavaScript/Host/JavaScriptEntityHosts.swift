@@ -16,6 +16,7 @@ struct JavaScriptEntityHosts {
     let source: BookSource?
     let book: Book?
     let chapter: BookChapter?
+    let state: any JavaScriptSourceState
 
     func install(into context: QuickJSContext) {
         installSource(into: context)
@@ -58,7 +59,7 @@ struct JavaScriptEntityHosts {
         context.setProperty("get", on: object, value: context.makeFunction(argumentCount: 1) { ctx, _, args in
             let key = args.first.map { JavaScriptByteCoding.text(from: $0, in: ctx) } ?? ""
             return QuickJSValueConverter.stringValue(
-                BookSourceRuntimeStore.shared.get(sourceID: sourceID, key: key),
+                try state.get(sourceID: sourceID, key: key),
                 in: ctx
             )
         })
@@ -67,18 +68,18 @@ struct JavaScriptEntityHosts {
             guard args.count == 2 else { return QuickJSValueConverter.stringValue("", in: ctx) }
             let key = JavaScriptByteCoding.text(from: args[0], in: ctx)
             let value = JavaScriptByteCoding.text(from: args[1], in: ctx)
-            BookSourceRuntimeStore.shared.put(sourceID: sourceID, key: key, value: value)
+            try state.put(sourceID: sourceID, key: key, value: value)
             return QuickJSValueConverter.stringValue(value, in: ctx)
         })
 
         context.setProperty("getLoginHeader", on: object, value: context.makeFunction { ctx, _, _ in
-            let value = BookSourceRuntimeStore.shared.get(sourceID: sourceID, key: "loginHeader")
+            let value = try state.get(sourceID: sourceID, key: "loginHeader")
             return value.isEmpty ? qjs_null() : QuickJSValueConverter.stringValue(value, in: ctx)
         })
 
         context.setProperty("putLoginHeader", on: object, value: context.makeFunction(argumentCount: 1) { ctx, _, args in
             let value = args.first.map { JavaScriptByteCoding.text(from: $0, in: ctx) } ?? ""
-            BookSourceRuntimeStore.shared.put(sourceID: sourceID, key: "loginHeader", value: value)
+            try state.put(sourceID: sourceID, key: "loginHeader", value: value)
             return QuickJSValueConverter.stringValue(value, in: ctx)
         })
 
@@ -86,20 +87,20 @@ struct JavaScriptEntityHosts {
         // `cookie.removeCookie(source.bookSourceUrl); source.removeLoginHeader();`，
         // 缺这个方法点一下就是 TypeError，而用户只会看到「清除失败」。
         context.setProperty("removeLoginHeader", on: object, value: context.makeFunction { ctx, _, _ in
-            BookSourceRuntimeStore.shared.put(sourceID: sourceID, key: "loginHeader", value: "")
+            try state.put(sourceID: sourceID, key: "loginHeader", value: "")
             return QuickJSValueConverter.stringValue("", in: ctx)
         })
 
         // 名字带双下划线前缀，保持与 JS 胶水里 `source.__getLoginInfoMap()` 一致。
         context.setProperty("__getLoginInfoMap", on: object, value: context.makeFunction { ctx, _, _ in
-            let raw = BookSourceRuntimeStore.shared.get(sourceID: sourceID, key: "loginInfo")
+            let raw = try state.get(sourceID: sourceID, key: "loginInfo")
             let json = (try? JSONValue.decode(data: Data(raw.utf8))) ?? .object([:])
             return QuickJSValueConverter.value(from: json, in: ctx)
         })
 
         context.setProperty("putLoginInfo", on: object, value: context.makeFunction(argumentCount: 1) { ctx, _, args in
             let value = args.first.map { JavaScriptByteCoding.text(from: $0, in: ctx) } ?? ""
-            BookSourceRuntimeStore.shared.put(sourceID: sourceID, key: "loginInfo", value: value)
+            try state.put(sourceID: sourceID, key: "loginInfo", value: value)
             return QuickJSValueConverter.stringValue(value, in: ctx)
         })
 
@@ -112,7 +113,7 @@ struct JavaScriptEntityHosts {
             }
             let includeLogin = args.first.map { qjs_to_bool(ctx.rawContext, $0) == 1 } ?? false
             if includeLogin {
-                headers.merge(BookSourceRuntimeStore.shared.loginHeaders(sourceID: sourceID)) { _, login in login }
+                headers.merge(try state.loginHeaders(sourceID: sourceID)) { _, login in login }
             }
             return QuickJSValueConverter.value(from: .object(headers.mapValues { .string($0) }), in: ctx)
         })

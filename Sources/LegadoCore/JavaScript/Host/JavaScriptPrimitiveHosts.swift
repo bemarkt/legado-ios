@@ -10,9 +10,11 @@ import CQuickJS
 struct JavaScriptPrimitiveHosts {
     /// 单次 AES / 字节数组转换的上限，避免脚本用一个超大数组把内存顶穿。
     let byteLimit: Int
+    let record: @Sendable (String) -> Void
 
-    init(byteLimit: Int) {
+    init(byteLimit: Int, record: @escaping @Sendable (String) -> Void) {
         self.byteLimit = max(0, byteLimit)
+        self.record = record
     }
 
     func install(into context: QuickJSContext) {
@@ -93,10 +95,7 @@ struct JavaScriptPrimitiveHosts {
         // 诊断日志：写一行即可，返回值原样回传（脚本里能链式使用）。
         context.defineFunction("__legadoLog", argumentCount: 1) { ctx, _, args in
             guard let value = args.first else { return qjs_undefined() }
-            DiagnosticLog.shared.record(
-                category: "JS",
-                message: JavaScriptByteCoding.text(from: value, in: ctx)
-            )
+            record(JavaScriptByteCoding.text(from: value, in: ctx))
             return ctx.duplicate(value)
         }
     }

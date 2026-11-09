@@ -15,11 +15,11 @@ struct JavaScriptJavaHosts {
     /// 内容入参用 `JSONValue` 而不是 `JSValue`：闭包内部要再起一次求值，
     /// 可能落在另一个 Context，把某个 Context 的 `JSValue` 传出去再使用
     /// 在 QuickJS 下属于未定义行为，因此在宿主函数内当场收敛成值类型。
-    typealias StringRuleEvaluator = (_ rule: String, _ content: JSONValue?, _ isURL: Bool) -> String
+    typealias StringRuleEvaluator = (_ rule: String, _ content: JSONValue?, _ isURL: Bool) throws -> String
 
     /// 列表模式求值器。`java.getStringList` 不能对 `java.getString` 的结果按换行切分，
     /// 必须回到规则引擎走一遍真正的列表模式解析。
-    typealias StringRuleListEvaluator = (_ rule: String, _ content: JSONValue?, _ isURL: Bool) -> [String]
+    typealias StringRuleListEvaluator = (_ rule: String, _ content: JSONValue?, _ isURL: Bool) throws -> [String]
 
     let variables: JavaScriptVariableBox
     let executionContext: RuleExecutionContext
@@ -29,6 +29,7 @@ struct JavaScriptJavaHosts {
 
     func install(into context: QuickJSContext) {
         let object = JS_NewObject(context.rawContext)
+        let environment = executionContext.hostEnvironment
 
         // MARK: 变量存储
 
@@ -74,7 +75,7 @@ struct JavaScriptJavaHosts {
             let rule = JavaScriptByteCoding.text(from: first, in: ctx)
             let content: JSONValue? = args.count > 1 ? ctx.jsonValue(from: args[1]) : nil
             let isURL = args.count > 2 ? qjs_to_bool(ctx.rawContext, args[2]) == 1 : false
-            let text = evaluateStringRule(rule, content, isURL)
+            let text = try evaluateStringRule(rule, content, isURL)
             return QuickJSValueConverter.stringValue(text, in: ctx)
         })
 
@@ -87,7 +88,7 @@ struct JavaScriptJavaHosts {
             let rule = JavaScriptByteCoding.text(from: first, in: ctx)
             let content: JSONValue? = args.count > 1 ? ctx.jsonValue(from: args[1]) : nil
             let isURL = args.count > 2 ? qjs_to_bool(ctx.rawContext, args[2]) == 1 : false
-            let values = evaluateStringListRule(rule, content, isURL)
+            let values = try evaluateStringListRule(rule, content, isURL)
             // 显式写 JSONValue.string：省略类型名的 `.string($0)` 依赖上下文推断，
             // 在 `value(from:)` 这座桥里是编译期歧义的高发点。
             let items: [JSONValue] = values.map { JSONValue.string($0) }
@@ -186,41 +187,21 @@ struct JavaScriptJavaHosts {
             QuickJSValueConverter.stringValue(UUID().uuidString, in: ctx)
         })
 
-        // `androidId()` 必须在同一台设备上稳定：书源把它当设备标识用于签名，
-        // 每次随机会让已保存的登录态与签名一起失效。
+        // Identity, browser behavior and logging belong to the selected host environment.
         context.setProperty("androidId", on: object, value: context.makeFunction { ctx, _, _ in
-            let key = "ios.installation.identifier"
-            let stored = BookSourceRuntimeStore.shared.get(sourceID: "__app__", key: key)
-            if !stored.isEmpty { return QuickJSValueConverter.stringValue(stored, in: ctx) }
-            let value = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
-            BookSourceRuntimeStore.shared.put(sourceID: "__app__", key: key, value: value)
-            return QuickJSValueConverter.stringValue(value, in: ctx)
+            QuickJSValueConverter.stringValue(try environment.identifier(), in: ctx)
         })
-
-        // `java.webView(html, url, timeout)`：Legado 里它驱动真实 WebView 再取回渲染后的 HTML。
-        // 同步 JS 宿主无法安全驱动 WebKit（需要主线程 + 异步等待，而这里是同步调用），
-        // 因此按「原样返回传入的 HTML + 记一条诊断」降级。
-        // 这样书源的降级分支至少能继续跑完解析，而不是像原先那样直接 ReferenceError
-        // 让整条正文规则链断掉。限制如实记录在诊断日志里，不做无声的假装。
         context.setProperty("webView", on: object, value: context.makeFunction(argumentCount: 3) { ctx, _, args in
             let html = args.first.map { JavaScriptByteCoding.text(from: $0, in: ctx) } ?? ""
-            DiagnosticLog.shared.record(
-                category: "JS",
-                message: "java.webView 未执行真实 WebView 渲染（同步宿主限制），已回退为原始 HTML"
-            )
-            return QuickJSValueConverter.stringValue(html, in: ctx)
+            return QuickJSValueConverter.stringValue(try environment.renderWebPage(html), in: ctx)
         })
-
-        // 登录 UI 的动作脚本会用 `java.startBrowser` / `java.longToast`，
-        // 缺这两个名字会让「网页登录」「登录状态」按钮点击时直接抛 ReferenceError。
         context.setProperty("startBrowser", on: object, value: context.makeFunction(argumentCount: 2) { ctx, _, args in
             let target = args.first.map { JavaScriptByteCoding.text(from: $0, in: ctx) } ?? ""
-            DiagnosticLog.shared.record(category: "JS", message: "java.startBrowser: \(target)")
-            return QuickJSValueConverter.stringValue(target, in: ctx)
+            return QuickJSValueConverter.stringValue(try environment.openBrowser(target), in: ctx)
         })
         context.setProperty("longToast", on: object, value: context.makeFunction(argumentCount: 1) { ctx, _, args in
             guard let value = args.first else { return qjs_undefined() }
-            DiagnosticLog.shared.record(category: "JS", message: JavaScriptByteCoding.text(from: value, in: ctx))
+            environment.record(JavaScriptByteCoding.text(from: value, in: ctx))
             return ctx.duplicate(value)
         })
 
@@ -233,10 +214,7 @@ struct JavaScriptJavaHosts {
         for name in ["log", "logType", "toast"] {
             context.setProperty(name, on: object, value: context.makeFunction(argumentCount: 1) { ctx, _, args in
                 guard let value = args.first else { return qjs_undefined() }
-                DiagnosticLog.shared.record(
-                    category: "JS",
-                    message: JavaScriptByteCoding.text(from: value, in: ctx)
-                )
+                environment.record(JavaScriptByteCoding.text(from: value, in: ctx))
                 // 入参所有权属于调用方，原样返回必须先 dup。
                 return ctx.duplicate(value)
             })

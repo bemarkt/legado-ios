@@ -84,7 +84,7 @@ enum JavaScriptHostInstaller {
         context.setGlobal(
             "__legadoUserAgent",
             value: QuickJSValueConverter.stringValue(
-                ApplicationSettingsStore.shared.settings.effectiveUserAgent,
+                executionContext.hostEnvironment.userAgent,
                 in: context
             )
         )
@@ -111,17 +111,20 @@ enum JavaScriptHostInstaller {
     // MARK: - 宿主层
 
     private static func installHosts(_ dependencies: Dependencies, into context: QuickJSContext) {
-        JavaScriptPrimitiveHosts(byteLimit: dependencies.byteLimit).install(into: context)
-        JavaScriptCookieHost().install(into: context)
+        let environment = dependencies.executionContext.hostEnvironment
+        JavaScriptPrimitiveHosts(byteLimit: dependencies.byteLimit, record: environment.record).install(into: context)
+        JavaScriptCookieHost(cookies: environment.cookies).install(into: context)
         JavaScriptNetworkHost(
             loadAjax: dependencies.loadAjax,
             loadDirect: dependencies.loadDirect,
-            maximumResultBytes: dependencies.byteLimit
+            maximumResultBytes: dependencies.byteLimit,
+            propagateFailures: dependencies.executionContext.environment != nil
         ).install(into: context)
         JavaScriptEntityHosts(
             source: dependencies.executionContext.source,
             book: dependencies.executionContext.book,
-            chapter: dependencies.executionContext.chapter
+            chapter: dependencies.executionContext.chapter,
+            state: environment.sourceState
         ).install(into: context)
         // `org.jsoup` 桥必须先于 javaImporter / 规则脚本注入：
         // 书源正文规则第一句就是 `org.jsoup.Jsoup.parse(result)`。

@@ -22,6 +22,7 @@ struct JavaScriptNetworkHost {
     let loadAjax: AjaxLoader
     let loadDirect: DirectLoader
     let maximumResultBytes: Int
+    let propagateFailures: Bool
 
     func install(into context: QuickJSContext) {
         let loadAjax = self.loadAjax
@@ -48,6 +49,7 @@ struct JavaScriptNetworkHost {
                 )
                 return Self.responseObject(response, limit: resultLimit, in: ctx)
             } catch {
+                if propagateFailures { throw error }
                 return Self.errorObject(error.localizedDescription, in: ctx)
             }
         }
@@ -76,14 +78,16 @@ struct JavaScriptNetworkHost {
             var rows: [JSONValue] = []
             rows.reserveCapacity(urls.count)
             for rawURL in urls {
-                if let response = try? loadAjax(rawURL, [:], timeout) {
+                do {
+                    let response = try loadAjax(rawURL, [:], timeout)
                     rows.append(.object([
                         "url": .string(response.finalURL.absoluteString),
                         "body": .string(response.decodedText),
                         "code": .number(Double(response.statusCode)),
                         "headers": .object(response.headers.mapValues { .string($0) })
                     ]))
-                } else {
+                } catch {
+                    if propagateFailures { throw error }
                     rows.append(.object([
                         "url": .string(rawURL),
                         "body": .string(""),

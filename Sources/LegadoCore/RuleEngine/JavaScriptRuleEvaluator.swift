@@ -17,6 +17,8 @@ public struct RuleExecutionContext: Sendable {
     /// `result` 就是当前页面的响应对象），而普通规则求值里的 `result` 是规则输入本身。
     /// 用显式字段区分，避免改动普通规则求值时 `result` 的类型。
     public var responseBody: String?
+    public var environment: JavaScriptHostEnvironment?
+    var hostEnvironment: JavaScriptHostEnvironment { environment ?? .legacy }
 
     public init(
         variables: [String: String] = [:],
@@ -28,7 +30,8 @@ public struct RuleExecutionContext: Sendable {
         chapter: BookChapter? = nil,
         isHTMLFragment: Bool = false,
         content: JSONValue? = nil,
-        responseBody: String? = nil
+        responseBody: String? = nil,
+        environment: JavaScriptHostEnvironment? = nil
     ) {
         self.variables = variables
         self.baseURL = baseURL
@@ -40,6 +43,7 @@ public struct RuleExecutionContext: Sendable {
         self.isHTMLFragment = isHTMLFragment
         self.content = content
         self.responseBody = responseBody
+        self.environment = environment
     }
 }
 
@@ -223,8 +227,13 @@ public struct JavaScriptRuleEvaluator: Sendable {
         result: JSONValue,
         executionContext: RuleExecutionContext
     ) async throws -> JavaScriptRuleResult {
-        try await RuleExecutionWorker.run {
-            try evaluate(script: script, result: result, executionContext: executionContext)
+        try await withTaskCancellationHandler {
+            try await RuleExecutionWorker.run {
+                try executionContext.environment?.control.check()
+                return try evaluate(script: script, result: result, executionContext: executionContext)
+            }
+        } onCancel: {
+            executionContext.environment?.control.cancel()
         }
     }
 
@@ -265,16 +274,24 @@ public struct JavaScriptRuleEvaluator: Sendable {
         stringifyResult: Bool,
         depth: Int
     ) throws -> JavaScriptRuleResult {
+        try executionContext.environment?.control.check()
         do {
-            return try evaluateRaw(
+            let result = try evaluateRaw(
                 script: script,
                 result: result,
                 executionContext: executionContext,
                 stringifyResult: stringifyResult,
                 depth: depth
             )
-        } catch let error as JavaScriptRuntimeError {
-            throw Self.ruleEngineError(error, script: script)
+            try executionContext.environment?.control.check()
+            return result
+        } catch {
+            // A script may catch a host exception; cancellation still owns the final outcome.
+            try executionContext.environment?.control.check()
+            if let error = error as? JavaScriptRuntimeError {
+                throw Self.ruleEngineError(error, script: script)
+            }
+            throw error
         }
     }
 
@@ -308,7 +325,9 @@ public struct JavaScriptRuleEvaluator: Sendable {
             throw JavaScriptRuntimeError.ruleTooLong(limit: maximumRuleLength, actual: byteCount)
         }
         let limits = self.limits
-        let runtime = try QuickJSRuntime(limits: limits)
+        let runtime = try QuickJSRuntime(limits: limits, shouldInterrupt: {
+            executionContext.environment?.control.shouldInterrupt ?? false
+        })
         let variables = JavaScriptVariableBox(executionContext.variables)
         let context = try JavaScriptHostInstaller.makeContext(
             runtime: runtime,
@@ -380,22 +399,22 @@ public struct JavaScriptRuleEvaluator: Sendable {
                 )
             },
             evaluateStringRule: { rule, content, isURL in
-                (try? evaluateStringRule(
-                    rule,
-                    content: content,
-                    isURL: isURL,
-                    executionContext: executionContext,
-                    depth: depth + 1
-                )) ?? ""
+                do {
+                    return try evaluateStringRule(rule, content: content, isURL: isURL,
+                        executionContext: executionContext, depth: depth + 1)
+                } catch {
+                    if executionContext.environment != nil { throw error }
+                    return ""
+                }
             },
             evaluateStringListRule: { rule, content, isURL in
-                (try? evaluateStringRuleValues(
-                    rule,
-                    content: content,
-                    isURL: isURL,
-                    executionContext: executionContext,
-                    depth: depth + 1
-                )) ?? []
+                do {
+                    return try evaluateStringRuleValues(rule, content: content, isURL: isURL,
+                        executionContext: executionContext, depth: depth + 1)
+                } catch {
+                    if executionContext.environment != nil { throw error }
+                    return []
+                }
             }
         )
     }
@@ -433,7 +452,9 @@ public struct JavaScriptRuleEvaluator: Sendable {
         private let renderLock = NSLock()
 
         init(evaluator: JavaScriptRuleEvaluator, script: String, executionContext: RuleExecutionContext) throws {
-            self.runtime = try QuickJSRuntime(limits: evaluator.limits)
+            self.runtime = try QuickJSRuntime(limits: evaluator.limits, shouldInterrupt: {
+                executionContext.environment?.control.shouldInterrupt ?? false
+            })
             self.evaluator = evaluator
             self.script = script
             self.executionContext = executionContext
@@ -508,6 +529,7 @@ public struct JavaScriptRuleEvaluator: Sendable {
         timeoutMilliseconds: Double?,
         executionContext: RuleExecutionContext
     ) throws -> HTTPResponse {
+        try executionContext.environment?.control.check()
         let baseText = executionContext.baseURL.isEmpty
             ? executionContext.source?.bookSourceUrl ?? ""
             : executionContext.baseURL
@@ -519,30 +541,33 @@ public struct JavaScriptRuleEvaluator: Sendable {
         let milliseconds = timeoutMilliseconds ?? 30_000
         var request = URLRequest(url: url, timeoutInterval: min(max(milliseconds / 1_000, 1), 180))
         request.httpMethod = method.uppercased()
-        request.httpShouldHandleCookies = executionContext.source?.enabledCookieJar != false
-        var requestHeaders = try executionContext.source.map { try BookSourceHeaderResolver().resolve($0) } ?? [:]
+        request.httpShouldHandleCookies = executionContext.environment == nil && executionContext.source?.enabledCookieJar != false
+        var requestHeaders = try executionContext.source.map { try BookSourceHeaderResolver().resolve($0, environment: executionContext.environment) } ?? [:]
         requestHeaders.merge(headers) { _, explicit in explicit }
         if !requestHeaders.keys.contains(where: { $0.caseInsensitiveCompare("User-Agent") == .orderedSame }) {
-            requestHeaders["User-Agent"] = ApplicationSettingsStore.shared.settings.effectiveUserAgent
+            requestHeaders["User-Agent"] = executionContext.hostEnvironment.userAgent
         }
         requestHeaders.forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
         if method.caseInsensitiveCompare("POST") == .orderedSame {
             request.httpBody = Data((body ?? "").utf8)
         }
         if executionContext.source?.enabledCookieJar != false {
-            let stored = LegadoCookieStore.shared.cookieHeader(for: rawURL)
+            let stored = try executionContext.hostEnvironment.cookies.cookieHeader(for: url.absoluteString)
             let explicit = request.value(forHTTPHeaderField: "Cookie") ?? ""
             let merged = Self.mergeCookieHeaders(stored, explicit)
             if !merged.isEmpty { request.setValue(merged, forHTTPHeaderField: "Cookie") }
         }
+        try executionContext.environment?.control.check()
         let response: HTTPResponse
-        if let redirectLoader = networkLoader as? any JavaScriptRedirectNetworkLoading {
+        let loader = executionContext.environment?.network ?? networkLoader
+        if let redirectLoader = loader as? any JavaScriptRedirectNetworkLoading {
             response = try redirectLoader.load(request, followRedirects: false)
         } else {
-            response = try networkLoader.load(request)
+            response = try loader.load(request)
         }
+        try executionContext.environment?.control.check()
         if let cookie = response.headers.first(where: { $0.key.caseInsensitiveCompare("Set-Cookie") == .orderedSame })?.value {
-            LegadoCookieStore.shared.setCookie(cookie, for: response.finalURL.absoluteString)
+            try executionContext.hostEnvironment.cookies.setCookie(cookie, for: response.finalURL.absoluteString)
         }
         return response
     }
@@ -556,32 +581,41 @@ public struct JavaScriptRuleEvaluator: Sendable {
         guard !rawURL.isEmpty else {
             throw RuleEngineError.invalidInput(rule: rawURL, expected: "java.ajax/connect URL")
         }
+        try executionContext.environment?.control.check()
         let source = executionContext.source
-        var headers = try source.map { try BookSourceHeaderResolver().resolve($0) } ?? [:]
+        var headers = try source.map { try BookSourceHeaderResolver().resolve($0, environment: executionContext.environment) } ?? [:]
         headers.merge(extraHeaders) { _, extra in extra }
         let base = URL(string: executionContext.baseURL.isEmpty ? source?.bookSourceUrl ?? "" : executionContext.baseURL)
-        let prepared = try urlBuilder.prepare(rawURL, baseURL: base, defaultHeaders: headers)
+        let prepared = try urlBuilder.prepare(rawURL, context: .init(
+            variables: executionContext.variables, source: source, book: executionContext.book,
+            chapter: executionContext.chapter, environment: executionContext.environment
+        ), baseURL: base, defaultHeaders: headers)
         if prepared.useWebView || prepared.webJavaScript != nil {
             throw RuleEngineError.unsupportedRule(rule: rawURL, feature: "JS 内 WKWebView 请求")
         }
         let timeout = timeoutMilliseconds.map { min(max($0 / 1_000, 1), 180) }
             ?? min(max(Double(source?.respondTime ?? 30_000) / 1_000, 5), 180)
-        var request = prepared.urlRequest(timeout: timeout, handleCookies: source?.enabledCookieJar != false)
+        var request = prepared.urlRequest(timeout: timeout,
+            handleCookies: executionContext.environment == nil && source?.enabledCookieJar != false,
+            useApplicationTimeout: executionContext.environment == nil)
         if source?.enabledCookieJar != false {
-            let stored = LegadoCookieStore.shared.cookieHeader(for: prepared.url.absoluteString)
+            let stored = try executionContext.hostEnvironment.cookies.cookieHeader(for: prepared.url.absoluteString)
             let explicit = request.value(forHTTPHeaderField: "Cookie") ?? ""
             let merged = Self.mergeCookieHeaders(stored, explicit)
             if !merged.isEmpty { request.setValue(merged, forHTTPHeaderField: "Cookie") }
         }
+        let loader = executionContext.environment?.network ?? networkLoader
         let retryCount = max(prepared.retry, 0)
         let attempts = retryCount == Int.max ? Int.max : retryCount + 1
         var lastError: Error = HTTPClientError.nonHTTPResponse
         for attempt in 0..<attempts {
             do {
-                var response = try networkLoader.load(request)
+                try executionContext.environment?.control.check()
+                var response = try loader.load(request)
+                try executionContext.environment?.control.check()
                 response.requestedCharset = prepared.charset
                 if let cookie = response.headers.first(where: { $0.key.caseInsensitiveCompare("Set-Cookie") == .orderedSame })?.value {
-                    LegadoCookieStore.shared.setCookie(cookie, for: response.finalURL.absoluteString)
+                    try executionContext.hostEnvironment.cookies.setCookie(cookie, for: response.finalURL.absoluteString)
                 }
                 guard (200 ... 299).contains(response.statusCode) else {
                     throw HTTPClientError.statusResponse(response)

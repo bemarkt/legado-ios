@@ -44,6 +44,9 @@ public struct JavaScriptRuntimeLimits: Sendable, Equatable {
 final class JavaScriptDeadlineBox: @unchecked Sendable {
     private let lock = NSLock()
     private var deadline: DispatchTime?
+    private let externalInterrupt: (@Sendable () -> Bool)?
+
+    init(externalInterrupt: (@Sendable () -> Bool)? = nil) { self.externalInterrupt = externalInterrupt }
 
     func arm(milliseconds: Int) {
         lock.lock()
@@ -62,6 +65,7 @@ final class JavaScriptDeadlineBox: @unchecked Sendable {
         lock.lock()
         let target = deadline
         lock.unlock()
+        if externalInterrupt?() == true { return true }
         guard let target else { return false }
         return DispatchTime.now() >= target
     }
@@ -94,9 +98,11 @@ public final class QuickJSRuntime {
     /// 直接暴露给同模块的 QuickJSContext 使用；对外不公开，避免上层绕过封装调 C API。
     let rawRuntime: OpaquePointer
 
-    private let deadlineBox = JavaScriptDeadlineBox()
+    private let deadlineBox: JavaScriptDeadlineBox
 
-    public init(limits: JavaScriptRuntimeLimits = JavaScriptRuntimeLimits()) throws {
+    public init(limits: JavaScriptRuntimeLimits = JavaScriptRuntimeLimits(),
+                shouldInterrupt: (@Sendable () -> Bool)? = nil) throws {
+        deadlineBox = JavaScriptDeadlineBox(externalInterrupt: shouldInterrupt)
         guard let runtime = JS_NewRuntime() else {
             throw JavaScriptRuntimeError.runtimeInitializationFailed(detail: "JS_NewRuntime 返回 NULL（内存不足或引擎未正确链接）")
         }

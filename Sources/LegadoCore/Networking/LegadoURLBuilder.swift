@@ -13,6 +13,7 @@ public struct URLTemplateContext: Sendable {
     public var source: BookSource?
     public var book: Book?
     public var chapter: BookChapter?
+    public var environment: JavaScriptHostEnvironment?
 
     public init(
         key: String? = nil,
@@ -20,7 +21,8 @@ public struct URLTemplateContext: Sendable {
         variables: [String: String] = [:],
         source: BookSource? = nil,
         book: Book? = nil,
-        chapter: BookChapter? = nil
+        chapter: BookChapter? = nil,
+        environment: JavaScriptHostEnvironment? = nil
     ) {
         self.key = key
         self.page = page
@@ -28,6 +30,7 @@ public struct URLTemplateContext: Sendable {
         self.source = source
         self.book = book
         self.chapter = chapter
+        self.environment = environment
     }
 
     fileprivate func value(for expression: String) -> String? {
@@ -108,8 +111,8 @@ public struct PreparedRequest: Sendable {
         self.chapter = chapter
     }
 
-    public func urlRequest(timeout: TimeInterval = 30, handleCookies: Bool = true) -> URLRequest {
-        let override = ApplicationSettingsStore.shared.settings.timeoutSeconds
+    public func urlRequest(timeout: TimeInterval = 30, handleCookies: Bool = true, useApplicationTimeout: Bool = true) -> URLRequest {
+        let override = useApplicationTimeout ? ApplicationSettingsStore.shared.settings.timeoutSeconds : 0
         var request = URLRequest(url: url, timeoutInterval: override > 0 ? Double(override) : timeout)
         request.httpMethod = method.rawValue
         request.httpBody = method == .post ? body : nil
@@ -193,7 +196,7 @@ public struct LegadoURLBuilder: Sendable {
         }
         if !suppressesUserAgent,
            headers.first(where: { $0.key.caseInsensitiveCompare("User-Agent") == .orderedSame }) == nil {
-            headers["User-Agent"] = ApplicationSettingsStore.shared.settings.effectiveUserAgent
+            headers["User-Agent"] = context.environment?.userAgent ?? ApplicationSettingsStore.shared.settings.effectiveUserAgent
         }
         let bodyText = options.body?.stringValue
         let trimmedBody = bodyText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -400,7 +403,8 @@ public struct LegadoURLBuilder: Sendable {
                 page: context.page,
                 source: context.source,
                 book: context.book,
-                chapter: context.chapter
+                chapter: context.chapter,
+                environment: context.environment
             )
         )
     }

@@ -1,6 +1,6 @@
 # 独立 Legado 兼容基准
 
-选择日期：2026-11-09。状态：固定参考提交与关键文件字节已核对；首批 28 项离线规则已在 Android 和 Swift 采集结果；Android 执行检查因数值字符串预期不当失败，尚未完成差分验收；独立 provider 尚无完整链路验收记录。
+选择日期：2026-11-09。状态：固定参考提交与关键文件字节已核对；首批 28 项离线规则已在 Android 和 Swift 采集结果；Android 执行检查因数值字符串预期不当失败，尚未完成差分验收；独立 provider 已有核心合成链路证据（01d58e6），App/真实 HTTP 集成仍待完成；详见 [P4 报告](../../docs/reports/SOURCE_PROTOCOL_P4_REPORT.md)。
 
 基准使用 LegadoTeam/legado 的非预发布标签 3.26101819，精确提交 a7d37f1707a70a459ad708f4fe79341d1e42d716。选择的是一个可追溯的实现，不将其称为所有历史“阅读”版本的统一标准。仓库、版本、发布 APK 哈希、许可和关键代码哈希见 [baseline.json](baseline.json)。核对日 gedoor/legado 默认分支仅有公告与图片、无标签或 Release，不能继续用该分支作为可重复的构建依赖。这里记录可用性，不作法律结论。
 
@@ -83,3 +83,7 @@ G4 功能验收要求可追溯的参考依据、固定样本、iOS 完整链路�
 - 2ca12ca / 42546394582：Android 引用校验与 SDK 准备通过；debug dex 编译因 MethodHandle 需要 minSdk 26 失败。后续 0a33920 采用显式 init overlay，不改上游源码，已进入规则执行。
 - 审查 Swift 结果发现原有 listMode 表示元素提取，不能用于模拟 getStringList。新增明确的 string/stringList/elements 模式，并保留旧 Bool 入口；探针使用 stringList。首次 CSS/XPath 列表输出不是有效差分基准；0a33920 已重采，仍须逐项审查。
 - 0a33920 / 42547092876：Android 与 Swift 已各输出 28 项结果，corpus SHA-256 均为 `1453d5243d128dec1137b1bf7e21798cee2745030b98d1cf98136a91edc2f740`。`js-arithmetic` 在 Android 返回 `"3.0"`，Swift 返回 `"3"`；Android 测试中的执行检查预期 `"3"`，因此该 job 失败，不能记为差分验收通过。证据已下载至 `build/github-actions/0a33920/compatibility/`；检查应与真实语义差异区分，后续扩大语料需使用新摘要。
+
+## 独立 provider 实施证据
+
+01d58e6 / 42557488421：475 项核心、74 项页面模型、29 项固定规则和 App 编译通过。7 项独立 provider 测试覆盖合成请求四步链路、原生归档/离线重开、作用域/游标和取消预算；不等同于 App 旧源导入、真实网络或设备验收。6931932 新增持久状态与安全登录字段，480 项核心、74 项模型、29 项规则和 App 编译均通过；完整矩阵、自动化状态与未实现范围统一见 [P4 报告](../../docs/reports/SOURCE_PROTOCOL_P4_REPORT.md)。

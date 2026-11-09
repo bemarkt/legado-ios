@@ -111,7 +111,7 @@
   "verification": {
     "referenceBytes": "verified",
     "androidExecution": "28-cases-captured-in-run-42547092876; numeric-sanity-assertion-failed",
-    "iosAdapter": "not-implemented",
+    "iosAdapter": "core-provider-flow-verified-at-01d58e6; scoped-state-verified-at-6931932; production-http-and-app-integration-pending",
     "differential": "raw-observations-retained; whole-profile-equivalence-not-claimed",
     "checkout": "verified locally at pinned commit"
   },

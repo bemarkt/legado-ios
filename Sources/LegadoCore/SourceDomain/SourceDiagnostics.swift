@@ -6,20 +6,47 @@ public struct SourceExtractionContext: Codable, Sendable, Equatable {
     public let field: Field
     public let httpStatus: Int?
     public let responseBytes: Int?
-    public init(field: Field, httpStatus: Int?, responseBytes: Int?) {
+    public let responseID: UUID?
+    public init(field: Field, httpStatus: Int?, responseBytes: Int?, responseID: UUID? = nil) {
         self.field = field
         self.httpStatus = httpStatus.flatMap { (100...599).contains($0) ? $0 : nil }
         self.responseBytes = responseBytes.map { min(8_388_608, max(0, $0)) }
+        self.responseID = responseID
     }
 }
 
 public struct SourceExtractionFailure: Error, Sendable, LocalizedError {
     public let context: SourceExtractionContext
-    public init(field: SourceExtractionContext.Field, httpStatus: Int?, responseBytes: Int?) {
-        context = .init(field: field, httpStatus: httpStatus, responseBytes: responseBytes)
+    public let localResponse: SourceLocalResponse?
+    public init(field: SourceExtractionContext.Field, httpStatus: Int?, responseBytes: Int?, responseID: UUID? = nil, localResponse: SourceLocalResponse? = nil) {
+        self.localResponse = localResponse
+        context = .init(field: field, httpStatus: httpStatus, responseBytes: responseBytes, responseID: responseID)
     }
     public var issue: SourceIssue { .init(code: context.field == .catalog ? "EMPTY_CATALOG" : "EMPTY_CONTENT", extraction: context) }
     public var errorDescription: String? { issue.message }
+}
+
+/// Deliberately not Codable: website text is available only in the local inspector.
+/// No request/response headers are retained except Content-Type. The body may contain private data.
+public struct SourceLocalResponse: Sendable {
+    public static let maximumTextBytes = 65_536
+    public let finalURL: String?
+    public let contentType: String?
+    public let body: String
+    public let truncated: Bool
+    public init(response: HTTPResponse) {
+        var components = URLComponents(url: response.finalURL, resolvingAgainstBaseURL: false)
+        components?.user = nil; components?.password = nil; components?.fragment = nil
+        let address = components?.url?.absoluteString
+        finalURL = address.flatMap { $0.utf8.count <= 8192 ? $0 : nil }
+        contentType = response.headers.first { $0.key.lowercased() == "content-type" }.map { String($0.value.prefix(256)) }
+        let bytes = response.decodedText.utf8
+        truncated = bytes.count > Self.maximumTextBytes
+        // Keep a valid UTF-8 prefix without replacing a cut multibyte character.
+        var prefix = Data(bytes.prefix(Self.maximumTextBytes))
+        while !prefix.isEmpty && String(data: prefix, encoding: .utf8) == nil { prefix.removeLast() }
+        body = String(decoding: prefix, as: UTF8.self)
+    }
 }
 
 /// UI recovery is determined by a bounded host code, never by matching website error text.
@@ -93,23 +120,38 @@ public struct SourceDiagnosticRecord: Codable, Sendable, Identifiable {
     public let extraction: SourceExtractionContext?
 }
 
-/// In-memory, bounded operational summaries. No website text, URLs, queries, headers, refs or bodies.
+/// Exportable summaries contain no website data. A separate, bounded local response cache is never exported.
 public actor SourceDiagnostics {
     public static let shared = SourceDiagnostics()
     private let capacity: Int
     private var values: [SourceDiagnosticRecord] = []
+    private var responses: [UUID: (created: Date, value: SourceLocalResponse)] = [:]
     public init(capacity: Int = 128) { self.capacity = min(128, max(1, capacity)) }
     public func record(id: UUID, operation: SourceDiagnosticOperation, identity: SourceExecutionIdentity,
-                       issue: SourceIssue?, elapsedMilliseconds: Int, line: Int? = nil, column: Int? = nil) {
+                       issue: SourceIssue?, elapsedMilliseconds: Int, line: Int? = nil, column: Int? = nil,
+                       localResponse: SourceLocalResponse? = nil, now: Date = Date()) {
         guard let encoded = try? SourceCoding.encode(identity.scope) else { return }
-        values.append(.init(id: id, timestamp: Date(), operation: operation, sourceDigest: identity.sourceDigest,
+        values.append(.init(id: id, timestamp: now, operation: operation, sourceDigest: identity.sourceDigest,
             scopeDigest: SourceCoding.digest(encoded), configurationDigest: identity.configurationDigest,
             code: issue?.code ?? "OK", elapsedMilliseconds: max(0, min(300_000, elapsedMilliseconds)),
             line: line.flatMap { (1...2_097_152).contains($0) ? $0 : nil }, column: column.flatMap { (1...2_097_152).contains($0) ? $0 : nil }, extraction: issue?.extraction))
         if values.count > capacity { values.removeFirst(values.count - capacity) }
+        if let localResponse, issue?.extraction?.responseID == id { responses[id] = (now, localResponse) }
+        pruneResponses(now: now)
+    }
+    private func pruneResponses(now: Date) {
+        let retained = Set(values.suffix(128).map(\.id))
+        responses = responses.filter { retained.contains($0.key) && now.timeIntervalSince($0.value.created) < 900 }
+        let newest = Set(responses.sorted { $0.value.created > $1.value.created }.prefix(8).map(\.key))
+        responses = responses.filter { newest.contains($0.key) }
+    }
+    public func localResponse(id: UUID, sourceDigest: String, now: Date = Date()) -> SourceLocalResponse? {
+        pruneResponses(now: now)
+        guard values.contains(where: { $0.id == id && $0.sourceDigest == sourceDigest }) else { return nil }
+        return responses[id]?.value
     }
     public func records() -> [SourceDiagnosticRecord] { Array(values.reversed()) }
-    public func clear() { values.removeAll() }
+    public func clear() { values.removeAll(); responses.removeAll() }
     public func export() throws -> Data {
         struct Report: Encodable { let version = 1; let operations: [SourceDiagnosticRecord] }
         let data = try SourceCoding.encode(Report(operations: values))

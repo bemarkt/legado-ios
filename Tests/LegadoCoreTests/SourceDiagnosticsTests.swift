@@ -4,6 +4,37 @@ import Testing
 
 @Suite("Native source recovery and diagnostic privacy")
 struct SourceDiagnosticsTests {
+    @Test func failedResponsesAreLocalBoundedCorrelatedAndExpire() async throws {
+        let diagnostics = SourceDiagnostics(), now = Date()
+        let identity = try SourceExecutionIdentity(scope: .init(installationID: UUID()), sourceDigest: String(repeating: "d", count: 64), configuration: .object([:]))
+        let ids = (0..<9).map { _ in UUID() }
+        let marker = "private-response-marker"
+        let body = marker + String(repeating: "😀", count: 30_000)
+        for (index, id) in ids.enumerated() {
+            let response = SourceLocalResponse(response: .init(data: Data(body.utf8), statusCode: 202,
+                headers: ["content-type": "text/html; charset=utf-8", "Set-Cookie": "private-session"],
+                finalURL: URL(string: "https://user:password@fixture.invalid/book?token=private-query#secret")!))
+            let failure = SourceExtractionFailure(field: .catalog, httpStatus: 202, responseBytes: body.utf8.count, responseID: id, localResponse: response)
+            await diagnostics.record(id: id, operation: .chapters, identity: identity, issue: failure.issue,
+                elapsedMilliseconds: 1, localResponse: response, now: now.addingTimeInterval(Double(index)))
+        }
+        let last = ids.last!
+        #expect(await diagnostics.localResponse(id: ids[0], sourceDigest: identity.sourceDigest, now: now) == nil)
+        #expect(await diagnostics.localResponse(id: last, sourceDigest: "another-source", now: now) == nil)
+        let response = try #require(await diagnostics.localResponse(id: last, sourceDigest: identity.sourceDigest, now: now))
+        #expect(response.body.hasPrefix(marker) && response.truncated)
+        #expect(response.body.utf8.count <= 65_536 && !response.body.contains("�"))
+        #expect(response.finalURL == "https://fixture.invalid/book?token=private-query")
+        #expect(response.contentType == "text/html; charset=utf-8")
+        let report = String(decoding: try await diagnostics.export(), as: UTF8.self)
+        for secret in [marker, "private-session", "fixture.invalid", "private-query", "password", "text/html"] { #expect(!report.contains(secret)) }
+        #expect(await diagnostics.localResponse(id: last, sourceDigest: identity.sourceDigest, now: now.addingTimeInterval(909)) == nil)
+        let freshID = UUID(), fresh = SourceLocalResponse(response: .init(data: Data(), statusCode: 202, headers: [:], finalURL: URL(string: "https://fixture.invalid")!))
+        let issue = SourceExtractionFailure(field: .catalog, httpStatus: 202, responseBytes: 0, responseID: freshID).issue
+        await diagnostics.record(id: freshID, operation: .chapters, identity: identity, issue: issue, elapsedMilliseconds: 0, localResponse: fresh)
+        await diagnostics.clear()
+        #expect(await diagnostics.localResponse(id: freshID, sourceDigest: identity.sourceDigest) == nil)
+    }
     @Test func extractionFactsAreBoundedAndOlderDiagnosticReportsRemainReadable() async throws {
         let detail = SourceExtractionContext(field: .content, httpStatus: 999, responseBytes: Int.max)
         #expect(detail.httpStatus == nil && detail.responseBytes == 8_388_608)

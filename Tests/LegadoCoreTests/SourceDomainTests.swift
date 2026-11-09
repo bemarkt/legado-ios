@@ -68,6 +68,27 @@ private actor DelayedDomainProvider: SourceProvider {
 
 @Suite("Native source domain")
 struct SourceDomainTests {
+    @Test func offlinePreferencePersistsPerLocalBookAndOverridesInitialDefault() async throws {
+        let url = database(), archive = try SourceArchive(url: url)
+        let scope = try scope(), key = try SourceBookKey(scope: scope, bookID: "book")
+        let other = try SourceBookKey(scope: scope, bookID: "other")
+        #expect(try await !archive.offlineOnly(book: key))
+        #expect(try await archive.offlineOnly(book: key, defaultValue: true))
+        try await archive.setOfflineOnly(false, book: key)
+        let reopened = try SourceArchive(url: url)
+        #expect(try await !reopened.offlineOnly(book: key, defaultValue: true))
+        #expect(try await reopened.offlineOnly(book: other, defaultValue: true))
+        try await reopened.setOfflineOnly(true, book: key)
+        #expect(try await archive.offlineOnly(book: key))
+        #expect(try await !archive.offlineOnly(book: other))
+    }
+    @Test func nativeCatalogPageLimitRemainsOneThousand() async throws {
+        let scope = try SourceScope(installationID: UUID())
+        let chapters = (0..<1001).map { SourceWire.Chapter(ref: .init(id: String($0)), title: "Chapter \($0)") }
+        let provider = try DomainFixtureProvider(scope: scope, pages: [.init(items: chapters, nextCursor: .null)])
+        #expect(provider.descriptor.maximumChapterPageItems == 1000)
+        await #expect(throws: SourceDomainError.self) { try await SourceCatalogLoader().load(provider: provider, book: .init(id: "book")) }
+    }
     @Test func websiteSessionsShareLocalBookIdentityButNotOnlineResultsOrScriptState() async throws {
         let installation = UUID(), local = try SourceScope(installationID: UUID())
         #expect(throws: SourceDomainError.self) {

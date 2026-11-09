@@ -64,6 +64,8 @@ final class NativeSourceLibrary: ObservableObject {
     private var resultIDs = Set<String>()
     private var anchorWrite: Task<Void, Never>?
     private var anchorGeneration = UUID()
+    private var readingPreferenceWrite: Task<Void, Never>?
+    private var readingPreferenceGeneration = UUID()
 
     func services() throws -> (SourceArchive, SourceLibraryService) {
         if let database, let service { return (database, service) }
@@ -250,6 +252,9 @@ final class NativeSourceLibrary: ObservableObject {
         let captured = try await services().0.executionSnapshot(scope: scope)
         guard captured.installation.digest == installation.digest else { throw SourceDomainError(.stale, "书源已更新，请重新打开账号设置。") }
         let session = try await credentials.session(scope: scope, allowedOrigins: Set(captured.installation.origins))
+        // Register the previous generation even if the first action after upgrading is login.
+        // Otherwise old script state could survive the first explicit credential change.
+        try await services().0.reconcileWebsiteSession(scope: scope, revision: session.revision, gate: session.commitGate)
         guard try await selectedScope(installation) == scope else { throw SourceDomainError(.stale, "账号已切换，请重新打开。") }
         try requireStableAccount(installation.id)
         try session.commitGate.check()
@@ -288,6 +293,22 @@ final class NativeSourceLibrary: ObservableObject {
         }
         let url = try SourceHostHTTPPolicy(origins: Set(installation.origins), allowLoopbackHTTP: allowLoopbackHTTP).validate(fallbackOrigin + "/")
         return URLRequest(url: url)
+    }
+    func verificationRequest(_ installation: SourceInstallation, responseID: UUID) async throws -> NativeSourceLoginRequest {
+        guard let current = try await services().0.installations().first(where: { $0.id == installation.id }),
+              current.digest == installation.digest,
+              let response = await SourceDiagnostics.shared.localResponse(id: responseID, sourceDigest: installation.digest),
+              let address = response.finalURL else {
+            throw SourceDomainError(.stale, "此响应已过期或书源已更新，请重新执行失败的操作。")
+        }
+        let url = try SourceHostHTTPPolicy(origins: Set(current.origins), allowLoopbackHTTP: allowLoopbackHTTP).validate(address)
+        guard let origin = SourceHostHTTPPolicy.origin(url) else { throw SourceDomainError(.invalidInput, "响应地址无效。") }
+        var request = try websiteLoginRequest(current, fallbackOrigin: origin)
+        // Navigate to the exact failed page with fresh current credentials; never replay captured headers or a POST.
+        request.url = url
+        let scope = try await selectedScope(current)
+        let context = try await credentialContext(current, accountID: scope.accountID)
+        return .init(context: context, origin: origin, webRequest: request)
     }
     func saveBearer(_ token: String?, origin: String, context: NativeSourceCredentialContext) async throws {
         try await validateCredentialContext(context)
@@ -422,6 +443,21 @@ final class NativeSourceLibrary: ObservableObject {
         }
     }
     func pendingPositionWrites() async { await anchorWrite?.value }
+    func offlineOnly(book: SourceBookKey, defaultValue: Bool = false) async throws -> Bool {
+        await readingPreferenceWrite?.value
+        return try await services().0.offlineOnly(book: book, defaultValue: defaultValue)
+    }
+    func saveOfflineOnly(_ value: Bool, book: SourceBookKey) {
+        let previous = readingPreferenceWrite, generation = UUID()
+        readingPreferenceGeneration = generation
+        // The model owns pending writes so dismissing a details page cannot cancel a choice.
+        readingPreferenceWrite = Task {
+            await previous?.value
+            defer { if readingPreferenceGeneration == generation { readingPreferenceWrite = nil } }
+            do { try await services().0.setOfflineOnly(value, book: book) }
+            catch { message = error.localizedDescription }
+        }
+    }
     func add(_ hit: SearchHit) async throws {
         let provider = try await provider(hit.installation)
         guard provider.descriptor.identity == hit.identity else {

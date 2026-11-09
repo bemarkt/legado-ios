@@ -247,12 +247,29 @@ private struct NativeSourceImportView: View {
     }
 }
 
+struct NativeSourceEditorRequest: Identifiable {
+    let id = UUID()
+    let installation: SourceInstallation
+    let text: String
+}
+
+@MainActor
+final class NativeSourceEditorPresentation: ObservableObject {
+    @Published var request: NativeSourceEditorRequest?
+    func edit(_ installation: SourceInstallation, text: String? = nil) {
+        request = .init(installation: installation, text: text ?? installation.source)
+    }
+}
+
 struct NativeSourceSettingsView: View {
     @ObservedObject var model: NativeSourceLibrary
     let initialInstallation: SourceInstallation
     private var installation: SourceInstallation { model.installations.first { $0.id == initialInstallation.id } ?? initialInstallation }
-    @State private var editing = false
-    @State private var editingText = ""
+    @StateObject private var editor: NativeSourceEditorPresentation
+    init(model: NativeSourceLibrary, initialInstallation: SourceInstallation, editor: NativeSourceEditorPresentation = .init()) {
+        self.model = model; self.initialInstallation = initialInstallation
+        _editor = StateObject(wrappedValue: editor)
+    }
     @State private var history: [SourceInstallation] = []
     @State private var snapshot: SourceSnapshot?
     @State private var configurationScope: SourceScope?
@@ -274,13 +291,13 @@ struct NativeSourceSettingsView: View {
                 }.frame(minHeight: 44)
             }
             Section("源代码") {
-                Button("查看或修改源码") { editingText = installation.source; editing = true }
+                Button("查看或修改源码") { editor.edit(installation) }
                 if installation.originURL != nil {
-                    Button("检查原始地址的更新") { editingText = installation.source; editing = true }
+                    Button("检查原始地址的更新") { editor.edit(installation) }
                 }
                 ForEach(Array(history.enumerated()), id: \.offset) { _, previous in
                     Button("审阅历史版本 \(previous.version) · \(previous.digest.prefix(8))") {
-                        editingText = previous.source; editing = true
+                        editor.edit(installation, text: previous.source)
                     }
                 }
             }
@@ -307,8 +324,8 @@ struct NativeSourceSettingsView: View {
         }
         .navigationTitle("书源设置").navigationBarTitleDisplayMode(.inline)
         .scrollDismissesKeyboard(.interactively)
-        .sheet(isPresented: $editing) {
-            NativeSourceEditorView(model: model, installation: installation, initialText: editingText)
+        .sheet(item: $editor.request) { request in
+            NativeSourceEditorView(model: model, installation: request.installation, initialText: request.text).id(request.id)
         }
         .task(id: installation.digest + ":" + accountID) {
             configurationScope = nil; snapshot = nil; values = [:]; feedback = nil
@@ -362,7 +379,7 @@ private struct NativeSourceFile: FileDocument {
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper { FileWrapper(regularFileWithContents: Data(text.utf8)) }
 }
 
-private struct NativeSourceEditorView: View {
+struct NativeSourceEditorView: View {
     @ObservedObject var model: NativeSourceLibrary
     let installation: SourceInstallation
     @Environment(\.dismiss) private var dismiss

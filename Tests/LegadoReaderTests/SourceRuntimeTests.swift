@@ -606,6 +606,66 @@ final class SourceRuntimeTests: XCTestCase {
         let attachment = XCTAttachment(image: image); attachment.name = "legado-json-source-settings"; attachment.lifetime = .keepAlways; add(attachment)
     }
 
+    func testSourceEditorSheetReceivesCurrentAndHistoricalTextOnEveryPresentation() async throws {
+        let model = NativeSourceLibrary(databaseURL: FileManager.default.temporaryDirectory.appendingPathComponent("editor-sheet-\(UUID())/archive.sqlite"))
+        let text = #"{"bookSourceUrl":"https://fixture.invalid","bookSourceName":"Editor payload","ruleToc":{"chapterList":".chapter"}}"#
+        try await model.install(model.inspectCandidates(text))
+        let installation = try XCTUnwrap(model.installations.first)
+        let presentation = NativeSourceEditorPresentation()
+        let host = UIHostingController(rootView: NavigationStack {
+            NativeSourceSettingsView(model: model, initialInstallation: installation, editor: presentation)
+        })
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previous = scene.windows.first(where: \.isKeyWindow)
+        let window = UIWindow(windowScene: scene); window.rootViewController = host; window.makeKeyAndVisible()
+        defer { window.isHidden = true; previous?.makeKeyAndVisible() }
+        try await Task.sleep(for: .milliseconds(300))
+        for expected in [installation.source, text.replacingOccurrences(of: "Editor payload", with: "Historical payload"), installation.source] {
+            // Same action as the settings buttons, exercising the real SwiftUI sheet and TextEditor.
+            presentation.edit(installation, text: expected)
+            var editor: UITextView?
+            for _ in 0..<100 {
+                window.layoutIfNeeded()
+                editor = descendants(window).compactMap { $0 as? UITextView }.first { $0.text == expected }
+                if editor != nil { break }
+                try await Task.sleep(for: .milliseconds(30))
+            }
+            XCTAssertEqual(try XCTUnwrap(editor, "Presented editor is blank or contains a stale draft").text, expected)
+            let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in window.drawHierarchy(in: window.bounds, afterScreenUpdates: true) }
+            let attachment = XCTAttachment(image: image); attachment.name = "source-editor-presented-text"; attachment.lifetime = .keepAlways; add(attachment)
+            presentation.request = nil
+            for _ in 0..<100 {
+                if host.presentedViewController == nil { break }
+                try await Task.sleep(for: .milliseconds(30))
+            }
+        }
+    }
+
+    func testOfflineBookWithoutCatalogDoesNotStartAutomaticSourceOperation() async throws {
+        let model = NativeSourceLibrary(databaseURL: FileManager.default.temporaryDirectory.appendingPathComponent("offline-details-\(UUID())/archive.sqlite"), allowLoopbackHTTP: true)
+        let snapshot = try await source("return {items:[],nextCursor:null};", topLevel: "const offlineDetailsFixture = true;")
+        try await model.install(snapshot)
+        let installation = try XCTUnwrap(model.installations.first)
+        let provider = try await model.provider(installation)
+        let book = try await model.services().1.addBook(provider: provider, ref: .init(id: "b"))
+        let host = UIHostingController(rootView: NavigationStack {
+            NativeSourceBookView(model: model, item: .init(installation: installation, book: book), initiallyOffline: true)
+        })
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previous = scene.windows.first(where: \.isKeyWindow)
+        let window = UIWindow(windowScene: scene); window.rootViewController = host; window.makeKeyAndVisible()
+        defer { window.isHidden = true; previous?.makeKeyAndVisible() }
+        for _ in 0..<100 {
+            if descendants(window).compactMap({ $0 as? UISwitch }).contains(where: { $0.isEnabled && $0.isOn }) { break }
+            try await Task.sleep(for: .milliseconds(30))
+        }
+        try await Task.sleep(for: .milliseconds(300))
+        let toggle = try XCTUnwrap(descendants(window).compactMap { $0 as? UISwitch }.first)
+        XCTAssertTrue(toggle.isOn && toggle.isEnabled)
+        let records = await SourceDiagnostics.shared.records()
+        XCTAssertFalse(records.contains { $0.sourceDigest == installation.digest && $0.operation == .chapters })
+    }
+
     func testLegacyMigrationReviewAdoptionAndOfflineReaderOnIOS() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("migration-ios-" + UUID().uuidString)
         let databaseURL = directory.appendingPathComponent("original.sqlite3")
@@ -641,6 +701,25 @@ final class SourceRuntimeTests: XCTestCase {
         await model.reload()
         let item = try XCTUnwrap(model.shelf.first)
         let archive = try model.services().0
+        let initialOffline = try await model.offlineOnly(book: item.book.key)
+        XCTAssertTrue(initialOffline, "Imported books must initially open offline")
+        model.saveOfflineOnly(true, book: item.book.key)
+        model.saveOfflineOnly(false, book: item.book.key)
+        let chosenOffline = try await model.offlineOnly(book: item.book.key, defaultValue: true)
+        XCTAssertFalse(chosenOffline, "Explicit choice must override the migration default and pending earlier writes")
+        let detailHost = UIHostingController(rootView: NavigationStack { NativeSourceBookView(model: model, item: item, initiallyOffline: true) })
+        let detailScene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previousDetailWindow = detailScene.windows.first(where: \.isKeyWindow)
+        let detailWindow = UIWindow(windowScene: detailScene); detailWindow.rootViewController = detailHost; detailWindow.makeKeyAndVisible()
+        defer { detailWindow.isHidden = true; previousDetailWindow?.makeKeyAndVisible() }
+        var offlineToggle: UISwitch?
+        for _ in 0..<100 {
+            offlineToggle = descendants(detailWindow).compactMap { $0 as? UISwitch }.first
+            if let offlineToggle, offlineToggle.isEnabled, !offlineToggle.isOn { break }
+            try await Task.sleep(for: .milliseconds(30))
+        }
+        XCTAssertFalse(try XCTUnwrap(offlineToggle).isOn, "Opening imported book details must not force offline mode back on")
+        detailWindow.isHidden = true; previousDetailWindow?.makeKeyAndVisible()
         let savedCatalog = try await archive.catalog(book: item.book.key)
         let catalog = try XCTUnwrap(savedCatalog)
         let notes = try await archive.importedAnnotations(book: item.book.key)
@@ -676,6 +755,8 @@ final class SourceRuntimeTests: XCTestCase {
         }
         let reopened = NativeSourceLibrary(databaseURL: activeURL, credentials: SourceCredentialVault(persistence: SourceEphemeralCredentials()))
         await reopened.reload(); XCTAssertEqual(reopened.shelf.count, 1)
+        let reopenedOffline = try await reopened.offlineOnly(book: item.book.key, defaultValue: true)
+        XCTAssertFalse(reopenedOffline, "Offline choice must survive app restart")
         let preserved = try await database.loadBooks()
         XCTAssertEqual(preserved[0], book)
         XCTAssertEqual(try LegacyMigrationMapper.verify(at: mapping, snapshotAt: snapshot), report)
@@ -991,7 +1072,19 @@ extension SourceRuntimeTests {
         let (archive, library) = try model.services()
         let book = try await library.addBook(provider: initial, ref: XCTUnwrap(results.items.first?.ref))
         do { _ = try await library.refreshCatalog(provider: initial, book: book.details.ref); XCTFail("Verification shell accepted as a catalog") }
-        catch let error as SourceExtractionFailure { XCTAssertEqual(error.context.httpStatus, 202); XCTAssertEqual(error.context.field, .catalog) }
+        catch let error as SourceExtractionFailure {
+            XCTAssertEqual(error.context.httpStatus, 202); XCTAssertEqual(error.context.field, .catalog)
+            let responseID = try XCTUnwrap(error.context.responseID)
+            let captured = await SourceDiagnostics.shared.localResponse(id: responseID, sourceDigest: installation.digest)
+            XCTAssertFalse(try XCTUnwrap(captured).body.isEmpty)
+            let verification = try await model.verificationRequest(installation, responseID: responseID)
+            XCTAssertEqual(verification.webRequest?.url?.path, "/website/catalog", "Verification must open the failed page, not just the login homepage")
+            XCTAssertEqual(verification.webRequest?.value(forHTTPHeaderField: "User-Agent"), LegadoURLBuilder.defaultUserAgent)
+            XCTAssertNil(verification.webRequest?.value(forHTTPHeaderField: "Cookie"))
+            let report = String(decoding: try await SourceDiagnostics.shared.export(), as: UTF8.self)
+            XCTAssertFalse(report.contains("/website/catalog"))
+            XCTAssertFalse(report.contains(try XCTUnwrap(captured).body))
+        }
 
         let context = try await model.credentialContext(installation, accountID: "guest")
         let request = try model.websiteLoginRequest(installation, fallbackOrigin: origin)

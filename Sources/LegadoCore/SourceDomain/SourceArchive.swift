@@ -564,6 +564,15 @@ public actor SourceArchive {
     }
 
     public func books(scope: SourceScope) throws -> [SourceSavedBook] { try records("book", scope: scopeKey(scope), as: SourceSavedBook.self) }
+    /// A local reading preference, independent of the website's login and source configuration.
+    /// Imported books start offline only until the reader makes an explicit choice.
+    public func offlineOnly(book: SourceBookKey, defaultValue: Bool = false) throws -> Bool {
+        if let saved: Bool = try record("book-offline-only", scope: scopeKey(book.scope), key: book.bookID) { return saved }
+        return try defaultValue || importedBookMetadata(book) != nil
+    }
+    public func setOfflineOnly(_ value: Bool, book: SourceBookKey) throws {
+        try put("book-offline-only", scope: scopeKey(book.scope), key: book.bookID, value: value)
+    }
     public func saveBook(_ value: SourceSavedBook, gate: SourceCommitGate? = nil) throws {
         guard value.key.bookID == value.details.ref.id else { throw SourceDomainError(.invalidInput, "Book identity mismatch") }
         try put("book", scope: scopeKey(value.key.scope), key: value.key.bookID, value: value, gate: gate)

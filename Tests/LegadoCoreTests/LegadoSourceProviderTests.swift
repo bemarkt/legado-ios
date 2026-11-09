@@ -75,6 +75,22 @@ private actor LegadoFlowFixture {
 }
 
 struct LegadoSourceProviderTests {
+    @Test func compatibilityCatalogProfileAcceptsLongSinglePageWithinItsOwnBound() async throws {
+        let fixture = LegadoFlowFixture()
+        var source = self.source()
+        var toc = TocRule()
+        toc.chapterList = "@js:Array.from({length:1001},(_,i)=>({text:'Chapter '+i,href:'/chapter/'+i}))"
+        toc.chapterName = "text"; toc.chapterUrl = "href"; source.ruleToc = toc
+        let provider = try self.provider(fixture, source: source)
+        let search = try await provider.search(.init(query: "fixture"))
+        let book = try await provider.book(.init(ref: search.items[0].ref))
+        let catalog = try await SourceCatalogLoader().load(provider: provider, book: book.ref)
+        #expect(catalog.chapters.count == 1001)
+        #expect(catalog.chapters.last?.title == "Chapter 1000")
+        source.ruleToc?.chapterList = "@js:Array.from({length:5001},(_,i)=>({text:'Chapter '+i,href:'/chapter/'+i}))"
+        let overBudget = try self.provider(fixture, scope: provider.descriptor.identity.scope, source: source)
+        await #expect(throws: SourceDomainError.self) { try await SourceCatalogLoader().load(provider: overBudget, book: book.ref) }
+    }
     @Test func htmlCatalogScriptCanReturnVolumesAndChapterObjectsWithBarePropertyRules() async throws {
         let fixture = LegadoFlowFixture()
         await fixture.useHTMLExtraction()
@@ -115,6 +131,11 @@ struct LegadoSourceProviderTests {
         } catch let error as SourceExtractionFailure {
             #expect(error.context.field == .catalog && error.context.httpStatus == 202)
             #expect(error.context.responseBytes! > 0)
+            let id = try #require(error.context.responseID)
+            let response = try #require(await SourceDiagnostics.shared.localResponse(id: id, sourceDigest: provider.descriptor.identity.sourceDigest))
+            #expect(response.finalURL == "https://fixture.invalid/toc/1")
+            #expect(!response.body.isEmpty)
+            #expect(await SourceDiagnostics.shared.records().contains { $0.id == id && $0.operation == .chapters && $0.code == "EMPTY_CATALOG" })
         }
         do {
             _ = try await library.chapter(provider: provider, book: book.details.ref, chapter: catalog.chapters[0].ref, policy: .reload)

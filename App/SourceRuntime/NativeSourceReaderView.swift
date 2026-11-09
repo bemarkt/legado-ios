@@ -7,8 +7,11 @@ struct NativeSourceBookView: View {
     @State private var catalog: SourceCatalog?
     @State private var selected: SourceWire.Chapter?
     @State private var offline: Bool
+    @State private var preferenceLoaded = false
+    private let initiallyOffline: Bool
     init(model: NativeSourceLibrary, item: NativeSourceLibrary.ShelfBook, initiallyOffline: Bool = false) {
-        self.model = model; self.item = item; _offline = State(initialValue: initiallyOffline)
+        self.model = model; self.item = item; self.initiallyOffline = initiallyOffline
+        _offline = State(initialValue: initiallyOffline)
     }
     @State private var busy = false
     @State private var task: Task<Void, Never>?
@@ -29,7 +32,10 @@ struct NativeSourceBookView: View {
                 }
                 if let author = item.book.details.author { Text(author).foregroundStyle(.secondary) }
                 if let description = item.book.details.description, !description.isEmpty { Text(description).font(.footnote).lineLimit(6) }
-                Toggle("仅使用离线章节", isOn: $offline)
+                Toggle("仅使用离线章节", isOn: Binding(get: { offline }, set: {
+                    offline = $0; model.saveOfflineOnly($0, book: item.book.key)
+                    if $0 { operationID = UUID(); task?.cancel(); task = nil; busy = false }
+                })).disabled(!preferenceLoaded)
             }
             Section {
                 if let catalog, !catalog.chapters.isEmpty {
@@ -37,9 +43,9 @@ struct NativeSourceBookView: View {
                         selectedAnchor = nil
                         selected = catalog.chapters.first(where: { $0.ref.id == resumeID }) ?? catalog.chapters.first
                     }
-                    Button("下载全部章节") { retryDownload = true; start { try await download(catalog) } }.disabled(offline || busy)
+                    Button("下载全部章节") { retryDownload = true; start { try await download(catalog) } }.disabled(!preferenceLoaded || offline || busy)
                 }
-                Button("刷新目录") { retryDownload = false; start { try await refresh() } }.disabled(offline || busy)
+                Button("刷新目录") { retryDownload = false; start { try await refresh() } }.disabled(!preferenceLoaded || offline || busy)
                 if let progress = downloadProgress {
                     VStack(alignment: .leading, spacing: 8) {
                         ProgressView(value: Double(progress.completed), total: Double(max(1, progress.total)))
@@ -97,16 +103,21 @@ struct NativeSourceBookView: View {
         }
         .navigationTitle("书籍详情").navigationBarTitleDisplayMode(.inline)
         .task {
+            preferenceLoaded = false
             do {
                 let archive = try model.services().0
+                let savedOffline = try await model.offlineOnly(book: item.book.key, defaultValue: initiallyOffline)
+                try Task.checkCancellation()
+                offline = savedOffline; preferenceLoaded = true
                 await model.pendingPositionWrites()
                 catalog = try await archive.catalog(book: item.book.key)
                 try Task.checkCancellation()
                 resumeID = try await archive.anchor(book: item.book.key)?.chapter.chapterID
                 notes = try await archive.importedAnnotations(book: item.book.key)
-                if try await archive.importedBookMetadata(item.book.key) != nil { offline = true }
-                if catalog == nil { start { try await refresh() } }
-            } catch { issue = SourceIssue(error: error) }
+                try Task.checkCancellation()
+                if catalog == nil, !offline { start { try await refresh() } }
+            } catch is CancellationError { }
+            catch { issue = SourceIssue(error: error) }
         }
         .navigationDestination(isPresented: Binding(get: { selected != nil }, set: { if !$0 { selected = nil } })) {
             if let selected, let catalog {
@@ -126,6 +137,7 @@ struct NativeSourceBookView: View {
         }
     }
     private func refresh() async throws {
+        guard preferenceLoaded, !offline else { return }
         let provider = try await model.provider(item.installation, scope: item.book.key.scope)
         let fresh = try await model.services().1.refreshCatalog(provider: provider, book: item.book.details.ref)
         try Task.checkCancellation()
@@ -136,6 +148,7 @@ struct NativeSourceBookView: View {
         catalog = fresh
     }
     private func download(_ catalog: SourceCatalog) async throws {
+        guard preferenceLoaded, !offline else { return }
         let provider = try await model.provider(item.installation, scope: item.book.key.scope)
         let token = operationID
         let count = try await model.services().1.download(provider: provider.prioritized(.background), catalog: catalog) { progress in

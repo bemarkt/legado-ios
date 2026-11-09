@@ -16,7 +16,10 @@ public struct LegadoSourceProvider: SourceProvider {
               ["https", "http"].contains(url.scheme ?? ""), url.host != nil else {
             throw RuleEngineError.unsupportedRule(rule: source.bookSourceUrl, feature: "Only HTTP text-book sources are supported")
         }
-        self.source = source; self.descriptor = descriptor; self.environment = environment
+        self.source = source
+        self.descriptor = .init(identity: descriptor.identity, name: descriptor.name, supportsSearch: descriptor.supportsSearch,
+                                commitGate: descriptor.commitGate, maximumChapterPageItems: 5000)
+        self.environment = environment
     }
 
     /// Builds durable references from already stored legacy entities without executing rules or networking.
@@ -91,7 +94,7 @@ public struct LegadoSourceProvider: SourceProvider {
                 let host = try await environment(control, priorityOverride ?? priority)
                 guard host.control === control else { throw SourceDomainError(.invalidInput, "Host returned another operation control") }
                 try control.check()
-                let result = try await body(Operation(source: source, descriptor: descriptor, host: host))
+                let result = try await body(Operation(source: source, descriptor: descriptor, host: host, operationID: operationID))
                 try Task.checkCancellation(); try control.check()
                 return result
             } onCancel: { control.cancel() }
@@ -100,7 +103,8 @@ public struct LegadoSourceProvider: SourceProvider {
             return result
         } catch {
             await SourceDiagnostics.shared.record(id: operationID, operation: operation, identity: descriptor.identity,
-                issue: SourceIssue(compatibilityError: error), elapsedMilliseconds: Int(started.duration(to: .now) / .milliseconds(1)))
+                issue: SourceIssue(compatibilityError: error), elapsedMilliseconds: Int(started.duration(to: .now) / .milliseconds(1)),
+                localResponse: (error as? SourceExtractionFailure)?.localResponse)
             throw error
         }
     }
@@ -145,16 +149,18 @@ public struct LegadoSourceProvider: SourceProvider {
         var fragment = false
         var httpStatus: Int?
         var responseBytes: Int?
+        var localResponse: SourceLocalResponse?
     }
     private struct Operation: Sendable {
         let source: BookSource
         let descriptor: SourceProviderDescriptor
         let host: JavaScriptHostEnvironment
+        let operationID: UUID
         let engine = RuleEngine()
         let javascript = JavaScriptRuleEvaluator()
         var context: RuleExecutionContext
-        init(source: BookSource, descriptor: SourceProviderDescriptor, host: JavaScriptHostEnvironment) {
-            self.source = source; self.descriptor = descriptor; self.host = host
+        init(source: BookSource, descriptor: SourceProviderDescriptor, host: JavaScriptHostEnvironment, operationID: UUID) {
+            self.source = source; self.descriptor = descriptor; self.host = host; self.operationID = operationID
             context = .init(baseURL: source.bookSourceUrl, source: source, environment: host)
         }
         static func json<Value: Encodable>(_ value: Value) throws -> SourceJSON {
@@ -204,7 +210,7 @@ public struct LegadoSourceProvider: SourceProvider {
             context.variables.merge(response.requestVariables) { _, value in value }
             context.baseURL = response.finalURL.absoluteString
             return Document(value: response.decodedJSON ?? .string(response.decodedText), base: context.baseURL,
-                            httpStatus: response.statusCode, responseBytes: response.data.count)
+                            httpStatus: response.statusCode, responseBytes: response.data.count, localResponse: .init(response: response))
         }
         mutating func evaluate(_ rule: String?, _ document: Document, mode: RuleEvaluationMode = .string) async throws -> RuleEvaluation {
             try Task.checkCancellation(); try host.control.check()
@@ -342,7 +348,8 @@ public struct LegadoSourceProvider: SourceProvider {
             context.variables = pageVariables
             let next = try await links(rules.nextTocUrl, document)
             if items.isEmpty && references.isEmpty && cursor.offset == 0 && next.isEmpty && cursor.pending.isEmpty {
-                throw SourceExtractionFailure(field: .catalog, httpStatus: document.httpStatus, responseBytes: document.responseBytes)
+                throw SourceExtractionFailure(field: .catalog, httpStatus: document.httpStatus, responseBytes: document.responseBytes,
+                                              responseID: operationID, localResponse: document.localResponse)
             }
             for link in next {
                 let digest = SourceCoding.digest(Data(link.utf8))
@@ -377,7 +384,8 @@ public struct LegadoSourceProvider: SourceProvider {
                 let document = try await fetch(request)
                 if title == nil { title = try await string(rules.title, document) }
                 guard let text = try await string(rule, document) else {
-                    throw SourceExtractionFailure(field: .content, httpStatus: document.httpStatus, responseBytes: document.responseBytes)
+                    throw SourceExtractionFailure(field: .content, httpStatus: document.httpStatus, responseBytes: document.responseBytes,
+                                                  responseID: operationID, localResponse: document.localResponse)
                 }
                 bytes += text.utf8.count
                 guard bytes <= 8_388_608 else { throw SourceDomainError(.resourceLimit, "Chapter content exceeds byte budget") }

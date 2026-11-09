@@ -27,6 +27,11 @@ struct NativeSourceIssueView: View {
             }
             if let extraction = issue.extraction {
                 Text(extraction.field.rawValue + (extraction.httpStatus.map { " · HTTP \($0)" } ?? "")).font(.caption.monospaced()).foregroundStyle(.secondary)
+                if let responseID = extraction.responseID {
+                    NavigationLink("查看失败响应") {
+                        NativeSourceResponseView(model: model, installation: installation, responseID: responseID, extraction: extraction)
+                    }.frame(minHeight: 44)
+                }
             }
             if let retry, issue.recovery == .retry || issue.code == "CANCELLED" || issue.extraction != nil {
                 TimelineView(.periodic(from: .now, by: 1)) { context in
@@ -44,6 +49,64 @@ struct NativeSourceIssueView: View {
                     .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { accounts = false } } }
             }
         }
+    }
+}
+
+/// Captured HTML is displayed as inert, selectable text, never loaded into a web view.
+struct NativeSourceResponseView: View {
+    @ObservedObject var model: NativeSourceLibrary
+    let installation: SourceInstallation
+    let responseID: UUID
+    let extraction: SourceExtractionContext
+    @State private var response: SourceLocalResponse?
+    @State private var loaded = false
+    @State private var login: NativeSourceLoginRequest?
+    @State private var feedback: String?
+    @State private var preparing = false
+    var body: some View {
+        List {
+            Section("失败响应") {
+                LabeledContent("提取规则", value: extraction.field.rawValue)
+                if let status = extraction.httpStatus { LabeledContent("HTTP 状态", value: String(status)) }
+                if let bytes = extraction.responseBytes { LabeledContent("响应字节数", value: String(bytes)) }
+                if let response {
+                    if let type = response.contentType { LabeledContent("Content-Type", value: type) }
+                    if let address = response.finalURL { Text(address).font(.footnote.monospaced()).textSelection(.enabled) }
+                    Button("打开此页面验证") {
+                        preparing = true; feedback = nil
+                        Task {
+                            defer { preparing = false }
+                            do { login = try await model.verificationRequest(installation, responseID: responseID) }
+                            catch { feedback = error.localizedDescription }
+                        }
+                    }.frame(minHeight: 44).disabled(preparing || response.finalURL == nil)
+                    Text("完成网页验证后点保存登录，再返回刷新目录或正文。此操作会重新访问页面，HTTP 202 本身不能说明是否缺少登录。")
+                        .font(.footnote).foregroundStyle(.secondary)
+                } else if loaded {
+                    Text("响应未保留或已过期，请重新执行失败的操作后查看。旧版诊断报告仅包含状态和字节数。")
+                        .font(.footnote).foregroundStyle(.secondary)
+                } else { ProgressView("正在读取…") }
+                if let feedback { Text(feedback).font(.footnote).foregroundStyle(.secondary) }
+            }
+            if let response {
+                Section {
+                    Text(response.body.isEmpty ? "（空响应）" : response.body)
+                        .font(.caption.monospaced()).textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if response.truncated { Text("内容已截断，仅保留前 64 KiB UTF-8 文本。原始响应大小见上方。") }
+                } header: { Text("供规则解析的响应文本") } footer: {
+                    Text("文本仅供查看，不执行其中的脚本。响应可能含账号或阅读信息；普通诊断导出不包含它。仅在本次运行保留最近 8 份失败响应，15 分钟后过期，清除诊断会一并删除。")
+                }
+            }
+        }
+        .navigationTitle("响应详情").navigationBarTitleDisplayMode(.inline)
+        .privacySensitive()
+        .task {
+            response = await SourceDiagnostics.shared.localResponse(id: responseID, sourceDigest: installation.digest)
+            loaded = true
+        }
+        .onDisappear { response = nil; loaded = false }
+        .sheet(item: $login) { request in NativeSourceLoginView(model: model, request: request) }
     }
 }
 
@@ -65,7 +128,7 @@ struct NativeSourceDiagnosticsView: View {
     var body: some View {
         List {
             Section {
-                Text("最近 128 次书源操作的状态和耗时，仅在本次运行中保留。报告不包含查询词、网站地址、凭据或正文。")
+                Text("最近 128 次书源操作的状态和耗时，仅在本次运行中保留。失败响应可在详情中于本机查看；导出报告不包含查询词、网站地址、凭据或正文。")
                     .font(.footnote).foregroundStyle(.secondary)
                 Button("导出诊断记录") {
                     Task {
@@ -110,6 +173,7 @@ private struct NativeSourceDiagnosticDetailView: View {
     @State private var excerpt: SourceCodeExcerpt?
     @State private var loaded = false
     @State private var feedback: String?
+    @State private var editor: NativeSourceEditorRequest?
     var body: some View {
         List {
             Section("操作记录") {
@@ -126,6 +190,11 @@ private struct NativeSourceDiagnosticDetailView: View {
             Section("对应源码") {
                 if let source {
                     Text(source.name + " · " + source.version)
+                    if let extraction = record.extraction, let responseID = extraction.responseID {
+                        NavigationLink("查看失败响应") {
+                            NativeSourceResponseView(model: model, installation: source, responseID: responseID, extraction: extraction)
+                        }.frame(minHeight: 44)
+                    }
                     if let excerpt {
                         Text("第 \(excerpt.line) 行，第 \(excerpt.column) 列").font(.subheadline)
                         ForEach(excerpt.lines) { line in
@@ -138,9 +207,12 @@ private struct NativeSourceDiagnosticDetailView: View {
                             .listRowBackground(line.selected ? Color.accentColor.opacity(0.1) : Color.clear)
                         }
                     } else if feedback == nil {
-                        Text("此操作未提供可用源码位置。可在实验室检查完整文件。").font(.footnote).foregroundStyle(.secondary)
+                        Text("此操作未提供可用源码位置。可查看对应版本的完整文件。").font(.footnote).foregroundStyle(.secondary)
                     }
-                    if let operation = SourceOperation(rawValue: record.operation.rawValue) {
+                    Button("查看对应源码") {
+                        editor = .init(installation: model.installations.first { $0.id == source.id } ?? source, text: source.source)
+                    }.frame(minHeight: 44)
+                    if source.format == .nativeModule, let operation = SourceOperation(rawValue: record.operation.rawValue) {
                         NavigationLink("在实验室查看并重试") {
                             SourceProtocolLabView(initialSource: source.source, initialOperation: operation)
                         }.frame(minHeight: 44)
@@ -155,6 +227,9 @@ private struct NativeSourceDiagnosticDetailView: View {
             }
         }
         .navigationTitle("诊断详情").navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $editor) { request in
+            NativeSourceEditorView(model: model, installation: request.installation, initialText: request.text).id(request.id)
+        }
         .task {
             defer { loaded = true }
             do {

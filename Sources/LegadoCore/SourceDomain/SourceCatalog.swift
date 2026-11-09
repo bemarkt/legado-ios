@@ -78,7 +78,7 @@ public struct SourceCatalogLoader: Sendable {
             let page = try await provider.chapters(.init(book: book, cursor: cursor))
             try Task.checkCancellation()
             guard provider.descriptor.identity == identity else { throw SourceDomainError(.stale, "Source changed during catalog loading") }
-            guard page.items.count <= 1000 else { throw SourceDomainError(.resourceLimit, "Catalog page exceeds item budget") }
+            guard page.items.count <= provider.descriptor.maximumChapterPageItems else { throw SourceDomainError(.resourceLimit, "Catalog page exceeds provider profile budget") }
             if let expected = revision, page.revision != expected { throw SourceDomainError(.catalogChanged, "Catalog revision changed between pages") }
             if let value = page.revision {
                 guard !value.isEmpty else { throw SourceDomainError(.invalidData, "Empty catalog revision") }

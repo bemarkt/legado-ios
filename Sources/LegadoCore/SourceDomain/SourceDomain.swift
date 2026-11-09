@@ -179,9 +179,12 @@ public struct SourceProviderDescriptor: Sendable {
     public let identity: SourceExecutionIdentity
     public let name: String
     public let supportsSearch: Bool
+    /// A host-selected profile bound. Native modules retain the schema limit of 1,000.
+    public let maximumChapterPageItems: Int
     public let commitGate: SourceCommitGate?
-    public init(identity: SourceExecutionIdentity, name: String, supportsSearch: Bool = true, commitGate: SourceCommitGate? = nil) {
+    public init(identity: SourceExecutionIdentity, name: String, supportsSearch: Bool = true, commitGate: SourceCommitGate? = nil, maximumChapterPageItems: Int = 1000) {
         self.identity = identity; self.name = name; self.supportsSearch = supportsSearch; self.commitGate = commitGate
+        self.maximumChapterPageItems = min(5000, max(1, maximumChapterPageItems))
     }
 }
 

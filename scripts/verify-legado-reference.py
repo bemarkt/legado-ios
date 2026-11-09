@@ -40,6 +40,7 @@ def main():
     report = verify(args.checkout.resolve(strict=True), baseline)
     text = json.dumps(report, ensure_ascii=False, indent=2) + '\n'
     if args.output:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(text, encoding='utf-8', newline='\n')
     print(text, end='')
 

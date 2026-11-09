@@ -29,6 +29,9 @@ jobs:
           distribution: temurin
           java-version: '21'
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
       - uses: gradle/actions/setup-gradle@v4
       - name: Validate pinned bytes and add isolated instrumentation
         run: |
@@ -64,10 +67,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Legado-Android-Reference
-          path: |
-            build/legado-compatibility/
-            build/android-reference/checkout/app/build/reports/androidTests/
-            build/android-reference/checkout/app/build/outputs/androidTest-results/
+          path: build/legado-compatibility/
           retention-days: 14
 
   swift:
@@ -111,7 +111,7 @@ jobs:
           path: build/observations/swift
       - name: Record differences without claiming provider compatibility
         run: |
-          python3 scripts/compare-legado-reference.py protocols/legado-compatibility/corpus.json build/observations/android/legado-compatibility/android.json build/observations/swift/swift.json --output build/legado-compatibility/comparison.json
+          python3 scripts/compare-legado-reference.py protocols/legado-compatibility/corpus.json build/observations/android/android.json build/observations/swift/swift.json --output build/legado-compatibility/comparison.json
           python3 -c "import json,os; p=json.load(open('build/legado-compatibility/comparison.json')); open(os.environ['GITHUB_STEP_SUMMARY'],'a').write('Offline discovery counts: '+json.dumps(p['counts'])+'\n\nIndependent provider compatibility: **not evaluated**.\n')"
       - uses: actions/upload-artifact@v4
         if: always()

@@ -6,13 +6,18 @@ struct NativeSourceBookView: View {
     let item: NativeSourceLibrary.ShelfBook
     @State private var catalog: SourceCatalog?
     @State private var selected: SourceWire.Chapter?
-    @State private var offline = false
+    @State private var offline: Bool
+    init(model: NativeSourceLibrary, item: NativeSourceLibrary.ShelfBook, initiallyOffline: Bool = false) {
+        self.model = model; self.item = item; _offline = State(initialValue: initiallyOffline)
+    }
     @State private var busy = false
     @State private var task: Task<Void, Never>?
     @State private var message: String?
     @State private var issue: SourceIssue?
     @State private var retryDownload = false
     @State private var resumeID: String?
+    @State private var notes: [SourceArchive.ImportedAnnotation] = []
+    @State private var selectedAnchor: SourceReadingAnchor?
     @State private var operationID = UUID()
     @State private var downloadProgress: SourceDownloadProgress?
     var body: some View {
@@ -29,6 +34,7 @@ struct NativeSourceBookView: View {
             Section {
                 if let catalog, !catalog.chapters.isEmpty {
                     Button(resumeID == nil ? "开始阅读" : "继续阅读") {
+                        selectedAnchor = nil
                         selected = catalog.chapters.first(where: { $0.ref.id == resumeID }) ?? catalog.chapters.first
                     }
                     Button("下载全部章节") { retryDownload = true; start { try await download(catalog) } }.disabled(offline || busy)
@@ -60,10 +66,25 @@ struct NativeSourceBookView: View {
                 }
                 if let message { Text(message).font(.footnote).foregroundStyle(.secondary).textSelection(.enabled) }
             }
+            if !notes.isEmpty {
+                Section("导入的书签与笔记") {
+                    ForEach(notes) { note in
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(note.chapterTitle).font(.subheadline.bold())
+                            if !note.selectedText.isEmpty { Text(note.selectedText).font(.callout).foregroundStyle(.secondary) }
+                            if !note.note.isEmpty { Text(note.note).textSelection(.enabled) }
+                            Button("打开笔记位置") {
+                                selectedAnchor = note.anchor
+                                selected = catalog?.chapters.first { $0.ref.id == note.anchor.chapter.chapterID }
+                            }.disabled(catalog?.chapters.contains { $0.ref.id == note.anchor.chapter.chapterID } != true).frame(minHeight: 44)
+                        }
+                    }
+                }
+            }
             Section("目录 · \(catalog?.chapters.count ?? 0) 章") {
                 if let catalog {
                     ForEach(catalog.chapters, id: \.ref.id) { chapter in
-                        Button { selected = chapter } label: {
+                        Button { selectedAnchor = nil; selected = chapter } label: {
                             HStack {
                                 Text(chapter.title).foregroundStyle(.primary)
                                 Spacer()
@@ -82,12 +103,14 @@ struct NativeSourceBookView: View {
                 catalog = try await archive.catalog(book: item.book.key)
                 try Task.checkCancellation()
                 resumeID = try await archive.anchor(book: item.book.key)?.chapter.chapterID
+                notes = try await archive.importedAnnotations(book: item.book.key)
+                if try await archive.importedBookMetadata(item.book.key) != nil { offline = true }
                 if catalog == nil { start { try await refresh() } }
             } catch { issue = SourceIssue(error: error) }
         }
         .navigationDestination(isPresented: Binding(get: { selected != nil }, set: { if !$0 { selected = nil } })) {
             if let selected, let catalog {
-                NativeSourceReaderView(model: model, item: item, catalog: catalog, initialChapterID: selected.ref.id, offline: offline)
+                NativeSourceReaderView(model: model, item: item, catalog: catalog, initialChapterID: selected.ref.id, offline: offline, initialAnchor: selectedAnchor)
             }
         }
         .onDisappear { operationID = UUID(); task?.cancel(); task = nil; busy = false }
@@ -137,10 +160,12 @@ struct NativeSourceReaderView: View {
     let catalog: SourceCatalog
     let initialChapterID: String
     let offline: Bool
+    var initialAnchor: SourceReadingAnchor? = nil
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ScaledMetric(relativeTo: .body) private var textScale = 1.0
     @State private var currentID = ""
+    @State private var initialAnchorUsed = false
     @State private var chapter: SourceCachedChapter?
     @State private var passages: [Passage] = []
     @State private var visibleID: Int?
@@ -246,7 +271,9 @@ struct NativeSourceReaderView: View {
                 try Task.checkCancellation()
                 guard generation == token else { return }
                 await model.pendingPositionWrites()
-                let anchor = try await archive.anchor(book: item.book.key)
+                let savedAnchor = try await archive.anchor(book: item.book.key)
+                let anchor = !initialAnchorUsed && initialAnchor?.chapter == content.key ? initialAnchor : savedAnchor
+                if initialAnchor?.chapter == content.key { initialAnchorUsed = true }
                 try Task.checkCancellation()
                 guard generation == token else { return }
                 let pieces = makePassages(content.document)

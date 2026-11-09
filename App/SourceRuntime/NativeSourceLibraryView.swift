@@ -2,7 +2,11 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct NativeSourceLibraryView: View {
-    @StateObject private var model = NativeSourceLibrary()
+    @StateObject private var model: NativeSourceLibrary
+    private let allowsMigration: Bool
+    init(model: NativeSourceLibrary = .init(), allowsMigration: Bool = true) {
+        _model = StateObject(wrappedValue: model); self.allowsMigration = allowsMigration
+    }
     @State private var query = ""
     @State private var importing = false
     @State private var adding: String?
@@ -14,6 +18,11 @@ struct NativeSourceLibraryView: View {
             Section {
                 Text("单文件 JS 和 Legado JSON 书源的阅读预览。可下载章节并离线继续阅读。")
                     .font(.footnote).foregroundStyle(.secondary)
+                if allowsMigration {
+                    NavigationLink { LegacyMigrationView(library: model) } label: { Label("从旧书架导入", systemImage: "square.and.arrow.down") }.frame(minHeight: 44)
+                } else {
+                    Text("这是独立副本。这里的编辑和进度不会写回迁移草稿或原书架。").font(.footnote).foregroundStyle(.secondary)
+                }
                 Button { importing = true } label: { Label("添加书源", systemImage: "plus.circle") }
                 NavigationLink { NativeSourceDiagnosticsView(model: model) } label: { Label("书源诊断", systemImage: "list.bullet.rectangle") }.frame(minHeight: 44)
                 NavigationLink { NativeSourceStorageView(model: model) } label: {
@@ -78,7 +87,7 @@ struct NativeSourceLibraryView: View {
                 if model.shelf.isEmpty { Text("搜索后加入书架，目录和阅读进度会保存在本机。 ").foregroundStyle(.secondary) }
                 ForEach(model.shelf) { item in
                     NavigationLink {
-                        NativeSourceBookView(model: model, item: item)
+                        NativeSourceBookView(model: model, item: item, initiallyOffline: !allowsMigration)
                     } label: {
                         HStack(spacing: 12) {
                             NativeSourceCoverView(model: model, installation: item.installation, scope: item.book.key.scope, cover: item.book.details.cover)

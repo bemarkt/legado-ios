@@ -7,6 +7,15 @@ public protocol SourceCredentialPersistence: Sendable {
     func write(_ data: Data, scope: SourceScope) throws
 }
 
+/// A separate vault for disposable previews; never reads or writes the user's Keychain accounts.
+public final class SourceEphemeralCredentials: SourceCredentialPersistence, @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [SourceScope: Data] = [:]
+    public init() {}
+    public func read(scope: SourceScope) throws -> Data? { lock.lock(); defer { lock.unlock() }; return values[scope] }
+    public func write(_ data: Data, scope: SourceScope) throws { lock.lock(); defer { lock.unlock() }; values[scope] = data }
+}
+
 public struct SourceKeychainCredentials: SourceCredentialPersistence {
     private let service: String
     public init(service: String = "com.epiboly.legado.native.credentials.v1") { self.service = service }

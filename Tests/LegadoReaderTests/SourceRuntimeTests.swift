@@ -601,6 +601,81 @@ final class SourceRuntimeTests: XCTestCase {
         let attachment = XCTAttachment(image: image); attachment.name = "legado-json-source-settings"; attachment.lifetime = .keepAlways; add(attachment)
     }
 
+    func testLegacyMigrationReviewAdoptionAndOfflineReaderOnIOS() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("migration-ios-" + UUID().uuidString)
+        let databaseURL = directory.appendingPathComponent("original.sqlite3")
+        let database = try LegadoDatabase(url: databaseURL)
+        let source = BookSource(bookSourceUrl: "https://migration.invalid", bookSourceName: "迁移离线示例")
+        try await database.replaceBookSources([source])
+        var book = Book(bookUrl: "https://migration.invalid/book?id=1", name: "副本中的书", author: "示例作者", origin: source.id)
+        book.durChapterIndex = 1; book.durChapterPos = 4; book.durChapterTime = 1000
+        var config = BookReadConfig(); config.useReplaceRule = false; book.readConfig = config
+        try await database.replaceBooks([book])
+        let chapters = (0..<2).map { BookChapter(url: "https://migration.invalid/chapter/\($0)", title: "相同标题", bookUrl: book.id, index: $0) }
+        try await database.replaceChapters(chapters, bookURL: book.id)
+        var bookmark = Bookmark(time: 1000, bookName: book.name, bookAuthor: book.author)
+        bookmark.chapterIndex = 1; bookmark.chapterPosition = 4; bookmark.chapterName = "相同标题"; bookmark.content = "迁移后的笔记"; bookmark.bookText = "可离线阅读"
+        try await database.replaceBookmarks([bookmark])
+        let cache = directory.appendingPathComponent("chapters")
+        try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
+        for chapter in chapters {
+            let entry = CachedChapterContent(bookURL: book.id, chapterURL: chapter.url,
+                content: "本章内容可离线阅读。\n这是第 \(chapter.index + 1) 章，验证同标题章节的阅读位置。", sourceID: source.id)
+            try SourceCoding.encode(entry).write(to: cache.appendingPathComponent("\(chapter.index).json"))
+        }
+        let migrationDirectory = directory.appendingPathComponent("migration")
+        let snapshot = migrationDirectory.appendingPathComponent("snapshot"), mapping = migrationDirectory.appendingPathComponent("mapping")
+        _ = try await Task.detached {
+            try LegacyMigrationSnapshot.capture(databaseURL: databaseURL, externalDirectories: ["chapters": cache], destination: snapshot)
+        }.value
+        let report = try await LegacyMigrationMapper.prepare(snapshotAt: snapshot, destination: mapping)
+        XCTAssertEqual(report.books.count, 1); XCTAssertEqual(report.cacheFilesMapped, 2)
+        let activeURL = directory.appendingPathComponent("active.sqlite3")
+        let model = NativeSourceLibrary(databaseURL: activeURL, credentials: SourceCredentialVault(persistence: SourceEphemeralCredentials()))
+        _ = try await LegacyMigrationMapper.adopt(at: mapping, snapshotAt: snapshot, into: model.services().0)
+        await model.reload()
+        let item = try XCTUnwrap(model.shelf.first)
+        let archive = try model.services().0
+        let savedCatalog = try await archive.catalog(book: item.book.key)
+        let catalog = try XCTUnwrap(savedCatalog)
+        let notes = try await archive.importedAnnotations(book: item.book.key)
+        XCTAssertEqual(notes.count, 1); XCTAssertEqual(notes[0].note, "迁移后的笔记")
+        XCTAssertEqual(notes[0].anchor.chapter.chapterID, catalog.chapters[1].ref.id)
+        let provider = try await model.provider(item.installation, scope: item.book.key.scope)
+        let stored = try await model.services().1.chapter(provider: provider, book: catalog.book, chapter: catalog.chapters[1].ref, policy: .offline)
+        XCTAssertTrue(stored.document.plainText.contains("第 2 章"))
+        let migrationModel = LegacyMigrationModel(directory: migrationDirectory, legacyDatabase: databaseURL)
+        migrationModel.restore(library: model)
+        for _ in 0..<100 {
+            if !migrationModel.busy { break }
+            try await Task.sleep(for: .milliseconds(30))
+        }
+        XCTAssertNotNil(migrationModel.report); XCTAssertTrue(migrationModel.adopted); XCTAssertNil(migrationModel.failure)
+        for (name, size, accessibility) in [("phone", CGSize(width: 393, height: 852), false), ("accessibility", CGSize(width: 393, height: 852), true), ("tablet-width", CGSize(width: 1024, height: 768), false)] {
+            let host = UIHostingController(rootView: NavigationStack { LegacyMigrationView(library: model, model: migrationModel) }
+                .environment(\.dynamicTypeSize, accessibility ? .accessibility3 : .large))
+            let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+            let previous = scene.windows.first(where: \.isKeyWindow)
+            let window = UIWindow(windowScene: scene), container = UIViewController()
+            window.rootViewController = container; window.makeKeyAndVisible(); container.addChild(host)
+            host.view.frame = CGRect(origin: .zero, size: size); container.view.addSubview(host.view); host.didMove(toParent: container)
+            defer { window.isHidden = true; previous?.makeKeyAndVisible() }
+            try await Task.sleep(for: .milliseconds(300)); host.view.layoutIfNeeded()
+            var rendered = false
+            let image = UIGraphicsImageRenderer(size: size).image { _ in rendered = host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true) }
+            XCTAssertTrue(rendered)
+            let attachment = XCTAttachment(image: image); attachment.name = "legacy-migration-review-" + name; attachment.lifetime = .keepAlways; add(attachment)
+            for scroll in descendants(host.view).compactMap({ $0 as? UIScrollView }) where scroll.bounds.width > 100 {
+                XCTAssertLessThanOrEqual(scroll.contentSize.width, scroll.bounds.width + 1)
+            }
+        }
+        let reopened = NativeSourceLibrary(databaseURL: activeURL, credentials: SourceCredentialVault(persistence: SourceEphemeralCredentials()))
+        await reopened.reload(); XCTAssertEqual(reopened.shelf.count, 1)
+        let preserved = try await database.loadBooks()
+        XCTAssertEqual(preserved[0], book)
+        XCTAssertEqual(try LegacyMigrationMapper.verify(at: mapping, snapshotAt: snapshot), report)
+    }
+
     func testOperationCompletionRejectsLaterStorageWrites() async throws {
         let archive = try SourceArchive(url: FileManager.default.temporaryDirectory.appendingPathComponent("source-late-\(UUID().uuidString)/native.sqlite3"))
         let scope = try SourceScope(installationID: UUID())

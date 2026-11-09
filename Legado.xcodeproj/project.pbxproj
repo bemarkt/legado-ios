@@ -200,6 +200,7 @@
 		EA1000000000000000000015 /* LegadoSourceDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA2000000000000000000015; };
 		EA1000000000000000000016 /* LegacyMigrationSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA2000000000000000000016; };
 		EA1000000000000000000018 /* LegacyMigrationMapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA2000000000000000000018; };
+		EA1000000000000000000019 /* LegacyMigrationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA2000000000000000000019; };
 		EA1000000000000000000017 /* LegacyMigrationPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA2000000000000000000017; };
 /* End PBXBuildFile section */
 
@@ -396,6 +397,7 @@
 		EA2000000000000000000015 /* LegadoSourceDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/LegadoCore/LegadoAdapter/LegadoSourceDocument.swift; sourceTree = SOURCE_ROOT; };
 		EA2000000000000000000016 /* LegacyMigrationSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/LegadoCore/Migration/LegacyMigrationSnapshot.swift; sourceTree = SOURCE_ROOT; };
 		EA2000000000000000000018 /* LegacyMigrationMapper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/LegadoCore/Migration/LegacyMigrationMapper.swift; sourceTree = SOURCE_ROOT; };
+		EA2000000000000000000019 /* LegacyMigrationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/SourceRuntime/LegacyMigrationView.swift; sourceTree = SOURCE_ROOT; };
 		EA2000000000000000000017 /* LegacyMigrationPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/LegadoCore/Migration/LegacyMigrationPlan.swift; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
@@ -686,6 +688,7 @@
 				EA2000000000000000000015 /* LegadoSourceDocument.swift */,
 				EA2000000000000000000016 /* LegacyMigrationSnapshot.swift */,
 				EA2000000000000000000018 /* LegacyMigrationMapper.swift */,
+				EA2000000000000000000019 /* LegacyMigrationView.swift */,
 				EA2000000000000000000017 /* LegacyMigrationPlan.swift */,
 				EA2000000000000000000009 /* JavaScriptHostEnvironment.swift */,
 				DF2000000000000000000001 /* BookSourceRuntimeStore.swift */,
@@ -1068,6 +1071,7 @@
 				EA1000000000000000000015 /* LegadoSourceDocument.swift in Sources */,
 				EA1000000000000000000016 /* LegacyMigrationSnapshot.swift in Sources */,
 				EA1000000000000000000018 /* LegacyMigrationMapper.swift in Sources */,
+				EA1000000000000000000019 /* LegacyMigrationView.swift in Sources */,
 				EA1000000000000000000017 /* LegacyMigrationPlan.swift in Sources */,
 				EA1000000000000000000009 /* JavaScriptHostEnvironment.swift in Sources */,
 				DF1000000000000000000001 /* BookSourceRuntimeStore.swift in Sources */,

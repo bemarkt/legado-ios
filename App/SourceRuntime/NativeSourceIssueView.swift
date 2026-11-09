@@ -22,10 +22,13 @@ struct NativeSourceIssueView: View {
             Text(issue.title).font(.headline)
             Text(issue.message).font(.footnote).foregroundStyle(.secondary)
             Text(issue.code).font(.caption.monospaced()).foregroundStyle(.secondary)
-            if issue.recovery == .login {
-                Button("账号与登录") { accounts = true }.frame(minHeight: 44)
+            if issue.recovery == .login || issue.extraction != nil {
+                Button("网站登录与验证") { accounts = true }.frame(minHeight: 44)
             }
-            if let retry, issue.recovery == .retry || issue.code == "CANCELLED" {
+            if let extraction = issue.extraction {
+                Text(extraction.field.rawValue + (extraction.httpStatus.map { " · HTTP \($0)" } ?? "")).font(.caption.monospaced()).foregroundStyle(.secondary)
+            }
+            if let retry, issue.recovery == .retry || issue.code == "CANCELLED" || issue.extraction != nil {
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     Button(issue.canRetry(at: context.date) ? "重试" : "等待后重试") { retry() }
                         .disabled(!issue.canRetry(at: context.date)).frame(minHeight: 44)
@@ -113,6 +116,11 @@ private struct NativeSourceDiagnosticDetailView: View {
                 LabeledContent("操作", value: record.operation.rawValue)
                 LabeledContent("结果", value: record.code)
                 LabeledContent("耗时", value: "\(record.elapsedMilliseconds) ms")
+                if let extraction = record.extraction {
+                    LabeledContent("提取规则", value: extraction.field.rawValue)
+                    if let status = extraction.httpStatus { LabeledContent("HTTP 状态", value: String(status)) }
+                    if let bytes = extraction.responseBytes { LabeledContent("响应字节数", value: String(bytes)) }
+                }
                 Text(record.sourceDigest).font(.caption.monospaced()).textSelection(.enabled)
             }
             Section("对应源码") {

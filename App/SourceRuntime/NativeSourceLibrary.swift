@@ -41,6 +41,7 @@ final class NativeSourceLibrary: ObservableObject {
     @Published var message: String?
     private let databaseURL: URL
     private let allowLoopbackHTTP: Bool
+    var allowsLoopbackHTTP: Bool { allowLoopbackHTTP }
     let credentials: SourceCredentialVault
     private var reloadGeneration = UUID()
     private var guestGates: [UUID: SourceCommitGate] = [:]
@@ -266,9 +267,20 @@ final class NativeSourceLibrary: ObservableObject {
         try context.changeGate.check(); try context.session.commitGate.check()
     }
     func saveLoginCookies(_ cookies: [SourceCredentialCookie], origin: String, context: NativeSourceCredentialContext) async throws {
+        try await saveLoginCookies(cookies, origins: [origin], context: context)
+    }
+    func saveLoginCookies(_ cookies: [SourceCredentialCookie], origins: Set<String>, context: NativeSourceCredentialContext) async throws {
         try await validateCredentialContext(context)
-        try await credentials.replaceBrowserCookies(cookies, session: context.session, replacingOrigins: [origin], changeGate: context.changeGate)
+        try await credentials.replaceBrowserCookies(cookies, session: context.session, replacingOrigins: origins, changeGate: context.changeGate)
         await credentialsChanged()
+    }
+    func websiteLoginRequest(_ installation: SourceInstallation, fallbackOrigin: String) throws -> URLRequest {
+        if installation.format == .legado {
+            guard let document = try LegadoSourceDocument.inspect(installation.source).first else { throw SourceDomainError(.invalidData, "书源登录信息缺失。") }
+            return try document.loginRequest(fallbackOrigin: fallbackOrigin, allowLoopbackHTTP: allowLoopbackHTTP)
+        }
+        let url = try SourceHostHTTPPolicy(origins: Set(installation.origins), allowLoopbackHTTP: allowLoopbackHTTP).validate(fallbackOrigin + "/")
+        return URLRequest(url: url)
     }
     func saveBearer(_ token: String?, origin: String, context: NativeSourceCredentialContext) async throws {
         try await validateCredentialContext(context)

@@ -23,6 +23,10 @@ private actor LegadoFlowFixture {
     var loopCatalog = false
     var loopContent = false
     var changedTitles = false
+    var emptyResponse = false
+    var htmlExtraction = false
+    func useHTMLExtraction() { htmlExtraction = true }
+    func useEmptyResponse(_ enabled: Bool) { emptyResponse = enabled }
     func setOffline() { offline = true }
     func failPage() { failSecondContentPage = true }
     func setCatalogLoop() { loopCatalog = true }
@@ -37,6 +41,11 @@ private actor LegadoFlowFixture {
         #expect(!request.httpShouldHandleCookies)
         requests.append(request)
         if offline { throw URLError(.notConnectedToInternet) }
+        if emptyResponse { return .init(data: Data("<html><body><script src='/verification.js'></script></body></html>".utf8), statusCode: 202, headers: ["Content-Type": "text/html"], finalURL: url) }
+        if htmlExtraction && (url.path.hasPrefix("/toc/") || url.path.hasPrefix("/chapter/")) {
+            let html = url.path.hasPrefix("/toc/") ? "<ul><li class='chapter'><a href='/chapter/a'>First chapter</a></li></ul>" : "<article><p>Saved chapter text.</p></article>"
+            return .init(data: Data(html.utf8), statusCode: 200, headers: ["Content-Type": "text/html"], finalURL: url)
+        }
         if url.path == "/slow" {
             slowStarted = true; waiter?.resume(); waiter = nil
             do { try await Task.sleep(for: .seconds(10)) }
@@ -66,6 +75,40 @@ private actor LegadoFlowFixture {
 }
 
 struct LegadoSourceProviderTests {
+    @Test func emptyWebsitePagesPreserveCatalogAndOfflineTextAndReportExtractionFacts() async throws {
+        let fixture = LegadoFlowFixture()
+        await fixture.useHTMLExtraction()
+        var source = self.source()
+        var toc = TocRule(); toc.chapterList = "@css:.chapter"; toc.chapterName = "@css:a@text"; toc.chapterUrl = "@css:a@href"
+        source.ruleToc = toc
+        var content = ContentRule(); content.content = "@css:article@text"; source.ruleContent = content
+        let provider = try self.provider(fixture, source: source)
+        let archive = try SourceArchive(url: FileManager.default.temporaryDirectory.appendingPathComponent("empty-website-\(UUID().uuidString)/library.sqlite"))
+        let library = SourceLibraryService(archive: archive)
+        let search = try await provider.search(.init(query: "fixture"))
+        let book = try await library.addBook(provider: provider, ref: search.items[0].ref)
+        let catalog = try await library.refreshCatalog(provider: provider, book: book.details.ref)
+        let cached = try await library.chapter(provider: provider, book: book.details.ref, chapter: catalog.chapters[0].ref, catalog: catalog, retainOffline: true)
+        await fixture.useEmptyResponse(true)
+        do {
+            _ = try await library.refreshCatalog(provider: provider, book: book.details.ref)
+            Issue.record("Blank website replaced the catalog")
+        } catch let error as SourceExtractionFailure {
+            #expect(error.context.field == .catalog && error.context.httpStatus == 202)
+            #expect(error.context.responseBytes! > 0)
+        }
+        do {
+            _ = try await library.chapter(provider: provider, book: book.details.ref, chapter: catalog.chapters[0].ref, policy: .reload)
+            Issue.record("Blank website replaced the saved chapter")
+        } catch let error as SourceExtractionFailure {
+            #expect(error.issue.code == "EMPTY_CONTENT")
+        }
+        #expect(try await archive.catalog(book: book.key) == catalog)
+        #expect(try await library.chapter(provider: provider, book: book.details.ref, chapter: catalog.chapters[0].ref, policy: .offline) == cached)
+        let records = await SourceDiagnostics.shared.records().filter { $0.sourceDigest == provider.descriptor.identity.sourceDigest && $0.extraction != nil }
+        #expect(records.contains { $0.code == "EMPTY_CATALOG" && $0.extraction?.httpStatus == 202 })
+        #expect(records.contains { $0.code == "EMPTY_CONTENT" && $0.extraction?.field == .content })
+    }
     private func source() -> BookSource {
         var source = BookSource(bookSourceUrl: "https://fixture.invalid", bookSourceName: "Synthetic legacy source")
         source.searchUrl = "/search?q={{key}}&page={{page}}"

@@ -3,6 +3,20 @@ import Testing
 @testable import LegadoCore
 
 struct LegadoSourceDocumentTests {
+    @Test func websiteLoginUsesDeclaredPathAndStaticUserAgentWithoutRunningSourceScripts() throws {
+        let text = #"{"bookSourceUrl":"https://books.invalid","bookSourceName":"Login fixture","loginUrl":"/member/sign-in?return=books","header":{"User-Agent":"Fixture Browser"},"jsLib":"throw new Error('never execute during login setup')"}"#
+        // BookSource stores header as a JSON string, as ordinary imported sources do.
+        var value = try #require(JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any])
+        value["header"] = #"{"User-Agent":"Fixture Browser"}"#
+        let document = try #require(LegadoSourceDocument.inspect(String(decoding: JSONSerialization.data(withJSONObject: value), as: UTF8.self)).first)
+        let request = try document.loginRequest(fallbackOrigin: "https://cdn.invalid")
+        #expect(request.url?.absoluteString == "https://books.invalid/member/sign-in?return=books")
+        #expect(request.value(forHTTPHeaderField: "User-Agent") == "Fixture Browser")
+        #expect(request.value(forHTTPHeaderField: "Cookie") == nil)
+        value["loginUrl"] = "@js:while(true){}"
+        let executable = try #require(LegadoSourceDocument.inspect(String(decoding: JSONSerialization.data(withJSONObject: value), as: UTF8.self)).first)
+        #expect(throws: SourceDomainError.self) { try executable.loginRequest(fallbackOrigin: "https://books.invalid") }
+    }
     private let original = #"{"bookSourceUrl":"https://fixture.invalid","bookSourceName":"JSON fixture","futureField":{"keep":[1,true,"text"]},"ruleBookInfo":{"name":"$.title","futureRule":"untouched"},"jsLib":"while(true){}","header":"@js:throw new Error('must not execute')"}"#
     private func database() throws -> SourceArchive {
         try .init(url: FileManager.default.temporaryDirectory.appendingPathComponent("legacy-document-\(UUID().uuidString)/archive.sqlite"))

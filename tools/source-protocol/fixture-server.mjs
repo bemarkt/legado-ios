@@ -30,8 +30,29 @@ export async function startFixtureServer({ port = 0 } = {}) {
       response.end(body);
     };
     const json = (status, body, headers) => send(status, JSON.stringify(body), headers);
-    if (request.headers.host !== new URL(baseURL).host) { json(400, { error: 'Unexpected Host' }); return; }
+    const alternateOrigin = baseURL.replace('127.0.0.1', 'localhost');
+    const alternateWebsite = url.pathname.startsWith('/website/') && request.headers.host === new URL(alternateOrigin).host;
+    if (request.headers.host !== new URL(baseURL).host && !alternateWebsite) { json(400, { error: 'Unexpected Host' }); return; }
     if (!['GET', 'POST'].includes(request.method)) { json(405, { error: 'Unsupported method' }); return; }
+    if (url.pathname === '/website/login') {
+      send(200, `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><script src="${alternateOrigin}/website/login-script.js" defer></script></head><body></body></html>`, { 'Content-Type': 'text/html; charset=utf-8' }); return;
+    }
+    if (url.pathname === '/website/login-script.js') {
+      send(200, `document.body.innerHTML='<h1 id="login-ready">Website login</h1><button id="login">Sign in</button>';document.getElementById('login').onclick=async()=>{await fetch('/state/login');document.body.dataset.signedIn='true';};`, { 'Content-Type': 'application/javascript' }); return;
+    }
+    if (url.pathname === '/website/cross-origin') {
+      json(200, { website: true }, { 'Access-Control-Allow-Origin': baseURL }); return;
+    }
+    if (url.pathname === '/website/catalog') {
+      if (!/(?:^|;\s*)fixture_session=fixture-a(?:;|$)/.test(request.headers.cookie ?? '')) {
+        send(202, '<html><body><script src="/website/login-script.js"></script></body></html>', { 'Content-Type': 'text/html' }); return;
+      }
+      send(200, '<ul><li class="chapter"><a href="/website/chapter">First chapter</a></li></ul>', { 'Content-Type': 'text/html' }); return;
+    }
+    if (url.pathname === '/website/chapter') {
+      if (!/(?:^|;\s*)fixture_session=fixture-a(?:;|$)/.test(request.headers.cookie ?? '')) { json(401, { error: 'AUTH_REQUIRED' }); return; }
+      send(200, '<article><p>Signed in chapter.</p></article>', { 'Content-Type': 'text/html' }); return;
+    }
     if (url.pathname === '/') {
       send(200, `<!doctype html><html><head><title>Fixture login</title><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><h1>Fixture login</h1><button id="login" onclick="fetch('/state/login').then(() => document.getElementById('status').textContent='Saved in browser')">Sign in</button><p id="status">Temporary browser</p></body></html>`, { 'Content-Type': 'text/html; charset=utf-8' });
       return;

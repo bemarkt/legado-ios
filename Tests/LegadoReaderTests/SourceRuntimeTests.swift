@@ -966,7 +966,89 @@ extension SourceRuntimeTests {
         XCTAssertEqual(restored.first(where: { $0.name == "fixture_session" })?.value, "fixture-a")
     }
 
-    func testCancelledLoginIsDiscardedAndBrowserBlocksOtherOrigins() async throws {
+    func testDeclaredLegacyLoginRendersCrossOriginScriptAndUnlocksCatalogAndContent() async throws {
+        let databaseURL = FileManager.default.temporaryDirectory.appendingPathComponent("website-login-\(UUID().uuidString)/archive.sqlite")
+        let vault = SourceCredentialVault(persistence: RuntimeMemoryCredentials())
+        let model = NativeSourceLibrary(databaseURL: databaseURL, credentials: vault, allowLoopbackHTTP: true)
+        var source = BookSource(bookSourceUrl: origin, bookSourceName: "Website login fixture")
+        source.loginUrl = "/website/login"
+        source.searchUrl = "/html/search?q={{key}}&page={{page}}"
+        source.ruleSearch = .init(bookList: "@css:.book", name: "@css:.title@text", bookUrl: "@css:.title@href")
+        var info = BookInfoRule(); info.name = "@css:h1@text"; info.tocUrl = "@js:'/website/catalog'"; source.ruleBookInfo = info
+        var toc = TocRule(); toc.chapterList = "@css:.chapter"; toc.chapterName = "@css:a@text"; toc.chapterUrl = "@css:a@href"; source.ruleToc = toc
+        var content = ContentRule(); content.content = "@css:article@text"; source.ruleContent = content
+        try await model.install(model.inspectCandidates(String(decoding: try SourceCoding.encode(source), as: UTF8.self)))
+        let installation = try XCTUnwrap(model.installations.first)
+        let account = try await model.services().0.addAccount(name: "Website", installationID: installation.id)
+        try await model.selectAccount(account.id, installation: installation)
+        let initial = try await model.provider(installation)
+        let results = try await initial.search(.init(query: "demo"))
+        let (archive, library) = try model.services()
+        let book = try await library.addBook(provider: initial, ref: XCTUnwrap(results.items.first?.ref))
+        do { _ = try await library.refreshCatalog(provider: initial, book: book.details.ref); XCTFail("Verification shell accepted as a catalog") }
+        catch let error as SourceExtractionFailure { XCTAssertEqual(error.context.httpStatus, 202); XCTAssertEqual(error.context.field, .catalog) }
+
+        let context = try await model.credentialContext(installation, accountID: account.id)
+        let request = try model.websiteLoginRequest(installation, fallbackOrigin: origin)
+        XCTAssertEqual(request.url?.path, "/website/login")
+        let browser = NativeSourceLoginBrowser(origin: origin, request: request, credentialOrigins: context.session.allowedOrigins, allowLoopbackHTTP: true)
+        defer { browser.close() }
+        try await browser.prepare(cookies: [])
+        let view = try XCTUnwrap(browser.webView)
+        let controller = UIViewController()
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 650))
+        window.rootViewController = controller; window.makeKeyAndVisible()
+        view.frame = controller.view.bounds; view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        controller.view.addSubview(view)
+        defer { window.isHidden = true }
+        try await waitForLogin(browser)
+        let rendered = try await script("return document.getElementById('login-ready')?.textContent ?? 'blank';", in: view)
+        XCTAssertEqual(rendered, "Website login", "The page is blank without its cross-origin script")
+        let image: UIImage = try await withCheckedThrowingContinuation { continuation in
+            view.takeSnapshot(with: nil) { image, error in
+                if let image { continuation.resume(returning: image) }
+                else { continuation.resume(throwing: error ?? SourceDomainError(.unavailable, "Login snapshot missing")) }
+            }
+        }
+        let attachment = XCTAttachment(image: image); attachment.name = "website-login-cross-origin-rendered"; attachment.lifetime = .keepAlways; add(attachment)
+        _ = try await script("document.getElementById('login').click(); for(let i=0;i<100;i++){if(document.body.dataset.signedIn==='true')return 'signed-in';await new Promise(r=>setTimeout(r,20));}throw Error('Login timed out');", in: view)
+        try await model.saveLoginCookies(browser.cookies(), origins: context.session.allowedOrigins, context: context)
+        browser.close()
+        let current = try await model.provider(installation)
+        let catalog = try await library.refreshCatalog(provider: current, book: book.details.ref)
+        XCTAssertEqual(catalog.chapters.count, 1)
+        let chapter = try await library.chapter(provider: current, book: book.details.ref, chapter: catalog.chapters[0].ref, catalog: catalog, retainOffline: true)
+        XCTAssertEqual(chapter.document.plainText, "Signed in chapter.")
+        let anchor = SourceReadingAnchor(chapter: chapter.key, document: chapter.document, offsetUTF16: 4)
+        try await archive.saveAnchor(anchor)
+        let reopened = NativeSourceLibrary(databaseURL: databaseURL, credentials: vault, allowLoopbackHTTP: true)
+        await reopened.reload()
+        XCTAssertEqual(reopened.shelf.map(\.book.key), [book.key])
+        let resumed = try await reopened.provider(installation)
+        let offline = try await reopened.services().1.chapter(provider: resumed, book: book.details.ref, chapter: catalog.chapters[0].ref, policy: .offline)
+        XCTAssertEqual(offline.document, chapter.document)
+        let restoredAnchor = try await reopened.services().0.anchor(book: book.key)
+        XCTAssertEqual(restoredAnchor, anchor)
+    }
+
+    func testWebsiteLoginExportsOnlyCookiesForApprovedSourceOrigins() async throws {
+        let allowed: Set<String> = ["https://www.website.invalid", "https://api.website.invalid"]
+        let browser = NativeSourceLoginBrowser(origin: origin, credentialOrigins: allowed, allowLoopbackHTTP: true)
+        defer { browser.close() }
+        try await browser.prepare(cookies: [])
+        try await waitForLogin(browser)
+        let view = try XCTUnwrap(browser.webView)
+        for (name, domain) in [("parent", ".website.invalid"), ("host", "www.website.invalid"), ("idp", "identity.invalid")] {
+            let cookie = try XCTUnwrap(HTTPCookie(properties: [.name: name, .value: "synthetic", .domain: domain, .path: "/", .secure: "TRUE"]))
+            await view.configuration.websiteDataStore.httpCookieStore.setCookie(cookie)
+        }
+        let exported = try await browser.cookies()
+        XCTAssertEqual(Set(exported.filter { $0.name == "parent" }.map(\.origin)), allowed)
+        XCTAssertEqual(exported.filter { $0.name == "host" }.map(\.origin), ["https://www.website.invalid"])
+        XCTAssertFalse(exported.contains { $0.name == "idp" })
+    }
+
+    func testCancelledWebsiteLoginIsDiscardedAndUnsafeNavigationIsBlocked() async throws {
         let model = accountModel()
         try await model.install(source("return {items:[],nextCursor:null};"))
         let installation = try XCTUnwrap(model.installations.first)
@@ -983,14 +1065,14 @@ extension SourceRuntimeTests {
         // The host-only check intentionally returns 400, but still records a reachable control request.
         let (_, control) = try await URLSession.shared.data(from: URL(string: alternate + "/outside-control-" + marker)!)
         XCTAssertEqual((control as? HTTPURLResponse)?.statusCode, 400)
-        let blocked = try await script("try { await fetch('\(alternate)/outside-browser-\(marker)'); return 'allowed'; } catch { return 'blocked'; }", in: view)
-        XCTAssertEqual(blocked, "blocked")
+        let allowed = try await script("const r = await fetch('\(alternate)/website/cross-origin?marker=\(marker)'); return String(r.status);", in: view)
+        XCTAssertEqual(allowed, "200", "Interactive login must support identity providers and website resources")
         let (diagnosticsData, _) = try await URLSession.shared.data(from: URL(string: origin + "/diagnostics")!)
         let diagnostics = try object(String(decoding: diagnosticsData, as: UTF8.self))
         let requests = try XCTUnwrap(diagnostics["requests"] as? [[String: Any]])
         XCTAssertTrue(requests.contains { ($0["path"] as? String) == "/outside-control-" + marker })
-        XCTAssertFalse(requests.contains { ($0["path"] as? String) == "/outside-browser-" + marker }, "Cross-origin request reached the server despite the content rule")
-        view.load(URLRequest(url: URL(string: "https://outside.example/")!))
+        XCTAssertTrue(requests.contains { ($0["path"] as? String) == "/website/cross-origin?marker=" + marker })
+        view.load(URLRequest(url: URL(string: "http://outside.example/")!))
         for _ in 0..<50 {
             if browser.message != nil { break }
             try await Task.sleep(for: .milliseconds(20))

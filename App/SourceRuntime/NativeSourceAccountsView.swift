@@ -10,6 +10,7 @@ struct NativeSourceLoginRequest: Identifiable {
     let id = UUID()
     let context: NativeSourceCredentialContext
     let origin: String
+    var webRequest: URLRequest? = nil
 }
 
 @MainActor
@@ -143,7 +144,8 @@ struct NativeSourceAccountsView: View {
         let origin = selectedOrigin, installation = installation
         perform {
             let context = try await model.credentialContext(installation, accountID: settings.selectedID)
-            let request = NativeSourceLoginRequest(context: context, origin: origin)
+            let webRequest = isToken ? nil : try model.websiteLoginRequest(installation, fallbackOrigin: origin)
+            let request = NativeSourceLoginRequest(context: context, origin: webRequest?.url.flatMap(SourceHostHTTPPolicy.origin) ?? origin, webRequest: webRequest)
             if isToken { token = request } else { login = request }
         }
     }

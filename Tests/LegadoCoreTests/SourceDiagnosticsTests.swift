@@ -4,6 +4,18 @@ import Testing
 
 @Suite("Native source recovery and diagnostic privacy")
 struct SourceDiagnosticsTests {
+    @Test func extractionFactsAreBoundedAndOlderDiagnosticReportsRemainReadable() async throws {
+        let detail = SourceExtractionContext(field: .content, httpStatus: 999, responseBytes: Int.max)
+        #expect(detail.httpStatus == nil && detail.responseBytes == 8_388_608)
+        let diagnostics = SourceDiagnostics()
+        let identity = try SourceExecutionIdentity(scope: .init(installationID: UUID()), sourceDigest: String(repeating: "a", count: 64), configuration: .object([:]))
+        await diagnostics.record(id: UUID(), operation: .content, identity: identity, issue: SourceExtractionFailure(field: .content, httpStatus: 202, responseBytes: 209).issue, elapsedMilliseconds: 10)
+        let record = try #require(await diagnostics.records().first)
+        #expect(record.extraction?.httpStatus == 202 && record.code == "EMPTY_CONTENT")
+        var old = try #require(JSONSerialization.jsonObject(with: SourceCoding.encode(record)) as? [String: Any])
+        old.removeValue(forKey: "extraction")
+        #expect(try SourceCoding.decode(SourceDiagnosticRecord.self, from: JSONSerialization.data(withJSONObject: old)).extraction == nil)
+    }
     @Test func rateLimitHonorsBoundedRetryTimeAndCannotTurnOtherFailuresIntoBackoff() {
         let now = Date(timeIntervalSince1970: 1000)
         let rate = SourceIssue(code: "RATE_LIMITED", retryAfterMs: 5000, now: now)

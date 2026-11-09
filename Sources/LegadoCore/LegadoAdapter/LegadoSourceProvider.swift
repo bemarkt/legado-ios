@@ -142,6 +142,8 @@ public struct LegadoSourceProvider: SourceProvider {
         var value: JSONValue
         var base: String
         var fragment = false
+        var httpStatus: Int?
+        var responseBytes: Int?
     }
     private struct Operation: Sendable {
         let source: BookSource
@@ -194,7 +196,8 @@ public struct LegadoSourceProvider: SourceProvider {
             let response = try await javascript.request(request, context: context)
             context.variables.merge(response.requestVariables) { _, value in value }
             context.baseURL = response.finalURL.absoluteString
-            return Document(value: response.decodedJSON ?? .string(response.decodedText), base: context.baseURL)
+            return Document(value: response.decodedJSON ?? .string(response.decodedText), base: context.baseURL,
+                            httpStatus: response.statusCode, responseBytes: response.data.count)
         }
         mutating func evaluate(_ rule: String?, _ document: Document, mode: RuleEvaluationMode = .string) async throws -> RuleEvaluation {
             try Task.checkCancellation(); try host.control.check()
@@ -324,6 +327,9 @@ public struct LegadoSourceProvider: SourceProvider {
             }
             context.variables = pageVariables
             let next = try await links(rules.nextTocUrl, document)
+            if items.isEmpty && references.isEmpty && cursor.offset == 0 && next.isEmpty && cursor.pending.isEmpty {
+                throw SourceExtractionFailure(field: .catalog, httpStatus: document.httpStatus, responseBytes: document.responseBytes)
+            }
             for link in next {
                 let digest = SourceCoding.digest(Data(link.utf8))
                 guard !cursor.visited.contains(digest) else { throw SourceDomainError(.invalidData, "Catalog pagination loop") }
@@ -356,7 +362,9 @@ public struct LegadoSourceProvider: SourceProvider {
                 guard visited.insert(request).inserted else { throw SourceDomainError(.invalidData, "Content pagination loop") }
                 let document = try await fetch(request)
                 if title == nil { title = try await string(rules.title, document) }
-                guard let text = try await string(rule, document) else { throw SourceDomainError(.invalidData, "Content rule returned an empty page") }
+                guard let text = try await string(rule, document) else {
+                    throw SourceExtractionFailure(field: .content, httpStatus: document.httpStatus, responseBytes: document.responseBytes)
+                }
                 bytes += text.utf8.count
                 guard bytes <= 8_388_608 else { throw SourceDomainError(.resourceLimit, "Chapter content exceeds byte budget") }
                 parts.append(text)
@@ -379,7 +387,8 @@ private extension String { var nonempty: String? { isEmpty ? nil : self } }
 
 public extension SourceIssue {
     init(compatibilityError error: any Error) {
-        if let failure = error as? SourceDomainError { self.init(code: failure.code.rawValue) }
+        if let failure = error as? SourceExtractionFailure { self = failure.issue }
+        else if let failure = error as? SourceDomainError { self.init(code: failure.code.rawValue) }
         else if let failure = error as? SourceHostHTTPFailure { self.init(code: failure.code.rawValue) }
         else if let failure = error as? RuleEngineError {
             switch failure {

@@ -10,6 +10,19 @@ struct SourceProtocolLabView: View {
     @State private var task: Task<Void, Never>?
     @State private var importing = false
 
+    init(initialSource: String = "", initialOperation: SourceOperation = .search) {
+        _source = State(initialValue: initialSource)
+        _operation = State(initialValue: initialOperation)
+        _input = State(initialValue: Self.exampleInput(initialOperation))
+    }
+    private static func exampleInput(_ operation: SourceOperation) -> String {
+        switch operation {
+        case .search: return #"{"query":"示例"}"#
+        case .book: return #"{"ref":{"id":"demo"}}"#
+        case .chapters: return #"{"book":{"id":"demo"}}"#
+        case .content: return #"{"book":{"id":"demo"},"chapter":{"id":"chapter-1"}}"#
+        }
+    }
     var body: some View {
         Form {
             Section {
@@ -62,12 +75,7 @@ struct SourceProtocolLabView: View {
         .onDisappear { task?.cancel() }
         .onChange(of: source) { snapshot = nil }
         .onChange(of: operation) {
-            switch operation {
-            case .search: input = #"{"query":"示例"}"#
-            case .book: input = #"{"ref":{"id":"demo"}}"#
-            case .chapters: input = #"{"book":{"id":"demo"}}"#
-            case .content: input = #"{"book":{"id":"demo"},"chapter":{"id":"chapter-1"}}"#
-            }
+            input = Self.exampleInput(operation)
         }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.javaScript, .plainText, .data]) { selection in
             do {

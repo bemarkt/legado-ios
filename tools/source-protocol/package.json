@@ -13,13 +13,16 @@
     "generate": "node generate-types.mjs && node generate-swift.mjs",
     "check": "node generate-types.mjs --check && node generate-swift.mjs --check && node build-browser.mjs --check && node --test --test-concurrency=1",
     "bundle": "node build-browser.mjs",
-    "build-source": "node build-source.mjs"
+    "build-source": "node build-source.mjs",
+    "locate": "node locate-source.mjs"
   },
   "dependencies": {
     "acorn": "8.19.0",
     "ajv": "8.20.0"
   },
   "devDependencies": {
-    "esbuild": "0.25.12"
+    "@jridgewell/remapping": "2.3.5",
+    "esbuild": "0.25.12",
+    "magic-string": "1.4.5"
   }
 }

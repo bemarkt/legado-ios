@@ -15,7 +15,7 @@ struct NativeSourceLibraryView: View {
                 Text("自有 JS 书源的阅读预览。可保存书源、下载章节并离线继续阅读。")
                     .font(.footnote).foregroundStyle(.secondary)
                 Button { importing = true } label: { Label("添加 JS 书源", systemImage: "plus.circle") }
-                NavigationLink { NativeSourceDiagnosticsView() } label: { Label("书源诊断", systemImage: "list.bullet.rectangle") }.frame(minHeight: 44)
+                NavigationLink { NativeSourceDiagnosticsView(model: model) } label: { Label("书源诊断", systemImage: "list.bullet.rectangle") }.frame(minHeight: 44)
                 NavigationLink { NativeSourceStorageView(model: model) } label: {
                     Label("缓存与下载", systemImage: "internaldrive")
                 }.frame(minHeight: 44)

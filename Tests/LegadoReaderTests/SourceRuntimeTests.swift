@@ -1004,4 +1004,60 @@ extension SourceRuntimeTests {
         XCTAssertTrue(records.contains { $0.sourceDigest == snapshot.sha256 && $0.operation == .search && $0.code == "AUTH_REQUIRED" })
     }
 
+
+    func testRuntimeFailureReportsExactAuthorLineAndNoRawStack() async throws {
+        let snapshot = try await source("return broken();", topLevel: """
+        function broken() {
+          throw new Error('synthetic author failure');
+        }
+        """)
+        let lines = snapshot.source.components(separatedBy: "\n")
+        let expected = try XCTUnwrap(lines.firstIndex { $0.contains("throw new Error") }) + 1
+        do { _ = try await run(snapshot); XCTFail("Expected a source error") }
+        catch let failure as SourceFailure {
+            XCTAssertEqual(failure.code, "SCRIPT_ERROR")
+            XCTAssertEqual(failure.line, expected)
+            let column = try XCTUnwrap(failure.column)
+            XCTAssertTrue((1...lines[expected - 1].utf16.count + 1).contains(column))
+            let encoded = String(decoding: try JSONEncoder().encode(failure), as: UTF8.self)
+            XCTAssertFalse(encoded.contains("blob:")); XCTAssertFalse(encoded.contains("stack"))
+        }
+        let topLevel = try await source("return {items:[],nextCursor:null};", topLevel: "throw new Error('top-level fixture');")
+        do { _ = try await run(topLevel); XCTFail("Expected top-level failure") }
+        catch let failure as SourceFailure {
+            XCTAssertEqual(failure.code, "SCRIPT_ERROR"); XCTAssertEqual(failure.line, 2)
+        }
+    }
+
+    func testBuiltMultiFileSourceMatchesNodeAndKeepsFailureLocation() async throws {
+        struct Case: Decodable { let operation: String; let input: SourceJSON; let expected: SourceJSON }
+        struct Failure: Decodable { let input: SourceJSON; let code: String; let line: Int }
+        struct Fixture: Decodable { let source: String; let sha256: String; let cases: [Case]; let failure: Failure }
+        let (data, _) = try await URLSession.shared.data(from: URL(string: origin + "/built-offline")!)
+        let fixture = try JSONDecoder().decode(Fixture.self, from: data)
+        let snapshot = try await SourceInspector().inspect(Data(fixture.source.utf8))
+        XCTAssertEqual(snapshot.sha256, fixture.sha256)
+        XCTAssertGreaterThanOrEqual(fixture.cases.count, 4)
+        for sample in fixture.cases {
+            let operation = try XCTUnwrap(SourceOperation(rawValue: sample.operation))
+            let input = String(decoding: try SourceCoding.encode(sample.input), as: UTF8.self)
+            // Every operation gets a fresh WebKit execution page, including persisted refs from prior results.
+            let result = try await SourceRuntime().run(operation, inputJSON: input, snapshot: snapshot)
+            XCTAssertEqual(try SourceCoding.decode(SourceJSON.self, from: Data(result.utf8)), sample.expected, sample.operation)
+        }
+        let input = String(decoding: try SourceCoding.encode(fixture.failure.input), as: UTF8.self)
+        do { _ = try await SourceRuntime().run(.content, inputJSON: input, snapshot: snapshot); XCTFail("Expected missing chapter") }
+        catch let error as SourceFailure { XCTAssertEqual(error.code, fixture.failure.code); XCTAssertEqual(error.line, fixture.failure.line) }
+        let model = accountModel()
+        try await model.install(snapshot)
+        let installation = try XCTUnwrap(model.installations.first)
+        let provider = try await model.provider(installation)
+        do { _ = try await provider.content(.init(book: .init(id: "demo"), chapter: .init(id: "missing"))); XCTFail("Expected source diagnostic") }
+        catch let error as SourceFailure { XCTAssertEqual(error.line, fixture.failure.line) }
+        let records = await SourceDiagnostics.shared.records()
+        let record = try XCTUnwrap(records.first { $0.sourceDigest == snapshot.sha256 && $0.code == "PARSE" })
+        XCTAssertEqual(record.line, fixture.failure.line)
+        let retained = try await model.services().0.sourceSnapshot(digest: record.sourceDigest)
+        XCTAssertEqual(retained?.source, fixture.source)
+    }
 }

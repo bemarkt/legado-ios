@@ -74,3 +74,14 @@ test('slow request can be aborted and fixture server remains usable', async t =>
   await assert.rejects(pending, { name: 'AbortError' });
   assert.equal((await fetch(fixture.baseURL + '/health')).status, 200);
 });
+
+test('built offline fixture serves deterministic Node reference output and original source location', async t => {
+  const fixture = await startFixtureServer(); t.after(() => fixture.close());
+  const result = await (await fetch(fixture.baseURL + '/built-offline')).json();
+  assert.equal(result.sha256.length,64);
+  assert.deepEqual(result.cases.map(item=>item.operation),['search','book','chapters','content','content']);
+  assert.equal(result.failure.original.source,'index.ts');
+  assert.equal(result.failure.original.line,23);
+  assert.match(result.source.split('\n')[result.failure.line-1],/throw ctx.errors.parse/);
+  assert.doesNotMatch(result.source,/sourceMappingURL/);
+});

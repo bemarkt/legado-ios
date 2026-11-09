@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
+import { builtOfflineFixture } from './lib/built-offline-fixture.mjs';
 
 const fixtureRoot = new URL('../../protocols/source-v1/fixtures/', import.meta.url);
 const canonicalURL = new URL('http://127.0.0.1:18764');
@@ -10,6 +11,7 @@ function routeKey(url) { const copy = new URL(url); copy.searchParams.sort(); re
 const routes = new Map(manifest.resources.map(route => [routeKey(new URL(route.route, canonicalURL)), route]));
 
 export async function startFixtureServer({ port = 0 } = {}) {
+  const compiledFixture = await builtOfflineFixture();
   const requests = [];
   let activeRequests = 0;
   let baseURL;
@@ -38,6 +40,7 @@ export async function startFixtureServer({ port = 0 } = {}) {
       if (url.pathname.includes('private') && !/(?:^|;\s*)fixture_session=fixture-a(?:;|$)/.test(request.headers.cookie ?? '')) { json(401, { error: 'AUTH_REQUIRED' }); return; }
       send(200, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAEAAAABgCAIAAAAip+O/AAABxklEQVR4nNXCA3YjAABF0becsW12bNdIGptt7Nq2bXeMjc06/j2XI8UG6RwtMUrnWGmtdI6XmaRzotwsnZMVFumcqrRK53SVTTpnqu3SOVvjkM45g1M6540u6VyodUvnoskjnUtmr3QuW3zSuWL1S+eqLSCda/agdK47QtK54QxL56arTjq33PXSue2JSOeONyqdu76YdO7549K5H0hI50EwKZ2HoZR0isJp6Tyqy0jncX1WOk8iOek8jeal8yxWkM7zeIN0XiQapfMy2SSdV6lm6bxOt0jnTaZVOm+zbdJ5l2uXzvt8h3Q+FDql87GhSzqfGrul87mpRzpfmnulU9zSJ52S1n7plLYNSKesfVA65R1D0qnoHJZOZdeIdKq6R6VT3TMmnZrecekY+iakY+yflE7twJR0TIPT0jEPzUjHMjwrHevInHRso/PSsY8tSMcxvigd58SSdFyTy9JxT61IxzO9Kh3vzJp0fLPr0vHPbUgnML8pneDClnRCi9vSCS/tSKdueVc69St70oms7ksnunYgndj6oXTiG1+lk9j8Jp3k1nfppLZ/SCe981M6md1f0snu/ZZObv+PdPIHf6VTOPwn/T/zbe3/96qaXAAAAABJRU5ErkJggg==', 'base64'), { 'Content-Type': 'image/png' }); return;
     }
+    if (url.pathname === '/built-offline') { json(200, compiledFixture); return; }
     if (url.pathname === '/health') { json(200, { fixtureVersion: 1 }); return; }
     if (url.pathname === '/diagnostics') { json(200, { requests, activeRequests: activeRequests - 1 }); return; }
     if (url.pathname === '/redirect/allowed') { send(302, '', { Location: '/health' }); return; }

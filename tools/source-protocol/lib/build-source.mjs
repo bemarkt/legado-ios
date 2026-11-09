@@ -1,4 +1,7 @@
 import path from 'node:path';
+import { createHash } from 'node:crypto';
+import MagicString, { Bundle } from 'magic-string';
+import remapping from '@jridgewell/remapping';
 import { build } from 'esbuild';
 import { parse } from 'acorn';
 import { inspectSource } from './inspect.mjs';
@@ -7,12 +10,14 @@ import { profile } from './contracts.mjs';
 const operations = ['search', 'book', 'chapters', 'content'];
 
 // Author-side compiler only. No user plugin/config JS is loaded, and no source module is executed.
-export async function buildSource(entry) {
+export async function buildSource(entry, { sourceMap = false } = {}) {
   const absolute = path.resolve(entry);
   const result = await build({
     absWorkingDir: path.dirname(absolute), entryPoints: [absolute], bundle: true, write: false,
+    outfile: path.join(path.dirname(absolute), '__source_bundle__.js'), allowOverwrite: true,
     platform: 'browser', format: 'esm', target: 'es2022', charset: 'utf8',
-    minify: false, legalComments: 'inline', treeShaking: false, sourcemap: false, metafile: true,
+    minify: false, legalComments: 'inline', treeShaking: false, sourcemap: sourceMap ? 'external' : false,
+    sourcesContent: false, metafile: true,
     logLevel: 'silent', tsconfigRaw: {},
     plugins: [{ name: 'self-contained-source', setup(builder) {
       builder.onResolve({ filter: /.*/ }, args => {
@@ -22,8 +27,9 @@ export async function buildSource(entry) {
       });
     } }]
   });
-  if (result.outputFiles.length !== 1) throw new Error('A source must build to one JavaScript file without assets');
-  const code = result.outputFiles[0].text;
+  if (result.outputFiles.length !== (sourceMap ? 2 : 1)) throw new Error('A source must build to one JavaScript file without assets');
+  const code = result.outputFiles.find(file => file.path.endsWith('.js'))?.text;
+  if (!code) throw new Error('Compiler did not produce JavaScript');
   if (Buffer.byteLength(code) > profile.limits.sourceBytes) throw new Error('Built source exceeds the source byte budget');
   const ast = parse(code, { ecmaVersion: 2022, sourceType: 'module' });
   const pending = [ast];
@@ -65,19 +71,29 @@ export async function buildSource(entry) {
   let argument = '__sourceMetadata';
   while (code.includes(argument)) argument += '_';
   edits.push({ start: metadata.start, end: metadata.end, text: argument });
-  let implementation = code;
-  for (const edit of edits.sort((a, b) => b.start - a.start)) {
-    implementation = implementation.slice(0, edit.start) + edit.text + implementation.slice(edit.end);
-  }
+  const implementation = new MagicString(code);
+  for (const edit of edits) implementation.overwrite(edit.start, edit.end, edit.text);
+  implementation.trimEnd().indent('  ');
   const names = operations.filter(name => exports.has(name));
-  const source = '// Self-contained source. Metadata and all dependencies remain readable.\n'
-    + 'export const metadata = ' + code.slice(metadata.start, metadata.end) + ';\n\n'
-    + 'const __sourceOperations = ((' + argument + ') => {\n'
-    + implementation.trimEnd().split('\n').map(line => line ? '  ' + line : '').join('\n') + '\n'
-    + '  return { ' + names.map(name => name + ': ' + exports.get(name)).join(', ') + ' };\n'
-    + '})(metadata);\n\n'
-    + names.map(name => 'export async function ' + name + '(ctx, input) {\n  return __sourceOperations.' + name + '(ctx, input);\n}').join('\n\n') + '\n';
+  // Retain mappings across metadata extraction, indentation and generated async wrappers.
+  // Wrapper text is deliberately unmapped; it must not be attributed to an author's last line.
+  const bundle = new Bundle({ separator: '' });
+  bundle.append('// Self-contained source. Metadata and all dependencies remain readable.\nexport const metadata = ');
+  bundle.addSource({ filename: '__source_bundle__.js', content: new MagicString(code).snip(metadata.start, metadata.end) });
+  bundle.append(';\n\nconst __sourceOperations = ((' + argument + ') => {\n');
+  bundle.addSource({ filename: '__source_bundle__.js', content: implementation });
+  bundle.append('\n  return { ' + names.map(name => name + ': ' + exports.get(name)).join(', ') + ' };\n})(metadata);\n\n');
+  bundle.append(names.map(name => 'export async function ' + name + '(ctx, input) {\n  return __sourceOperations.' + name + '(ctx, input);\n}').join('\n\n') + '\n');
+  const source = bundle.toString();
+  let map;
+  if (sourceMap) {
+    const compiledMap = JSON.parse(result.outputFiles.find(file => file.path.endsWith('.map')).text);
+    const transformedMap = bundle.generateMap({ file: 'source.source.js', hires: true, includeContent: false });
+    map = JSON.parse(remapping([transformedMap, compiledMap], () => null, { excludeContent: true }).toString());
+    map.x_source_sha256 = createHash('sha256').update(source).digest('hex');
+    if (Buffer.byteLength(JSON.stringify(map)) > 8 * 1024 * 1024) throw new Error('Source map exceeds the 8 MiB development budget');
+  }
   const inspection = await inspectSource(source);
   if (inspection.unsupportedRequirements.length) throw new Error('Built source requires unsupported capabilities: ' + inspection.unsupportedRequirements.join(', '));
-  return { source, inspection, inputs: Object.keys(result.metafile.inputs).sort() };
+  return { source, inspection, inputs: Object.keys(result.metafile.inputs).sort(), ...(map ? { map } : {}) };
 }

@@ -40,7 +40,10 @@ try {
   for (const [name, file] of [['acorn', 'LICENSE'], ['ajv', 'LICENSE'], ['fast-uri', 'LICENSE'], ['fast-deep-equal', 'LICENSE'], ['json-schema-traverse', 'LICENSE'], ['require-from-string', 'license']]) {
     licenses.push(`## ${name}`, '', await readFile(path.join(here, 'node_modules', name, file), 'utf8'), '');
   }
-  const files = { 'SourceInspector.js': inspector, 'profile.json': profileText, 'LICENSES.md': licenses.join('\n').trimEnd() + '\n' };
+  const runner = await build({ entryPoints: [path.join(here, 'browser/runner.mjs')], bundle: true, write: false,
+    platform: 'browser', format: 'iife', globalName: 'SourceRunner', target: 'es2022', minify: false, legalComments: 'inline' });
+  const files = { 'SourceInspector.js': inspector, 'SourceRunner.js': runner.outputFiles[0].text,
+    'profile.json': profileText, 'LICENSES.md': licenses.join('\n').trimEnd() + '\n' };
   if (!check) await mkdir(output, { recursive: true });
   for (const [name, content] of Object.entries(files)) {
     const destination = path.join(output, name);

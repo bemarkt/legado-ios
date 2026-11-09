@@ -229,6 +229,24 @@ public actor SourceArchive {
             return (source, try configuration(scope: scope))
         }
     }
+    /// Resolve a diagnostic only against exact currently retained source bytes, never the newest lookalike.
+    public func sourceSnapshot(digest: String) throws -> SourceInstallation? {
+        guard digest.count == 64, digest.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }) else {
+            throw SourceDomainError(.invalidInput, "无效的源码摘要。")
+        }
+        return try transaction {
+            let installed = try installations()
+            for value in installed where value.digest == digest {
+                if SourceCoding.digest(Data(value.source.utf8)) == digest { return value }
+            }
+            for installation in installed {
+                for value in try installationHistory(installation.id) where value.digest == digest {
+                    if SourceCoding.digest(Data(value.source.utf8)) == digest { return value }
+                }
+            }
+            return nil
+        }
+    }
     public func installationHistory(_ id: UUID) throws -> [SourceInstallation] {
         try record("installation-history", scope: "", key: id.uuidString) ?? []
     }

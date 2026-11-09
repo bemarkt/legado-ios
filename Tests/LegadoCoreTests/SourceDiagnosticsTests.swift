@@ -47,4 +47,46 @@ struct SourceDiagnosticsTests {
         await diagnostics.clear()
         #expect(await diagnostics.records().isEmpty)
     }
+
+    @Test func sourceExcerptUsesExactDigestAndUTF16AcrossLineEndings() throws {
+        for separator in ["\n", "\r\n", "\r", "\u{2028}", "\u{2029}"] {
+            let source = ["first", "emoji 😀 line", "third", "fourth", "fifth", "sixth"].joined(separator: separator)
+            let digest = SourceCoding.digest(Data(source.utf8))
+            let excerpt = try SourceCodeExcerpt(source: source, expectedDigest: digest, line: 2, column: 9)
+            #expect(excerpt.lines.map(\.number) == [1, 2, 3, 4])
+            #expect(excerpt.lines.filter(\.selected).map(\.text) == ["emoji 😀 line"])
+            #expect(excerpt.column == 9)
+            #expect(throws: SourceDomainError.self) { try SourceCodeExcerpt(source: source + "changed", expectedDigest: digest, line: 2) }
+            #expect(throws: SourceDomainError.self) { try SourceCodeExcerpt(source: source, expectedDigest: digest, line: 0) }
+            #expect(throws: SourceDomainError.self) { try SourceCodeExcerpt(source: source, expectedDigest: digest, line: 7) }
+            #expect(throws: SourceDomainError.self) { try SourceCodeExcerpt(source: source, expectedDigest: digest, line: 2, column: 99) }
+        }
+    }
+    @Test func sourceExcerptBoundsOutputWithoutSplittingEmoji() throws {
+        let source = String(repeating: "😀", count: 700)
+        let excerpt = try SourceCodeExcerpt(source: source, expectedDigest: SourceCoding.digest(Data(source.utf8)), line: 1, column: 1201)
+        #expect(excerpt.lines.count == 1 && excerpt.lines[0].text == String(repeating: "😀", count: 500) + "…")
+    }
+    @Test func diagnosticSourceLookupUsesRetainedHistoryAndNeverSubstitutesNewerVersion() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("source-diagnostic-\(UUID().uuidString)/native.sqlite3")
+        let archive = try SourceArchive(url: url)
+        let first = try SourceInstallation(publisherID: "org.example", name: "Source", version: "1", source: "source one", origins: ["https://example.org"])
+        try await archive.saveInstallation(first)
+        #expect(try await archive.sourceSnapshot(digest: first.digest) == first)
+        var current = first
+        for number in 2...9 {
+            let next = try SourceInstallation(id: first.id, publisherID: first.publisherID, name: first.name, version: String(number),
+                source: "source \(number)", origins: first.origins)
+            try await archive.saveInstallation(next, replacing: current.digest)
+            current = next
+        }
+        let reopened = try SourceArchive(url: url)
+        #expect(try await reopened.sourceSnapshot(digest: first.digest) == first)
+        let last = try SourceInstallation(id: first.id, publisherID: first.publisherID, name: first.name, version: "10", source: "source ten", origins: first.origins)
+        try await archive.saveInstallation(last, replacing: current.digest)
+        #expect(try await reopened.sourceSnapshot(digest: first.digest) == nil)
+        #expect(try await reopened.sourceSnapshot(digest: current.digest) == current)
+        #expect(try await reopened.sourceSnapshot(digest: last.digest) == last)
+        await #expect(throws: SourceDomainError.self) { try await archive.sourceSnapshot(digest: "not-a-digest") }
+    }
 }

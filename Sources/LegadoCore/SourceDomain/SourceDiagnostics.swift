@@ -88,3 +88,33 @@ public actor SourceDiagnostics {
         return data
     }
 }
+
+/// A bounded local excerpt must match the diagnostic's immutable source digest.
+/// Lines and columns are 1-based UTF-16, matching JavaScript engine diagnostics.
+public struct SourceCodeExcerpt: Sendable, Equatable {
+    public struct Line: Sendable, Equatable, Identifiable {
+        public let number: Int
+        public let text: String
+        public let selected: Bool
+        public var id: Int { number }
+    }
+    public let lines: [Line]
+    public let line: Int
+    public let column: Int
+    public init(source: String, expectedDigest: String, line: Int, column: Int = 1) throws {
+        guard source.utf8.count <= 2_097_152, SourceCoding.digest(Data(source.utf8)) == expectedDigest else {
+            throw SourceDomainError(.stale, "源码与这条诊断的版本不一致。")
+        }
+        let normalized = source.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
+            .replacingOccurrences(of: "\u{2028}", with: "\n").replacingOccurrences(of: "\u{2029}", with: "\n")
+        let values = normalized.components(separatedBy: "\n")
+        guard line >= 1, line <= values.count, column >= 1, column <= values[line - 1].utf16.count + 1 else {
+            throw SourceDomainError(.invalidInput, "源码位置已超出文件范围。")
+        }
+        self.line = line; self.column = column
+        lines = (max(1, line - 2)...min(values.count, line + 2)).map { number in
+            let text = values[number - 1]
+            return Line(number: number, text: String(text.prefix(500)) + (text.count > 500 ? "…" : ""), selected: number == line)
+        }
+    }
+}

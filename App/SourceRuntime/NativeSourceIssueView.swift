@@ -53,6 +53,7 @@ private struct NativeSourceDiagnosticFile: FileDocument {
 }
 
 struct NativeSourceDiagnosticsView: View {
+    @ObservedObject var model: NativeSourceLibrary
     @State private var records: [SourceDiagnosticRecord] = []
     @State private var data = Data()
     @State private var exporting = false
@@ -73,11 +74,15 @@ struct NativeSourceDiagnosticsView: View {
             }
             if records.isEmpty { ContentUnavailableView("暂无记录", systemImage: "list.bullet.rectangle", description: Text("执行书源操作后，可在这里查看结果。")) }
             ForEach(records) { record in
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack { Text(record.operation.rawValue); Spacer(); Text(record.code).font(.caption.monospaced()) }
-                    Text("耗时 \(record.elapsedMilliseconds) ms · 书源 \(record.sourceDigest.prefix(8))").font(.footnote)
-                    Text(record.timestamp, style: .time).font(.caption).foregroundStyle(.secondary)
-                    if let line = record.line { Text("源码位置：\(line):\(record.column ?? 1)").font(.caption) }
+                NavigationLink {
+                    NativeSourceDiagnosticDetailView(model: model, record: record)
+                } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack { Text(record.operation.rawValue); Spacer(); Text(record.code).font(.caption.monospaced()) }
+                        Text("耗时 \(record.elapsedMilliseconds) ms · 书源 \(record.sourceDigest.prefix(8))").font(.footnote)
+                        Text(record.timestamp, style: .time).font(.caption).foregroundStyle(.secondary)
+                        if let line = record.line { Text("源码位置：\(line):\(record.column ?? 1)").font(.caption) }
+                    }.frame(minHeight: 44)
                 }
             }
             if let feedback { Text(feedback).font(.footnote) }
@@ -91,6 +96,65 @@ struct NativeSourceDiagnosticsView: View {
         }
         .fileExporter(isPresented: $exporting, document: NativeSourceDiagnosticFile(data: data), contentType: .json, defaultFilename: "source-diagnostics.json") { result in
             if case .failure(let error) = result { feedback = error.localizedDescription }
+        }
+    }
+}
+
+private struct NativeSourceDiagnosticDetailView: View {
+    @ObservedObject var model: NativeSourceLibrary
+    let record: SourceDiagnosticRecord
+    @State private var source: SourceInstallation?
+    @State private var excerpt: SourceCodeExcerpt?
+    @State private var loaded = false
+    @State private var feedback: String?
+    var body: some View {
+        List {
+            Section("操作记录") {
+                LabeledContent("操作", value: record.operation.rawValue)
+                LabeledContent("结果", value: record.code)
+                LabeledContent("耗时", value: "\(record.elapsedMilliseconds) ms")
+                Text(record.sourceDigest).font(.caption.monospaced()).textSelection(.enabled)
+            }
+            Section("对应源码") {
+                if let source {
+                    Text(source.name + " · " + source.version)
+                    if let excerpt {
+                        Text("第 \(excerpt.line) 行，第 \(excerpt.column) 列").font(.subheadline)
+                        ForEach(excerpt.lines) { line in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("\(line.selected ? "→ " : "")\(line.number)").font(.caption.monospaced()).foregroundStyle(.secondary)
+                                Text(line.text.isEmpty ? " " : line.text).font(.caption.monospaced()).textSelection(.enabled)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.vertical, 4)
+                            .listRowBackground(line.selected ? Color.accentColor.opacity(0.1) : Color.clear)
+                        }
+                    } else if feedback == nil {
+                        Text("此操作未提供可用源码位置。可在实验室检查完整文件。").font(.footnote).foregroundStyle(.secondary)
+                    }
+                    if let operation = SourceOperation(rawValue: record.operation.rawValue) {
+                        NavigationLink("在实验室查看并重试") {
+                            SourceProtocolLabView(initialSource: source.source, initialOperation: operation)
+                        }.frame(minHeight: 44)
+                        Text("实验室不会自动执行源码；需要手动检查、填写本次输入并运行。账号凭据和持久状态不会带入调试页。")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                } else if loaded {
+                    Text("此源码版本已不在当前安装或保留的历史中。请按摘要向作者提供原文件，避免使用新版行号定位。")
+                        .font(.footnote).foregroundStyle(.secondary)
+                } else { ProgressView("正在查找源码…") }
+                if let feedback { Text(feedback).font(.footnote).foregroundStyle(.secondary) }
+            }
+        }
+        .navigationTitle("诊断详情").navigationBarTitleDisplayMode(.inline)
+        .task {
+            defer { loaded = true }
+            do {
+                source = try await model.services().0.sourceSnapshot(digest: record.sourceDigest)
+                if let source, let line = record.line {
+                    excerpt = try SourceCodeExcerpt(source: source.source, expectedDigest: record.sourceDigest, line: line, column: record.column ?? 1)
+                }
+            } catch { feedback = error.localizedDescription }
         }
     }
 }

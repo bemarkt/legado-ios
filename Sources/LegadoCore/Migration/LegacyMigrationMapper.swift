@@ -16,7 +16,7 @@ public enum LegacyMigrationMapper {
         guard target.isFileURL, !overlaps(target, original) else { throw SourceDomainError(.invalidInput, "映射目录必须独立于恢复副本。") }
         let manager = FileManager.default, marker = target.appendingPathComponent("migration-request.json")
         let existed = manager.fileExists(atPath: target.path)
-        if existed, !manager.fileExists(atPath: marker.path), !(try manager.contentsOfDirectory(atPath: target.path)).isEmpty {
+        if existed, !manager.fileExists(atPath: marker.path), !(try manager.contentsOfDirectory(atPath: target.path)).allSatisfy({ ["migration-lock.sqlite3", "migration-lock.sqlite3-journal", "migration-lock.sqlite3-wal", "migration-lock.sqlite3-shm"].contains($0) }) {
             throw SourceDomainError(.storageConflict, "目标目录不属于此迁移，请使用新的目录。")
         }
         try manager.createDirectory(at: target, withIntermediateDirectories: true)
@@ -250,9 +250,12 @@ public enum LegacyMigrationMapper {
                 let candidate = CacheCandidate(file: file, row: row, bookURL: cached.bookURL, chapterURL: cached.chapterURL)
                 candidates.append(candidate); counts[key(cached.bookURL, cached.chapterURL), default: 0] += 1
             }
-            let ruleFile = sourceRoot.appendingPathComponent("external/config/replace-rules.json")
-            let capturedRules = snapshot.files.contains { $0.relativePath == "external/config/replace-rules.json" }
-                ? try? SourceCoding.decode([ReplaceRule].self, from: boundedData(ruleFile, limit: 16_777_216)) : nil
+            let ruleFile = sourceRoot.appendingPathComponent("files/replace-rules")
+            let capturedRules: [ReplaceRule]?
+            if snapshot.files.contains(where: { $0.relativePath == "files/replace-rules" }) {
+                capturedRules = try? SourceCoding.decode([ReplaceRule].self, from: boundedData(ruleFile, limit: 16_777_216))
+            } else if snapshot.missingExternalFiles?.contains("replace-rules") == true { capturedRules = [] }
+            else { capturedRules = nil }
             for candidate in candidates {
                 try Task.checkCancellation()
                 guard counts[key(candidate.bookURL, candidate.chapterURL)] == 1 else {

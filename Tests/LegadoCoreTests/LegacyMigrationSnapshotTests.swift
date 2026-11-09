@@ -42,12 +42,10 @@ struct LegacyMigrationSnapshotTests {
         #expect(!wal.isEmpty)
         let destination = root.appendingPathComponent("snapshot"), defaults = Data("private-defaults".utf8)
         let manifest = try LegacyMigrationSnapshot.capture(databaseURL: original,
-            externalDirectories: ["chapters": external, "missing": root.appendingPathComponent("absent")], defaults: defaults, destination: destination) { point in
-                if point == .databaseCopied {
-                    // All names in this fixture are synthetic; expose platform-created SQLite sidecars on failure.
-                    print("Synthetic snapshot files after backup:", try FileManager.default.subpathsOfDirectory(atPath: destination.path))
-                }
-            }
+            externalDirectories: ["chapters": external, "missing": root.appendingPathComponent("absent")], defaults: defaults, destination: destination)
+        let copyURL = LegacyMigrationSnapshot.databaseURL(at: destination, manifest: manifest)
+        #expect(!FileManager.default.fileExists(atPath: copyURL.path + "-wal"))
+        #expect(!FileManager.default.fileExists(atPath: copyURL.path + "-shm"))
         #expect(manifest.schemaVersion == 7); #expect(manifest.tables.count == 21)
         #expect(manifest.tables["books"] == 1); #expect(manifest.tables["book_sources"] == 1)
         #expect(manifest.missingExternalDirectories == ["missing"])
@@ -143,6 +141,25 @@ struct LegacyMigrationSnapshotTests {
         let relative = "external/chapters/章节/第一章 📖.json"
         #expect(manifest.files.contains { $0.relativePath == relative })
         #expect(try Data(contentsOf: destination.appendingPathComponent(manifest.attempt).appendingPathComponent(relative)) == contents)
+        #expect(try LegacyMigrationSnapshot.verify(at: destination) == manifest)
+        #expect(try await database.loadBooks().count == 1)
+    }
+
+    @Test func explicitConfigurationFilesAreVerifiedAndChangesBeforePublicationRejected() async throws {
+        let root = try root(), (database, original) = try await fixture(root)
+        let rules = root.appendingPathComponent("rules.json")
+        try Data("[]".utf8).write(to: rules)
+        let files = ["replace-rules": rules, "missing": root.appendingPathComponent("absent.json")]
+        let destination = root.appendingPathComponent("snapshot")
+        #expect(throws: SourceDomainError.self) {
+            try LegacyMigrationSnapshot.capture(databaseURL: original, externalFiles: files, destination: destination) { point in
+                if point == .beforePublish { try Data("[{}]".utf8).write(to: rules) }
+            }
+        }
+        #expect(!FileManager.default.fileExists(atPath: destination.appendingPathComponent("manifest.json").path))
+        let manifest = try LegacyMigrationSnapshot.capture(databaseURL: original, externalFiles: files, destination: destination)
+        #expect(manifest.missingExternalFiles == ["missing"])
+        #expect(manifest.files.contains { $0.relativePath == "files/replace-rules" })
         #expect(try LegacyMigrationSnapshot.verify(at: destination) == manifest)
         #expect(try await database.loadBooks().count == 1)
     }

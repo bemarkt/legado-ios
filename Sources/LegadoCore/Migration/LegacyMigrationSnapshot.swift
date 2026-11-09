@@ -18,6 +18,7 @@ public struct LegacyMigrationManifest: Codable, Sendable, Equatable {
     public let files: [File]
     public let missingExternalDirectories: [String]
     public let createdAt: Date
+    public let missingExternalFiles: [String]?
 }
 
 /// Copy-first snapshot: SQLite's online backup includes committed WAL data; the source is opened read-only.
@@ -29,8 +30,9 @@ public enum LegacyMigrationSnapshot {
         let database: String
         let external: [String: String]
         let defaultsDigest: String?
+        let files: [String: String]?
     }
-    public static func capture(databaseURL: URL, externalDirectories: [String: URL] = [:], defaults: Data? = nil,
+    public static func capture(databaseURL: URL, externalDirectories: [String: URL] = [:], externalFiles: [String: URL] = [:], defaults: Data? = nil,
                                destination: URL, maximumBytes: Int64 = 8 * 1024 * 1024 * 1024,
                                checkpoint: @Sendable (Checkpoint) throws -> Void = { _ in }) throws -> LegacyMigrationManifest {
         try Task.checkCancellation()
@@ -38,11 +40,14 @@ public enum LegacyMigrationSnapshot {
         let source = databaseURL.standardizedFileURL.resolvingSymlinksInPath(), target = destination.standardizedFileURL.resolvingSymlinksInPath()
         guard databaseURL.isFileURL, destination.isFileURL, source != target, maximumBytes > 0,
               externalDirectories.count <= 16, externalDirectories.keys.allSatisfy(validLabel),
+              externalFiles.count <= 64, externalFiles.keys.allSatisfy(validLabel),
+              externalFiles.values.allSatisfy({ $0.isFileURL && !contains(target, $0.standardizedFileURL.resolvingSymlinksInPath()) }),
               externalDirectories.values.allSatisfy({ $0.isFileURL && !contains($0.standardizedFileURL.resolvingSymlinksInPath(), target) && !contains(target, $0.standardizedFileURL.resolvingSymlinksInPath()) }),
               !contains(target, source) else { throw SourceDomainError(.invalidInput, "迁移副本必须使用独立目录，不能覆盖旧数据。") }
         let request = Request(version: 1, database: SourceCoding.digest(Data(source.path.utf8)),
                               external: externalDirectories.mapValues { SourceCoding.digest(Data($0.standardizedFileURL.resolvingSymlinksInPath().path.utf8)) },
-                              defaultsDigest: defaults.map(SourceCoding.digest))
+                              defaultsDigest: defaults.map(SourceCoding.digest),
+                              files: externalFiles.isEmpty ? nil : externalFiles.mapValues { SourceCoding.digest(Data($0.standardizedFileURL.resolvingSymlinksInPath().path.utf8)) })
         let requestData = try SourceCoding.encode(request), requestDigest = SourceCoding.digest(requestData)
         let marker = target.appendingPathComponent("request.json"), ready = target.appendingPathComponent("manifest.json")
         if manager.fileExists(atPath: target.path) {
@@ -62,13 +67,16 @@ public enum LegacyMigrationSnapshot {
         let input = try open(source, writable: false); defer { sqlite3_close(input) }
         let sourceVersion = try dataVersion(input)
         let inventory = try backup(input: input, destination: database, maximumBytes: maximumBytes)
+        try finishStandaloneDatabase(database)
         try checkpoint(.databaseCopied); try Task.checkCancellation()
         var files = [try file(database, relative: "legacy.sqlite3")]
-        var bytes = files[0].bytes, missing: [String] = []
+        var bytes = files[0].bytes, missing: [String] = [], missingFiles: [String] = []
+        var directoryChecks: [(URL, [String: String])] = [], fileChecks: [(URL, String)] = []
         for name in externalDirectories.keys.sorted() {
             let input = externalDirectories[name]!.standardizedFileURL.resolvingSymlinksInPath()
             guard manager.fileExists(atPath: input.path) else { missing.append(name); continue }
             let before = try fileInventory(input)
+            directoryChecks.append((input, before))
             for relative in before.keys.sorted() {
                 try Task.checkCancellation()
                 guard files.count < 250_000 else { throw SourceDomainError(.resourceLimit, "迁移文件数量超过限制。") }
@@ -81,6 +89,18 @@ public enum LegacyMigrationSnapshot {
             }
             guard try fileInventory(input) == before else { throw SourceDomainError(.stale, "复制期间外部文件已改变，请停止下载或编辑后重试。") }
         }
+        for name in externalFiles.keys.sorted() {
+            let input = externalFiles[name]!.standardizedFileURL.resolvingSymlinksInPath()
+            guard manager.fileExists(atPath: input.path) else { missingFiles.append(name); continue }
+            guard try input.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true else {
+                throw SourceDomainError(.invalidInput, "额外迁移文件必须是普通文件。")
+            }
+            let relative = "files/" + name, output = directory.appendingPathComponent(relative)
+            try manager.createDirectory(at: output.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let copied = try copy(input, to: output, remaining: maximumBytes - bytes)
+            files.append(.init(relativePath: relative, bytes: copied.bytes, sha256: copied.sha256)); bytes += copied.bytes
+            fileChecks.append((input, copied.sha256)); try checkpoint(.externalFileCopied)
+        }
         if let defaults {
             guard defaults.count <= 16_777_216, bytes + Int64(defaults.count) <= maximumBytes else { throw SourceDomainError(.resourceLimit, "设置备份超过容量限制。") }
             let url = directory.appendingPathComponent("defaults.plist")
@@ -89,9 +109,15 @@ public enum LegacyMigrationSnapshot {
         }
         let manifest = LegacyMigrationManifest(version: 1, id: UUID(), requestDigest: requestDigest, attempt: attempt,
             schemaVersion: inventory.version, tables: inventory.tables, files: files.sorted { $0.relativePath < $1.relativePath },
-            missingExternalDirectories: missing, createdAt: Date())
+            missingExternalDirectories: missing, createdAt: Date(), missingExternalFiles: externalFiles.isEmpty ? nil : missingFiles)
         try verifyFiles(manifest, root: directory)
         try checkpoint(.beforePublish); try Task.checkCancellation()
+        for (directory, before) in directoryChecks where try fileInventory(directory) != before {
+            throw SourceDomainError(.stale, "发布前外部数据已改变，请停止写入后重试。")
+        }
+        for (url, digest) in fileChecks where try file(url, relative: "").sha256 != digest {
+            throw SourceDomainError(.stale, "发布前外部文件已改变，请停止写入后重试。")
+        }
         guard try dataVersion(input) == sourceVersion else { throw SourceDomainError(.stale, "复制期间旧库发生写入，请停止书架更新或下载后重试。") }
         try SourceCoding.encode(manifest).write(to: ready, options: .atomic)
         try checkpoint(.published)
@@ -215,6 +241,42 @@ public enum LegacyMigrationSnapshot {
         guard result == SQLITE_OK else { throw SourceDomainError(.unavailable, "数据库副本未完成。") }
         guard sqlite3_exec(output, "PRAGMA journal_mode=DELETE", nil, nil, nil) == SQLITE_OK else { throw SourceDomainError(.unavailable, "无法完成独立数据库快照。") }
         return try inspect(output)
+    }
+    /// Apple's SQLite may leave an orphan SHM file after backing up a WAL database.
+    /// The writer is closed before this method; only a confirmed DELETE-mode copy may discard sidecars.
+    private static func finishStandaloneDatabase(_ url: URL) throws {
+        let handle = try open(url, writable: false)
+        do {
+            var query: OpaquePointer?
+            guard sqlite3_prepare_v2(handle, "PRAGMA journal_mode", -1, &query, nil) == SQLITE_OK, let query else {
+                throw SourceDomainError(.invalidData, "无法确认副本日志模式。")
+            }
+            let step = sqlite3_step(query)
+            let mode = sqlite3_column_text(query, 0).map { String(cString: $0) }
+            sqlite3_finalize(query)
+            guard step == SQLITE_ROW, mode == "delete" else { throw SourceDomainError(.invalidData, "数据库副本仍依赖外部日志。") }
+            _ = try inspect(handle)
+            guard sqlite3_close(handle) == SQLITE_OK else { throw SourceDomainError(.unavailable, "无法关闭副本验证连接。") }
+        } catch { sqlite3_close(handle); throw error }
+        let manager = FileManager.default
+        let wal = URL(fileURLWithPath: url.path + "-wal")
+        if manager.fileExists(atPath: wal.path) {
+            let values = try wal.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
+            guard values.isRegularFile == true, values.isSymbolicLink != true, values.fileSize == 0 else {
+                throw SourceDomainError(.invalidData, "副本仍有待处理日志，已保留所有文件。")
+            }
+            try manager.removeItem(at: wal)
+        }
+        let shm = URL(fileURLWithPath: url.path + "-shm")
+        if manager.fileExists(atPath: shm.path) {
+            let values = try shm.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+            guard values.isRegularFile == true, values.isSymbolicLink != true else { throw SourceDomainError(.invalidData, "副本共享内存文件类型无效。") }
+            try manager.removeItem(at: shm)
+        }
+        _ = try inspectDatabase(url)
+        guard !manager.fileExists(atPath: wal.path), !manager.fileExists(atPath: shm.path) else {
+            throw SourceDomainError(.invalidData, "独立副本重新打开后仍产生日志。")
+        }
     }
     private static func dataVersion(_ handle: OpaquePointer) throws -> Int64 {
         var statement: OpaquePointer?

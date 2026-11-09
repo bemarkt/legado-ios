@@ -52,9 +52,17 @@ node build-source.mjs ../../docs/examples/source-project/index.ts ../../build/bu
 
 用户可在已安装书源的“账号与登录”建立本地账号，再选择一个 metadata.origins 网站进行网页登录，或输入该网站的 Bearer 令牌。凭据由原生 HTTP 按安装、账号与精确 origin 注入；书源使用原来的 ctx.http.fetch，无需增加密码字段或手工拼 Cookie。账号名称只作本机别名，源不接收用户输入的口令/令牌。
 
-登录过期时可抛出 ctx.errors.authRequired({message: "请在书源设置中重新登录"})。当前恢复入口是用户手动进入“账号与登录”后重试；尚未实现从认证错误自动跳转或恢复后台下载。不要把凭据放进 metadata、settings、storage、ref.state 或可分享源码。
+登录过期时可抛出 `ctx.errors.authRequired({message: "请在书源设置中重新登录"})`。阅读界面按错误码显示原生提示和“账号与登录”入口，不直接显示网站的任意错误文字；用户完成登录后重新搜索或刷新目录，后台下载不会自动恢复。不要把凭据放进 metadata、settings、storage、ref.state 或可分享源码。
 
 当前网页登录只支持一个选定网站的 Cookie 会话，不支持跨站 SSO、依赖站外资源的登录或导入 localStorage 里的令牌。令牌路径目前固定为 Bearer；不等同于完整的作者认证扩展。登录与设备验证范围见 [设备复核](SOURCE_RUNTIME_DEVICE_VALIDATION.md)。
+
+## 封面与错误诊断
+
+结果中的 `cover.url` 也必须属于 `metadata.origins`。宿主按当前安装、账号和执行快照加载封面，凭据与普通 HTTP 使用同一策略。不要在 URL 中编码 Cookie 或令牌；不需要作者自己下载、存储或缓存图片。单张响应最多 2 MiB，宿主只保存最长边 480px 的静态缩略图；大图、非法格式或不允许的跳转会显示占位。缩略图缓存最多 128 张/32 MiB，默认 24 小时尝试刷新；这是可回收缓存，不保证每本离线书永久保留封面。
+
+按合同使用 `ctx.errors` 返回认证、限流、解析等可解释错误；真正的空结果应返回空 `items`，不要把网站失败伪装成空列表。限流等待只使用有界 `retryAfterMs`，用户在到期后手动重试。
+
+用户可从“原生书源阅读 → 书源诊断”导出最近 128 次操作摘要。报告仅记录错误码、耗时、源码/配置摘要、哈希账号范围和可用行列，不含原始异常 message、URL、查询词、请求头、引用或正文。它便于将反馈对应到一个源码版本；复杂项目的原始 TS 源码定位仍待 P3 工具完善。报告只在内存保存，App 重启后清空。
 
 ## 验证层次
 

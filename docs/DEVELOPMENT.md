@@ -95,6 +95,14 @@ RSS 界面回归还验证正文的手动刷新确实重新请求网络。核心�
 
 打包使用实际 `Info.plist` 的版本信息，不自动提升版本号，也不会发布 Release 或更新应用源。同一触发分支的新 IPA 运行会取消该分支上尚未完成的旧运行。
 
+下载实验性原生书源 IPA 后，可在 Windows/macOS/Linux 的仓库根目录使用 Python 核验：
+
+```sh
+python scripts/verify-source-ipa.py path/to/Legado-unsigned.ipa 完整提交SHA --output path/to/ipa-verification.json
+```
+
+脚本检查 ZIP、重复成员、arm64 主程序、iPhoneOS/最低 iOS 26.0、包标识、未签名状态，以及 `SourceRuntime` 文件集合和每个文件与预期 Git 提交的字节一致性。JSON 包含版本、大小和 SHA-256，不解压或执行 IPA。资源一致性不能单独证明 Swift 编译来源，仍需核对工作流实际 checkout 日志；使用 `inputs.ref` 时，Actions 列出的触发分支 SHA 可能与实际 checkout 不同。脚本可重复用于每个集成节点，不必触发新的构建。
+
 ## 兼容性验证
 
 最低部署版本为 iOS 26.0。项目已放弃 iOS 15–25 的兼容分支：`glassEffect` 这类 API 直接在编译期解析，部署目标低于 26 会报「找不到符号」，`#available` 挡不住。因此仓库里既有的 `#available(iOS 16.0/*)`、`#available(iOS 17.0/*)` 守卫现在是恒真分支，Swift 会给出 unnecessary-availability 警告——这属于已知待清理项，清理时连同其后的旧系统回落分支一起删，作为独立提交而非混在界面改动里。`App/Compatibility.swift` 仍保留导航、分享、照片选择与弹窗的兼容实现，供 `-uiLegacyCompatibility` 调试分支使用，对应回归位于 `Tests/LegadoReaderUITests/`。这些测试不能替代 iOS 26 真机或模拟器实测。
@@ -185,10 +193,10 @@ P2 的领域核心、独立原生源数据库与适配器可以在 G1 设备测�
 
 入口为「设置 → 其他设置 → 原生书源阅读」。添加 `.source.js` 文件、粘贴源码、下载 HTTPS 原始文本或载入离线示例，静态检查后审核名称/版本/声明网站，再保存。搜索后加入独立书架，在书籍详情加载目录、下载章节和打开阅读。仅离线模式读取已下载内容，缺章明确报错；重新打开 App 可读取书架、目录和文本锚点。
 
-数据库位于 `Application Support/Legado/native-sources.sqlite3`，使用安装 UUID 和账号 scope，未迁移旧 Legado 数据。当前界面只开放 guest；账号隔离已有核心测试，不意味着登录服务已经实现。源码或配置改变会使在线缓存失配；显式离线可读以前下载的版本，界面会提示。设置改变后重新打开书籍以使用新配置。
+数据库位于 `Application Support/Legado/native-sources.sqlite3`，使用安装 UUID 和账号 scope，未迁移旧 Legado 数据。当前支持 guest 和独立本地账号；网页登录使用临时 WKWebView，明确保存后将选定网站 Cookie 写入 Keychain，原生 HTTP 按精确 origin 注入。封面复用同一网络/账号策略，具有独立有界缩略图缓存；“书源诊断”只导出有限操作摘要。源码或配置改变会使在线缓存失配；显式离线可读以前下载的版本，界面会提示。设置改变后重新打开书籍以使用新配置。
 
 新 Swift 核心文件必须同时登记到 `Legado.xcodeproj/project.pbxproj`。SwiftPM 会发现文件，App target 不会；通过 SwiftPM 不等于通过 App 编译。见 [P2 实施与验收报告](reports/SOURCE_PROTOCOL_P2_REPORT.md)。
 
 书源设置可查看/修改/导出源码、获取原地址候选更新、审阅访问范围并恢复历史源码（最多 8 个）。替换需摘要一致且 publisher ID 相同；本地草稿替换有确认，源码回滚要求确认已有 state 兼容，不能确认时另存新安装。来源下载当前只允许同 origin 重定向。
 
-手动 WebKit 工作流的 `suite=runtime` 执行完整原生套件；`suite=reader-layout` 只验证阅读布局并导出截图，适用于完整运行时已经通过且只修改截图/布局之后。后者不能替代桥接、网络、状态或操作变化所需的完整测试。
+手动 WebKit 工作流的 `suite=runtime` 执行完整 SourceRuntime 套件，并加入已有 EPUB、书签、滚动几何和翻页进度回归；`suite=reader-layout` 只验证阅读布局并导出截图，适用于完整运行时已经通过且只修改截图/布局之后。后者不能替代桥接、网络、状态或操作变化所需的完整测试。

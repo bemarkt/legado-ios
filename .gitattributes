@@ -2,6 +2,7 @@
 /protocols/source-v1/** text eol=lf
 /tools/source-protocol/** text eol=lf
 /scripts/source-protocol-baseline.py text eol=lf
+/scripts/verify-source-ipa.py text eol=lf
 /.github/workflows/source-protocol-ci.yml text eol=lf
 /docs/reports/source-protocol-p0-baseline.json text eol=lf
 

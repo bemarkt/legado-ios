@@ -1,5 +1,27 @@
 import Foundation
 
+/// Measured after authorization is attached, never inferred from the saved cookie count.
+/// Contains no cookie names/values, URLs, query parameters or raw request headers.
+public struct SourceHTTPExchangeSummary: Codable, Sendable, Equatable {
+    public let originDigest: String
+    public let userAgentDigest: String?
+    public let status: Int
+    public let responseBytes: Int
+    public let sentCookieCount: Int
+    public let receivedCookieCount: Int
+    public let deletedCookieCount: Int
+    public let hasSetCookieHeader: Bool
+    init(request: URLRequest, status: Int, responseBytes: Int, cookies: [SourceCredentialCookie], hasSetCookieHeader: Bool) {
+        originDigest = SourceCoding.digest(Data((request.url.flatMap(SourceHostHTTPPolicy.origin) ?? "").utf8))
+        userAgentDigest = request.value(forHTTPHeaderField: "User-Agent").map { SourceCoding.digest(Data($0.utf8)) }
+        self.status = status; self.responseBytes = responseBytes
+        sentCookieCount = (request.value(forHTTPHeaderField: "Cookie") ?? "").split(separator: ";").filter { $0.contains("=") }.count
+        receivedCookieCount = cookies.count
+        deletedCookieCount = cookies.filter { $0.expiresAt.map { $0 <= Date() } ?? false }.count
+        self.hasSetCookieHeader = hasSetCookieHeader
+    }
+}
+
 /// Host-generated extraction facts, without page text, addresses, headers or credentials.
 public struct SourceExtractionContext: Codable, Sendable, Equatable {
     public enum Field: String, Codable, Sendable { case catalog = "ruleToc.chapterList", content = "ruleContent.content" }
@@ -34,6 +56,7 @@ public struct SourceLocalResponse: Sendable {
     public let contentType: String?
     public let body: String
     public let truncated: Bool
+    public let httpExchanges: [SourceHTTPExchangeSummary]
     public init(response: HTTPResponse) {
         var components = URLComponents(url: response.finalURL, resolvingAgainstBaseURL: false)
         components?.user = nil; components?.password = nil; components?.fragment = nil
@@ -46,6 +69,7 @@ public struct SourceLocalResponse: Sendable {
         var prefix = Data(bytes.prefix(Self.maximumTextBytes))
         while !prefix.isEmpty && String(data: prefix, encoding: .utf8) == nil { prefix.removeLast() }
         body = String(decoding: prefix, as: UTF8.self)
+        httpExchanges = Array(response.httpExchanges.suffix(16))
     }
 }
 
@@ -118,6 +142,9 @@ public struct SourceDiagnosticRecord: Codable, Sendable, Identifiable {
     public let line: Int?
     public let column: Int?
     public let extraction: SourceExtractionContext?
+    public let credentialRevisionDigest: String?
+    public let cookieJarEnabled: Bool?
+    public let httpExchanges: [SourceHTTPExchangeSummary]?
 }
 
 /// Exportable summaries contain no website data. A separate, bounded local response cache is never exported.
@@ -129,12 +156,15 @@ public actor SourceDiagnostics {
     public init(capacity: Int = 128) { self.capacity = min(128, max(1, capacity)) }
     public func record(id: UUID, operation: SourceDiagnosticOperation, identity: SourceExecutionIdentity,
                        issue: SourceIssue?, elapsedMilliseconds: Int, line: Int? = nil, column: Int? = nil,
-                       localResponse: SourceLocalResponse? = nil, now: Date = Date()) {
+                       localResponse: SourceLocalResponse? = nil, cookieJarEnabled: Bool? = nil,
+                       httpExchanges: [SourceHTTPExchangeSummary] = [], now: Date = Date()) {
         guard let encoded = try? SourceCoding.encode(identity.scope) else { return }
         values.append(.init(id: id, timestamp: now, operation: operation, sourceDigest: identity.sourceDigest,
             scopeDigest: SourceCoding.digest(encoded), configurationDigest: identity.configurationDigest,
             code: issue?.code ?? "OK", elapsedMilliseconds: max(0, min(300_000, elapsedMilliseconds)),
-            line: line.flatMap { (1...2_097_152).contains($0) ? $0 : nil }, column: column.flatMap { (1...2_097_152).contains($0) ? $0 : nil }, extraction: issue?.extraction))
+            line: line.flatMap { (1...2_097_152).contains($0) ? $0 : nil }, column: column.flatMap { (1...2_097_152).contains($0) ? $0 : nil }, extraction: issue?.extraction,
+            credentialRevisionDigest: identity.credentialRevision.map { SourceCoding.digest(Data($0.utf8)) }, cookieJarEnabled: cookieJarEnabled,
+            httpExchanges: httpExchanges.isEmpty ? nil : Array(httpExchanges.suffix(16))))
         if values.count > capacity { values.removeFirst(values.count - capacity) }
         if let localResponse, issue?.extraction?.responseID == id { responses[id] = (now, localResponse) }
         pruneResponses(now: now)
@@ -155,7 +185,7 @@ public actor SourceDiagnostics {
     public func export() throws -> Data {
         struct Report: Encodable { let version = 1; let operations: [SourceDiagnosticRecord] }
         let data = try SourceCoding.encode(Report(operations: values))
-        guard data.count <= 131_072 else { throw SourceDomainError(.resourceLimit, "诊断报告超过容量限制。") }
+        guard data.count <= 1_048_576 else { throw SourceDomainError(.resourceLimit, "诊断报告超过容量限制。") }
         return data
     }
 }

@@ -75,6 +75,10 @@ struct LegadoHostHTTPTests {
         let response = try await client.fetchCompatibility(request, followRedirects: true, policy: policy, deadline: control.deadline,
                                                            budget: .init(maximumRequests: 3), credentials: cookies)
         #expect(response.decodedText == "session=b")
+        #expect(response.httpExchanges.map(\.sentCookieCount) == [2, 1])
+        #expect(response.httpExchanges.map(\.status) == [302, 200])
+        #expect(response.httpExchanges.first?.receivedCookieCount == 1)
+        #expect(response.httpExchanges.first?.hasSetCookieHeader == true)
         #expect(await first.statistics().requests.first?.headers["cookie"] == "session=a; explicit=private")
         #expect(try await session.headers(for: URL(string: a)!)["Cookie"]?.contains("rotated=a") == true)
         let manual = try await client.fetchCompatibility(request, followRedirects: false, policy: policy, deadline: control.deadline,

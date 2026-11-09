@@ -11,14 +11,16 @@ public struct HTTPResponse: Sendable {
     public var finalURL: URL
     public var requestedCharset: String?
     public var requestVariables: [String: String]
+    public var httpExchanges: [SourceHTTPExchangeSummary]
 
-    public init(data: Data, statusCode: Int, headers: [String: String], finalURL: URL, requestedCharset: String? = nil, requestVariables: [String: String] = [:]) {
+    public init(data: Data, statusCode: Int, headers: [String: String], finalURL: URL, requestedCharset: String? = nil, requestVariables: [String: String] = [:], httpExchanges: [SourceHTTPExchangeSummary] = []) {
         self.data = data
         self.statusCode = statusCode
         self.headers = headers
         self.finalURL = finalURL
         self.requestedCharset = requestedCharset
         self.requestVariables = requestVariables
+        self.httpExchanges = httpExchanges
     }
 
     public var decodedText: String {

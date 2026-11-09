@@ -13,6 +13,7 @@ const routes = new Map(manifest.resources.map(route => [routeKey(new URL(route.r
 export async function startFixtureServer({ port = 0 } = {}) {
   const compiledFixture = await builtOfflineFixture();
   const requests = [];
+  const rotatingSessions = new Map();
   let activeRequests = 0;
   let baseURL;
   const server = createServer(async (request, response) => {
@@ -34,6 +35,28 @@ export async function startFixtureServer({ port = 0 } = {}) {
     const alternateWebsite = url.pathname.startsWith('/website/') && request.headers.host === new URL(alternateOrigin).host;
     if (request.headers.host !== new URL(baseURL).host && !alternateWebsite) { json(400, { error: 'Unexpected Host' }); return; }
     if (!['GET', 'POST'].includes(request.method)) { json(405, { error: 'Unsupported method' }); return; }
+    if (url.pathname === '/website/rotating-login') {
+      const session = url.searchParams.get('session');
+      if (!session || session.length > 64) { json(400, { error: 'Missing fixture session' }); return; }
+      if (rotatingSessions.size >= 100) rotatingSessions.clear();
+      rotatingSessions.set(session, 0);
+      send(200, '<h1 id="login-ready">Rotating login</h1>', { 'Content-Type': 'text/html',
+        'Set-Cookie': ['fixture_rotation=step-0; Path=/; HttpOnly; SameSite=Lax', 'obsolete=old; Path=/'] }); return;
+    }
+    if (url.pathname === '/website/rotating/catalog' || url.pathname === '/website/rotating/chapter') {
+      const session = url.searchParams.get('session');
+      const expected = rotatingSessions.get(session);
+      const supplied = /(?:^|;\s*)fixture_rotation=step-(\d+)(?:;|$)/.exec(request.headers.cookie ?? '')?.[1];
+      if (expected === undefined || supplied !== String(expected)) {
+        send(202, '<html><body>Fixture verification required</body></html>', { 'Content-Type': 'text/html' }); return;
+      }
+      rotatingSessions.set(session, expected + 1);
+      const body = url.pathname.endsWith('/catalog')
+        ? `<ul><li class="chapter"><a href="/website/rotating/chapter?session=${encodeURIComponent(session)}">Rotating chapter</a></li></ul>`
+        : '<article><p>Rotating session chapter.</p></article>';
+      send(200, body, { 'Content-Type': 'text/html', 'Set-Cookie': [
+        `fixture_rotation=step-${expected + 1}; Path=/; HttpOnly; SameSite=Lax`, 'obsolete=; Path=/; Max-Age=0'] }); return;
+    }
     if (url.pathname === '/website/login') {
       send(200, `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><script src="${alternateOrigin}/website/login-script.js" defer></script></head><body></body></html>`, { 'Content-Type': 'text/html; charset=utf-8' }); return;
     }

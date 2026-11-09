@@ -68,19 +68,13 @@ final class NativeSourceLoginBrowser: NSObject, ObservableObject, WKNavigationDe
         let cookies = await webView.configuration.websiteDataStore.httpCookieStore.allCookies()
         try ensureOpen()
         guard ready else { throw SourceDomainError(.stale, "登录页面正在跳转，请载入后再保存。") }
-        // Parent-domain and host cookies can collapse to one exact-origin key.
-        // Keep the most specific domain, with host-only spelling first on a tie.
-        let sorted = cookies.sorted {
-            let a = $0.domain.trimmingCharacters(in: CharacterSet(charactersIn: "."))
-            let b = $1.domain.trimmingCharacters(in: CharacterSet(charactersIn: "."))
-            if a.count != b.count { return a.count > b.count }
-            return !$0.domain.hasPrefix(".") && $1.domain.hasPrefix(".")
-        }
+        // A host cookie and a parent-domain cookie with the same name/path are distinct.
+        // Keep both, including Domain, so a response deleting one cannot delete the other.
         var values: [String: SourceCredentialCookie] = [:]
         for allowedOrigin in credentialOrigins.sorted() {
-            for cookie in sorted {
+            for cookie in cookies {
                 if let value = try SourceCredentialCookie.capture(cookie, origin: allowedOrigin) {
-                    let key = allowedOrigin + "\n" + value.name + "\n" + value.path
+                    let key = value.key
                     if values[key] == nil { values[key] = value }
                 }
             }

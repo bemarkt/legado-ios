@@ -39,8 +39,10 @@ public enum LegadoProviderHost {
             let network = LegadoAsyncNetworkLoader(control: control) { request, follow in
                 try control.check()
                 let timeout = request.timeoutInterval.isFinite ? min(max(request.timeoutInterval, 0.001), policy.timeout) : policy.timeout
-                return try await client.fetchCompatibility(request, followRedirects: follow, policy: policy, priority: priority,
+                let response = try await client.fetchCompatibility(request, followRedirects: follow, policy: policy, priority: priority,
                     deadline: min(control.deadline, ContinuousClock.now.advanced(by: .seconds(timeout))), budget: budget, credentials: cookies)
+                control.recordHTTP(response.httpExchanges)
+                return response
             }
             let identifier = SourceCoding.digest(try SourceCoding.encode(scope))
             return .init(sourceState: state, cookies: cookies, control: control, network: network, userAgent: userAgent,

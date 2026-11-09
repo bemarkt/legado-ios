@@ -10,6 +10,23 @@ async function loadTrustedJSONFixture(baseURL) {
   const source = await readFile(new URL('../../../protocols/source-v1/fixtures/json.source.js', import.meta.url), 'utf8');
   return import(`data:text/javascript;base64,${Buffer.from(source.replaceAll('http://127.0.0.1:18764', baseURL)).toString('base64')}`);
 }
+
+test('website fixture rotates cookies across catalog and content and rejects stale credentials', async t => {
+  const fixture = await startFixtureServer(); t.after(() => fixture.close());
+  const route = '/website/rotating/catalog?session=rotation-test';
+  assert.equal((await fetch(fixture.baseURL + route)).status, 202);
+  const login = await fetch(fixture.baseURL + '/website/rotating-login?session=rotation-test');
+  assert.equal(login.headers.getSetCookie().length, 2);
+  const first = await fetch(fixture.baseURL + route, { headers: { Cookie: 'fixture_rotation=step-0; obsolete=old' } });
+  assert.equal(first.status, 200);
+  assert.equal(first.headers.getSetCookie().length, 2);
+  assert.match(first.headers.getSetCookie()[1], /Max-Age=0/);
+  assert.equal((await fetch(fixture.baseURL + route, { headers: { Cookie: 'fixture_rotation=step-0' } })).status, 202);
+  const content = await fetch(fixture.baseURL + '/website/rotating/chapter?session=rotation-test', { headers: { Cookie: 'fixture_rotation=step-1' } });
+  assert.equal(content.status, 200);
+  assert.match(await content.text(), /Rotating session chapter/);
+  assert.equal((await fetch(fixture.baseURL + route, { headers: { Cookie: 'fixture_rotation=step-2' } })).status, 200);
+});
 test('JSON source completes all operations, catalog pagination and fresh-module recovery', async t => {
   const fixture = await startFixtureServer(); t.after(() => fixture.close());
   const source = await loadTrustedJSONFixture(fixture.baseURL);

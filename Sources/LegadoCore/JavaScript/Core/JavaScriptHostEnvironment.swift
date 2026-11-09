@@ -25,6 +25,7 @@ public final class JavaScriptExecutionControl: @unchecked Sendable {
     private var failure: (any Error)?
     private var callbacks: [UUID: @Sendable (any Error) -> Void] = [:]
     private var remainingRequests: Int
+    private var exchanges: [SourceHTTPExchangeSummary] = []
     public let commitGate: SourceCommitGate
     public let deadline: ContinuousClock.Instant
 
@@ -53,6 +54,14 @@ public final class JavaScriptExecutionControl: @unchecked Sendable {
     }
 
     public func cancel() { invalidate(CancellationError()) }
+
+    var httpExchanges: [SourceHTTPExchangeSummary] { lock.withLock { exchanges } }
+    func recordHTTP(_ values: [SourceHTTPExchangeSummary]) {
+        lock.withLock {
+            guard failure == nil else { return }
+            exchanges = Array((exchanges + values).suffix(16))
+        }
+    }
 
     public func invalidate(_ error: any Error) {
         let pending: [@Sendable (any Error) -> Void] = lock.withLock {

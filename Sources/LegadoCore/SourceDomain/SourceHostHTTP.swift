@@ -16,6 +16,8 @@ public struct SourceHostHTTPResponse: Encodable, Sendable {
     public let url: String
     public let headers: [String: String]
     public let body: String
+    var httpExchanges: [SourceHTTPExchangeSummary] = []
+    private enum CodingKeys: String, CodingKey { case status, url, headers, body }
 }
 
 public struct SourceHostHTTPFailure: Error, LocalizedError, Sendable, Equatable {
@@ -92,6 +94,7 @@ public struct SourceHostHTTPClient: Sendable {
         let headers: [String: String]
         let data: Data
         let cookies: [SourceCredentialCookie]
+        let diagnostic: SourceHTTPExchangeSummary
     }
     private let scheduler: SourceWorkScheduler
     public init(scheduler: SourceWorkScheduler = .init(globalLimit: 4, perOriginLimit: 2)) { self.scheduler = scheduler }
@@ -123,7 +126,7 @@ public struct SourceHostHTTPClient: Sendable {
         guard let finalURL = URL(string: result.url), let data = Data(base64Encoded: result.body) else {
             throw SourceHostHTTPFailure(.network, "Invalid host response")
         }
-        return .init(data: data, statusCode: result.status, headers: result.headers, finalURL: finalURL)
+        return .init(data: data, statusCode: result.status, headers: result.headers, finalURL: finalURL, httpExchanges: result.httpExchanges)
     }
 
     private func execute(_ input: SourceHostHTTPRequest, policy: SourceHostHTTPPolicy,
@@ -143,6 +146,7 @@ public struct SourceHostHTTPClient: Sendable {
             let deadline = operationDeadline.map { min($0, timeout) } ?? timeout
             let retryable = ["GET", "HEAD"].contains(input.method)
             var redirects = 0, retries = 0
+            var exchanges: [SourceHTTPExchangeSummary] = []
             var visited: Set<String> = [request.httpMethod! + " " + request.url!.absoluteString]
             while true {
                 try Self.check(deadline)
@@ -177,6 +181,7 @@ public struct SourceHostHTTPClient: Sendable {
                     continue
                 }
                 try Self.check(deadline)
+                exchanges.append(reply.diagnostic)
                 try await credentials?.receive(reply.cookies)
                 if !returnRedirect, [301,302,303,307,308].contains(reply.status), let location = reply.headers["location"] {
                     guard input.redirect == "follow" else { throw SourceHostHTTPFailure(.network, "Redirect rejected by request policy") }
@@ -206,7 +211,7 @@ public struct SourceHostHTTPClient: Sendable {
                     try await Self.wait(delay, deadline: deadline)
                     continue
                 }
-                return SourceHostHTTPResponse(status: reply.status, url: reply.url.absoluteString, headers: reply.headers, body: reply.data.base64EncodedString())
+                return SourceHostHTTPResponse(status: reply.status, url: reply.url.absoluteString, headers: reply.headers, body: reply.data.base64EncodedString(), httpExchanges: Array(exchanges.suffix(16)))
             }
         } catch let failure as SourceHostHTTPFailure { throw failure }
         catch let failure as SourceDomainError {
@@ -306,8 +311,10 @@ public struct SourceHostHTTPClient: Sendable {
             _ = try policy.validate(url.absoluteString)
             var headers: [String: String] = [:]
             var cookieHeaders: [String: String] = [:]
+            var hasSetCookieHeader = false
             for (name, value) in response.allHeaderFields {
                 let name = String(describing: name).lowercased()
+                if ["set-cookie", "set-cookie2"].contains(name) { hasSetCookieHeader = true }
                 if !["set-cookie", "set-cookie2"].contains(name) { headers[name] = String(describing: value) }
                 // Foundation’s cookie parser expects canonical field names on Darwin.
                 else if captureCookies { cookieHeaders[name == "set-cookie" ? "Set-Cookie" : "Set-Cookie2"] = String(describing: value) }
@@ -319,7 +326,8 @@ public struct SourceHostHTTPClient: Sendable {
             } else { cookies = [] }
             // Cancel/dispose this response before acquiring a permit for its redirect target.
             if !returnRedirect, [301,302,303,307,308].contains(response.statusCode), headers["location"] != nil {
-                return Reply(status: response.statusCode, url: url, headers: headers, data: Data(), cookies: cookies)
+                return Reply(status: response.statusCode, url: url, headers: headers, data: Data(), cookies: cookies,
+                    diagnostic: .init(request: request, status: response.statusCode, responseBytes: 0, cookies: cookies, hasSetCookieHeader: hasSetCookieHeader))
             }
             guard response.expectedContentLength <= Int64(policy.maximumBytes) else { throw SourceHostHTTPFailure(.resourceLimit, "HTTP response exceeds byte budget") }
             var data = Data()
@@ -329,7 +337,8 @@ public struct SourceHostHTTPClient: Sendable {
                 data.append(byte)
             }
             try check(deadline)
-            return Reply(status: response.statusCode, url: url, headers: headers, data: data, cookies: cookies)
+            return Reply(status: response.statusCode, url: url, headers: headers, data: data, cookies: cookies,
+                diagnostic: .init(request: request, status: response.statusCode, responseBytes: data.count, cookies: cookies, hasSetCookieHeader: hasSetCookieHeader))
         } catch {
             if Task.isCancelled { throw CancellationError() }
             if deadline <= ContinuousClock.now { throw SourceHostHTTPFailure(.timeout, "HTTP deadline exceeded") }

@@ -11,26 +11,36 @@ extension SourceIssue {
     }
 }
 
+@MainActor
+final class NativeSourceIssuePresentation: ObservableObject {
+    enum Destination: String, Identifiable { case response, settings, accounts; var id: String { rawValue } }
+    @Published var destination: Destination?
+}
+
 struct NativeSourceIssueView: View {
     @ObservedObject var model: NativeSourceLibrary
     let installation: SourceInstallation
     let issue: SourceIssue
     var retry: (() -> Void)? = nil
-    @State private var accounts = false
+    @StateObject private var presentation: NativeSourceIssuePresentation
+    init(model: NativeSourceLibrary, installation: SourceInstallation, issue: SourceIssue, retry: (() -> Void)? = nil,
+         presentation: NativeSourceIssuePresentation = .init()) {
+        self.model = model; self.installation = installation; self.issue = issue; self.retry = retry
+        _presentation = StateObject(wrappedValue: presentation)
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(issue.title).font(.headline)
             Text(issue.message).font(.footnote).foregroundStyle(.secondary)
             Text(issue.code).font(.caption.monospaced()).foregroundStyle(.secondary)
             if issue.recovery == .login || issue.extraction != nil {
-                Button("网站登录与验证") { accounts = true }.frame(minHeight: 44)
+                Button("网站登录与验证") { presentation.destination = .accounts }.frame(minHeight: 44)
             }
             if let extraction = issue.extraction {
                 Text(extraction.field.rawValue + (extraction.httpStatus.map { " · HTTP \($0)" } ?? "")).font(.caption.monospaced()).foregroundStyle(.secondary)
-                if let responseID = extraction.responseID {
-                    NavigationLink("查看失败响应") {
-                        NativeSourceResponseView(model: model, installation: installation, responseID: responseID, extraction: extraction)
-                    }.frame(minHeight: 44)
+                if extraction.responseID != nil {
+                    Button("查看失败响应") { presentation.destination = .response }
+                        .accessibilityIdentifier("source.issue.response").frame(minHeight: 44)
                 }
             }
             if let retry, issue.recovery == .retry || issue.code == "CANCELLED" || issue.extraction != nil {
@@ -39,14 +49,25 @@ struct NativeSourceIssueView: View {
                         .disabled(!issue.canRetry(at: context.date)).frame(minHeight: 44)
                 }
             }
-            NavigationLink("书源设置") { NativeSourceSettingsView(model: model, initialInstallation: installation) }
-                .frame(minHeight: 44)
+            Button("书源设置") { presentation.destination = .settings }
+                .accessibilityIdentifier("source.issue.settings").frame(minHeight: 44)
         }
         .buttonStyle(.borderless)
-        .sheet(isPresented: $accounts) {
+        // A Form row must not contain multiple NavigationLinks: SwiftUI can activate
+        // both row destinations. One item drives exactly one presentation.
+        .sheet(item: $presentation.destination) { target in
             NavigationStack {
-                NativeSourceAccountsView(model: model, initialInstallation: installation)
-                    .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { accounts = false } } }
+                Group {
+                    switch target {
+                    case .response:
+                        if let extraction = issue.extraction, let responseID = extraction.responseID {
+                            NativeSourceResponseView(model: model, installation: installation, responseID: responseID, extraction: extraction)
+                        }
+                    case .settings: NativeSourceSettingsView(model: model, initialInstallation: installation)
+                    case .accounts: NativeSourceAccountsView(model: model, initialInstallation: installation)
+                    }
+                }
+                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { presentation.destination = nil } } }
             }
         }
     }
@@ -89,6 +110,9 @@ struct NativeSourceResponseView: View {
                 if let feedback { Text(feedback).font(.footnote).foregroundStyle(.secondary) }
             }
             if let response {
+                if !response.httpExchanges.isEmpty {
+                    Section("本次请求的 Cookie") { SourceHTTPExchangeFactsView(exchanges: response.httpExchanges) }
+                }
                 Section {
                     Text(response.body.isEmpty ? "（空响应）" : response.body)
                         .font(.caption.monospaced()).textSelection(.enabled)
@@ -107,6 +131,24 @@ struct NativeSourceResponseView: View {
         }
         .onDisappear { response = nil; loaded = false }
         .sheet(item: $login) { request in NativeSourceLoginView(model: model, request: request) }
+    }
+}
+
+private struct SourceHTTPExchangeFactsView: View {
+    let exchanges: [SourceHTTPExchangeSummary]
+    var body: some View {
+        ForEach(Array(exchanges.enumerated()), id: \.offset) { index, exchange in
+            VStack(alignment: .leading, spacing: 6) {
+                Text("请求 \(index + 1) · HTTP \(exchange.status)").font(.subheadline)
+                LabeledContent("实际发送 Cookie", value: "\(exchange.sentCookieCount) 个")
+                LabeledContent("解析响应 Cookie", value: "\(exchange.receivedCookieCount) 个（删除 \(exchange.deletedCookieCount) 个）")
+                LabeledContent("返回 Set-Cookie", value: exchange.hasSetCookieHeader ? "是" : "否")
+                Text("网站标识 \(exchange.originDigest.prefix(8)) · UA \(exchange.userAgentDigest.map { String($0.prefix(8)) } ?? "未设置")")
+                    .font(.caption.monospaced()).foregroundStyle(.secondary)
+            }
+        }
+        Text("发送数量取自实际请求；已带 Cookie 仍可能被网站要求重新验证。标识仅用于比较请求是否使用同一网站和 UA，不包含 Cookie 值。")
+            .font(.footnote).foregroundStyle(.secondary)
     }
 }
 
@@ -186,6 +228,13 @@ private struct NativeSourceDiagnosticDetailView: View {
                     if let bytes = extraction.responseBytes { LabeledContent("响应字节数", value: String(bytes)) }
                 }
                 Text(record.sourceDigest).font(.caption.monospaced()).textSelection(.enabled)
+                if let enabled = record.cookieJarEnabled { LabeledContent("自动 Cookie", value: enabled ? "开启" : "关闭") }
+                if let revision = record.credentialRevisionDigest {
+                    LabeledContent("登录版本", value: String(revision.prefix(8)))
+                }
+            }
+            if let exchanges = record.httpExchanges, !exchanges.isEmpty {
+                Section("HTTP 请求记录") { SourceHTTPExchangeFactsView(exchanges: exchanges) }
             }
             Section("对应源码") {
                 if let source {

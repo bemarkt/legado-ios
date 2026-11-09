@@ -58,8 +58,19 @@ public struct SourceCredentialCookie: Codable, Sendable, Equatable {
     public let secure: Bool
     public let httpOnly: Bool
     public let expiresAt: Date?
+    /// The original Domain attribute. Nil is host-only (also the conservative v1 decoding default).
+    /// Origin remains the authorization partition; Domain never grants another origin access.
+    public let domain: String?
     public init(origin: String, name: String, value: String, path: String = "/", secure: Bool = true,
-                httpOnly: Bool = true, expiresAt: Date? = nil) throws {
+                httpOnly: Bool = true, expiresAt: Date? = nil, domain: String? = nil) throws {
+        let domain = domain?.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))
+        if let domain {
+            guard !domain.isEmpty, domain.utf8.count <= 253,
+                  domain.utf8.allSatisfy({ (97...122).contains($0) || (48...57).contains($0) || $0 == 45 || $0 == 46 }),
+                  let host = URL(string: origin)?.host?.lowercased(), host == domain || host.hasSuffix("." + domain) else {
+                throw SourceDomainError(.invalidInput, "Cookie 域与授权网站不匹配。")
+            }
+        }
         guard Self.validOrigin(origin), !name.isEmpty, name.utf8.count <= 256,
               name.utf8.allSatisfy({ $0 > 32 && $0 < 127 && ![34,40,41,44,47,58,59,60,61,62,63,64,91,92,93,123,125].contains($0) }),
               value.utf8.count <= 4096, value.utf8.allSatisfy({ $0 >= 32 && $0 < 127 && ![10,13,59].contains($0) }),
@@ -67,7 +78,14 @@ public struct SourceCredentialCookie: Codable, Sendable, Equatable {
             throw SourceDomainError(.invalidInput, "无效的登录 Cookie。")
         }
         self.origin = origin; self.name = name; self.value = value; self.path = path
-        self.secure = secure; self.httpOnly = httpOnly; self.expiresAt = expiresAt
+        self.secure = secure; self.httpOnly = httpOnly; self.expiresAt = expiresAt; self.domain = domain
+    }
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        try self.init(origin: values.decode(String.self, forKey: .origin), name: values.decode(String.self, forKey: .name),
+                      value: values.decode(String.self, forKey: .value), path: values.decode(String.self, forKey: .path),
+                      secure: values.decode(Bool.self, forKey: .secure), httpOnly: values.decode(Bool.self, forKey: .httpOnly),
+                      expiresAt: values.decodeIfPresent(Date.self, forKey: .expiresAt), domain: values.decodeIfPresent(String.self, forKey: .domain))
     }
     static func validOrigin(_ origin: String) -> Bool {
         guard let url = URL(string: origin), url.host?.contains("*") == false, SourceHostHTTPPolicy.origin(url) == origin,
@@ -81,17 +99,23 @@ public struct SourceCredentialCookie: Codable, Sendable, Equatable {
         guard host == domain || (cookie.domain.hasPrefix(".") && host.hasSuffix("." + domain)) else { return nil }
         if cookie.isSecure && url.scheme != "https" { return nil }
         return try .init(origin: origin, name: cookie.name, value: cookie.value, path: cookie.path,
-                         secure: cookie.isSecure, httpOnly: cookie.isHTTPOnly, expiresAt: cookie.expiresDate)
+                         secure: cookie.isSecure, httpOnly: cookie.isHTTPOnly, expiresAt: cookie.expiresDate,
+                         domain: cookie.domain.hasPrefix(".") ? domain : nil)
     }
     public func browserCookie() -> HTTPCookie? {
         guard let host = URL(string: origin)?.host else { return nil }
-        var properties: [HTTPCookiePropertyKey: Any] = [.name: name, .value: value, .domain: host, .path: path]
+        var properties: [HTTPCookiePropertyKey: Any] = [.name: name, .value: value, .domain: domain.map { "." + $0 } ?? host, .path: path]
         if secure { properties[.secure] = "TRUE" }
         if httpOnly { properties[HTTPCookiePropertyKey(rawValue: "HttpOnly")] = "TRUE" }
         if let expiresAt { properties[.expires] = expiresAt }
         return HTTPCookie(properties: properties)
     }
-    var key: String { origin + "\n" + name + "\n" + path }
+    var cookieDomain: String { domain ?? URL(string: origin)?.host?.lowercased() ?? "" }
+    var key: String { origin + "\n" + cookieDomain + "\n" + name + "\n" + path }
+    func scoped(to origin: String) throws -> Self {
+        try .init(origin: origin, name: name, value: value, path: path, secure: secure,
+                  httpOnly: httpOnly, expiresAt: expiresAt, domain: domain)
+    }
     func matches(_ url: URL, now: Date) -> Bool {
         guard SourceHostHTTPPolicy.origin(url) == origin, expiresAt.map({ $0 > now }) ?? true,
               !secure || url.scheme == "https" else { return false }
@@ -236,7 +260,7 @@ public actor SourceCredentialVault {
               Set(bundle.cookies.map(\.key)).count == bundle.cookies.count else { throw SourceDomainError(.resourceLimit, "登录凭据超过数量限制。") }
         for cookie in bundle.cookies {
             _ = try SourceCredentialCookie(origin: cookie.origin, name: cookie.name, value: cookie.value, path: cookie.path,
-                                           secure: cookie.secure, httpOnly: cookie.httpOnly, expiresAt: cookie.expiresAt)
+                                           secure: cookie.secure, httpOnly: cookie.httpOnly, expiresAt: cookie.expiresAt, domain: cookie.domain)
         }
         for (origin, token) in bundle.bearer {
             guard SourceCredentialCookie.validOrigin(origin), !token.isEmpty, token.utf8.count <= 8192,
@@ -264,7 +288,9 @@ public actor SourceCredentialVault {
             throw SourceDomainError(.invalidInput, "凭据请求不在授权网站内。")
         }
         var headers: [String: String] = [:]
-        let cookies = entry.bundle.cookies.filter { $0.matches(url, now: Date()) }.sorted { $0.path.count > $1.path.count }
+        let cookies = entry.bundle.cookies.filter { $0.matches(url, now: Date()) }.sorted {
+            $0.path.count == $1.path.count ? $0.key < $1.key : $0.path.count > $1.path.count
+        }
         if !cookies.isEmpty { headers["Cookie"] = cookies.map { $0.name + "=" + $0.value }.joined(separator: "; ") }
         if let token = entry.bundle.bearer[origin] { headers["Authorization"] = "Bearer " + token }
         guard headers.values.reduce(0, { $0 + $1.utf8.count }) <= 16_384 else {
@@ -289,8 +315,23 @@ public actor SourceCredentialVault {
         let now = Date()
         for cookie in cookies {
             guard session.allowedOrigins.contains(cookie.origin) else { throw SourceDomainError(.invalidInput, "响应 Cookie 超出授权范围。") }
-            if cookie.expiresAt.map({ $0 <= now }) ?? false { values.removeValue(forKey: cookie.key) }
-            else { values[cookie.key] = cookie }
+            // Browser capture may have explicitly saved a domain cookie for several approved
+            // origins. Rotate those existing copies together; never create a new origin grant.
+            let existingCopies = values.values.filter {
+                $0.domain != nil && $0.cookieDomain == cookie.cookieDomain && $0.name == cookie.name && $0.path == cookie.path
+                    && session.allowedOrigins.contains($0.origin)
+            }
+            // Replacing Domain=host with a host-only cookie also withdraws its saved
+            // sibling copies; hostOnly is a flag, not part of cookie identity.
+            if cookie.domain == nil {
+                for existing in existingCopies where existing.origin != cookie.origin { values.removeValue(forKey: existing.key) }
+            }
+            let existingOrigins = cookie.domain == nil ? [] : existingCopies.map(\.origin)
+            for origin in Set(existingOrigins + [cookie.origin]) {
+                let scoped = try cookie.scoped(to: origin)
+                if cookie.expiresAt.map({ $0 <= now }) ?? false { values.removeValue(forKey: scoped.key) }
+                else { values[scoped.key] = scoped }
+            }
         }
         var bundle = entry.bundle
         bundle.cookies = values.values.filter { $0.expiresAt.map { $0 > now } ?? true }.sorted { $0.key < $1.key }

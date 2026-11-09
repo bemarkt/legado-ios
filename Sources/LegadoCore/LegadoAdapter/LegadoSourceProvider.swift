@@ -99,12 +99,14 @@ public struct LegadoSourceProvider: SourceProvider {
                 return result
             } onCancel: { control.cancel() }
             await SourceDiagnostics.shared.record(id: operationID, operation: operation, identity: descriptor.identity,
-                issue: nil, elapsedMilliseconds: Int(started.duration(to: .now) / .milliseconds(1)))
+                issue: nil, elapsedMilliseconds: Int(started.duration(to: .now) / .milliseconds(1)),
+                cookieJarEnabled: source.enabledCookieJar != false, httpExchanges: control.httpExchanges)
             return result
         } catch {
             await SourceDiagnostics.shared.record(id: operationID, operation: operation, identity: descriptor.identity,
                 issue: SourceIssue(compatibilityError: error), elapsedMilliseconds: Int(started.duration(to: .now) / .milliseconds(1)),
-                localResponse: (error as? SourceExtractionFailure)?.localResponse)
+                localResponse: (error as? SourceExtractionFailure)?.localResponse,
+                cookieJarEnabled: source.enabledCookieJar != false, httpExchanges: control.httpExchanges)
             throw error
         }
     }

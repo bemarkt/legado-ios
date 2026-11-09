@@ -1161,6 +1161,116 @@ extension SourceRuntimeTests {
         XCTAssertFalse(exported.contains { $0.name == "idp" })
     }
 
+    func testFailureResponseUsesOnePresentationWithoutOpeningSourceSettings() async throws {
+        let model = accountModel()
+        try await model.install(model.inspect(SourceAssets.script("OfflineExample.source")))
+        let installation = try XCTUnwrap(model.installations.first)
+        let provider = try await model.provider(installation)
+        let id = UUID()
+        let extraction = SourceExtractionContext(field: .catalog, httpStatus: 202, responseBytes: 36, responseID: id)
+        let issue = SourceIssue(code: "EMPTY_CATALOG", extraction: extraction)
+        let response = SourceLocalResponse(response: .init(data: Data("<html>Fixture verification</html>".utf8), statusCode: 202,
+            headers: ["Content-Type": "text/html"], finalURL: URL(string: "https://fixture.invalid/catalog")!))
+        await SourceDiagnostics.shared.record(id: id, operation: .chapters, identity: provider.descriptor.identity,
+            issue: issue, elapsedMilliseconds: 1, localResponse: response)
+        let presentation = NativeSourceIssuePresentation()
+        let host = UIHostingController(rootView: NavigationStack {
+            Form { NativeSourceIssueView(model: model, installation: installation, issue: issue, presentation: presentation) }
+        })
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previous = scene.windows.first(where: \.isKeyWindow)
+        let window = UIWindow(windowScene: scene); window.rootViewController = host; window.makeKeyAndVisible()
+        defer { window.isHidden = true; previous?.makeKeyAndVisible() }
+        window.layoutIfNeeded(); host.view.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(300))
+        presentation.destination = .response
+        for _ in 0..<100 {
+            if descendants(window).compactMap({ $0 as? UINavigationBar }).contains(where: { $0.topItem?.title == "响应详情" }) { break }
+            try await Task.sleep(for: .milliseconds(30))
+        }
+        let titles = descendants(window).compactMap { ($0 as? UINavigationBar)?.topItem?.title }
+        XCTAssertTrue(titles.contains("响应详情"))
+        XCTAssertFalse(titles.contains("书源设置"))
+        XCTAssertEqual(presentation.destination, .response)
+        XCTAssertNil(host.presentedViewController?.presentedViewController, "Only one modal should open")
+        let image = UIGraphicsImageRenderer(size: window.bounds.size).image { _ in window.drawHierarchy(in: window.bounds, afterScreenUpdates: true) }
+        let attachment = XCTAttachment(image: image); attachment.name = "failed-response-single-presentation"; attachment.lifetime = .keepAlways; add(attachment)
+        presentation.destination = nil
+        try await Task.sleep(for: .milliseconds(400))
+        XCTAssertNil(host.presentedViewController)
+    }
+
+    func testBrowserPreservesSameNamedParentAndHostCookiesThroughSaveAndReopen() async throws {
+        let allowed: Set<String> = ["https://www.website.invalid", "https://read.website.invalid"]
+        let browser = NativeSourceLoginBrowser(origin: origin, credentialOrigins: allowed, allowLoopbackHTTP: true)
+        defer { browser.close() }
+        try await browser.prepare(cookies: [])
+        try await waitForLogin(browser)
+        let webView = try XCTUnwrap(browser.webView)
+        for (domain, value) in [(".website.invalid", "parent"), ("www.website.invalid", "host")] {
+            let cookie = try XCTUnwrap(HTTPCookie(properties: [.name: "sid", .value: value, .domain: domain, .path: "/", .secure: "TRUE"]))
+            await webView.configuration.websiteDataStore.httpCookieStore.setCookie(cookie)
+        }
+        let captured = try await browser.cookies()
+        XCTAssertEqual(captured.filter { $0.name == "sid" }.count, 3)
+        XCTAssertEqual(captured.filter { $0.name == "sid" && $0.domain == "website.invalid" }.count, 2)
+        let reopened = NativeSourceLoginBrowser(origin: origin, credentialOrigins: allowed, allowLoopbackHTTP: true)
+        defer { reopened.close() }
+        try await reopened.prepare(cookies: captured)
+        try await waitForLogin(reopened)
+        let restored = try await reopened.cookies()
+        XCTAssertEqual(Set(restored.filter { $0.name == "sid" }.map(\.key)), Set(captured.filter { $0.name == "sid" }.map(\.key)))
+    }
+
+    func testBrowserLoginCookieRotationSurvivesOnlineContentAndFullLibraryRestart() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("rotating-login-\(UUID())/archive.sqlite")
+        let persistence = RuntimeMemoryCredentials()
+        let model = NativeSourceLibrary(databaseURL: directory, credentials: SourceCredentialVault(persistence: persistence), allowLoopbackHTTP: true)
+        let scenario = UUID().uuidString
+        var source = BookSource(bookSourceUrl: origin, bookSourceName: "Rotating cookie fixture")
+        source.loginUrl = "/website/rotating-login?session=\(scenario)"
+        source.searchUrl = "/html/search?q={{key}}&page={{page}}"
+        source.ruleSearch = .init(bookList: "@css:.book", name: "@css:.title@text", bookUrl: "@css:.title@href")
+        var info = BookInfoRule(); info.name = "@css:h1@text"; info.tocUrl = "@js:'/website/rotating/catalog?session=\(scenario)'"; source.ruleBookInfo = info
+        var toc = TocRule(); toc.chapterList = "@css:.chapter"; toc.chapterName = "@css:a@text"; toc.chapterUrl = "@css:a@href"; source.ruleToc = toc
+        var content = ContentRule(); content.content = "@css:article@text"; source.ruleContent = content
+        try await model.install(model.inspectCandidates(String(decoding: try SourceCoding.encode(source), as: UTF8.self)))
+        let installation = try XCTUnwrap(model.installations.first)
+        let initial = try await model.provider(installation)
+        let result = try await initial.search(.init(query: "demo"))
+        let book = try await model.services().1.addBook(provider: initial, ref: XCTUnwrap(result.items.first?.ref))
+        do { _ = try await model.services().1.refreshCatalog(provider: initial, book: book.details.ref); XCTFail("Unauthenticated catalog succeeded") }
+        catch let error as SourceExtractionFailure {
+            let local = try XCTUnwrap(error.localResponse)
+            XCTAssertEqual(local.httpExchanges.last?.sentCookieCount, 0)
+            XCTAssertEqual(local.httpExchanges.last?.status, 202)
+        }
+        let context = try await model.credentialContext(installation, accountID: "guest")
+        let browser = NativeSourceLoginBrowser(origin: origin, request: try model.websiteLoginRequest(installation, fallbackOrigin: origin),
+            credentialOrigins: context.session.allowedOrigins, allowLoopbackHTTP: true)
+        defer { browser.close() }
+        try await browser.prepare(cookies: [])
+        try await waitForLogin(browser)
+        try await model.saveLoginCookies(browser.cookies(), origins: context.session.allowedOrigins, context: context)
+        browser.close()
+        for attempt in 0..<3 {
+            // A different vault and library must reload rotated credentials from secure persistence.
+            let active = attempt == 0 ? model : NativeSourceLibrary(databaseURL: directory,
+                credentials: SourceCredentialVault(persistence: persistence), allowLoopbackHTTP: true)
+            await active.reload()
+            XCTAssertEqual(active.shelf.map(\.book.key), [book.key])
+            let provider = try await active.provider(installation, scope: book.key.scope)
+            let catalog = try await active.services().1.refreshCatalog(provider: provider, book: book.details.ref)
+            let chapter = try await active.services().1.chapter(provider: active.provider(installation, scope: book.key.scope),
+                book: catalog.book, chapter: XCTUnwrap(catalog.chapters.first?.ref), policy: .reload, catalog: catalog)
+            XCTAssertEqual(chapter.document.plainText, "Rotating session chapter.")
+        }
+        let records = await SourceDiagnostics.shared.records().filter { $0.sourceDigest == installation.digest && [.chapters, .content].contains($0.operation) && $0.code == "OK" }
+        XCTAssertEqual(records.count, 6)
+        XCTAssertTrue(records.allSatisfy { $0.httpExchanges?.last?.sentCookieCount ?? 0 > 0 })
+        XCTAssertEqual(Set(records.compactMap(\.credentialRevisionDigest)).count, 1, "Routine rotation must not change the login generation")
+    }
+
     func testCancelledWebsiteLoginIsDiscardedAndUnsafeNavigationIsBlocked() async throws {
         let model = accountModel()
         try await model.install(source("return {items:[],nextCursor:null};"))

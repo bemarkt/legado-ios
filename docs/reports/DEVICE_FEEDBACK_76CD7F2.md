@@ -1,6 +1,6 @@
 # 76cd7f2 实机反馈处理记录
 
-日期：2026-11-09。目标版本：0.1.17 (23)。状态：修复已实现，自动化和新 IPA 待验证；实际网站仍需复测。
+日期：2026-11-09。交付版本：0.1.17 (23)，实现提交 `abb38abe6d01672acc21a97357eab45aa34b186a`。状态：适用自动化与 IPA 构建/包体验证已通过；实际网站仍需复测。
 
 ## 证据与判断
 
@@ -18,7 +18,14 @@
 
 - 核心：持久离线选项、不同书籍隔离、响应大小/数量/关联/过期/清除/导出隐私、长 Legado 目录与原生限额。
 - 实际 iOS：设置弹窗首次打开、历史版本、再次打开的 UITextView 内容；迁移书籍页面不重新强制离线及重启持久化；失败页验证地址和正常网页登录链路。
-- 运行编号、最终源码 SHA、IPA 校验结果待本次 CI 完成后补入；不能将旧提交的成功归给本次改动。
+- `Source Protocol Candidate` 42602690590 成功。
+- `JavaScript Engine CI` 42602691153 成功：515 核心、74 页面模型、App 模拟器编译；29 项固定规则与现有恢复验证成功。迁移恢复仍包含 13 次 SIGKILL、2 次注入 ENOSPC、2 次临时 HFS+ 镜像实际 ENOSPC，均恢复且原库不变；不等同于真机空间压力。
+- `Source Runtime WebKit` 42602745562 成功：67 项零失败，其中 49 项 SourceRuntime。实际 sheet 首次打开、历史版本和再次打开均断言 UITextView 文本；3 张截图已查看，内容均非空，首次截图包含弹出动画过程，不将它当作最终布局全验收。迁移详情 UISwitch 保持关闭、重启持久化、无目录且离线时不自动执行源操作均通过。
+- `Build Unsigned IPA` 42604996852 成功。已从实际 checkout 日志确认上述完整 SHA；下载包经 `scripts/verify-source-ipa.py` 校验，arm64、最低 iOS 26.0、未签名、ZIP 和内嵌 SourceRuntime 字节均符合预期。资源一致性与编译来源分别核对。
+
+交付文件：`build/github-actions/abb38ab/ipa/Legado-Unsigned-IPA-0.1.17-abb38ab/Legado-0.1.17-23-abb38ab-unsigned.ipa`，19,261,686 字节，SHA-256 `4cd42c3bb48cda988c303a6c3d9f56cf2291374084f6854ad5ec0b734432911c`。包体验证 JSON 为 `build/github-actions/abb38ab/ipa-verification.json`；IPA、dSYM 和构建日志均成功上传，工作流没有发布正式 Release。
+
+日志与截图位于被 Git 忽略的 `build/github-actions/abb38ab/`。公开仓库仅保留合成测试和报告，没有加入两个私人书源或网站响应。
 
 ## 真机复测
 

@@ -12,15 +12,18 @@ npm run fixtures
 ```
 
 - `check`：确认生成类型、App 内嵌解析器及许可证没有漂移，并运行 Node 测试。
-- `bundle`：使用锁定的 esbuild 和 Ajv standalone 生成可读的浏览器包；不在 App 运行时生成 validator 函数。
+- `bundle`：使用锁定的 esbuild 和 Ajv standalone 生成可读的浏览器 parser/validator 与 SourceRunner；不在 App 运行时生成 validator 函数。
 - `build-source`：作者侧可选 TS/多文件构建，输出可读自包含 `.source.js`，保留静态 metadata 和许可注释，拒绝远程/动态依赖；见 [作者指南](../../docs/SOURCE_AUTHOR_GUIDE.md)。
+- `locate`：按 1 起算的 UTF-16 行列查看单文件附近源码；可传入带摘要的开发 map，还原原始 TS/依赖位置；不执行输入、不打开 map 列出的文件或 URL。
 - `generate`：Schema 修改后重新生成类型。
 - `validate`：读取受限大小 UTF-8 文件，在有 deadline/内存限制的 worker 内解析 AST。输出元数据、入口、摘要和未知能力；不 import/eval 输入。
 - `fixtures`：启动本机确定性站点，Ctrl+C 结束。没有任意文件读取或代理转发入口。
 
-validator 的静态通过只代表声明符合当前候选；不能证明整个源安全、网站正常或已适配 App。当前 Node 校验器不提供执行任意用户书源的 CLI；测试只导入仓库内固定的、自行编写的 JSON fixture。HTML 的真实 DOM 执行另由 `Source Runtime WebKit` workflow 验证。
+validator 的静态通过只代表声明符合当前候选；不能证明整个源安全、网站正常或已适配 App。当前 Node 校验器不提供执行任意用户书源的 CLI；测试只导入仓库内固定的、自行编写的 JSON fixture。HTML 的真实 DOM 执行另由 `Source Runtime WebKit` workflow 验证。fixture server 还构建仓库自造的多文件离线示例，/built-offline 返回相同编译文件、Node 操作结果及错误位置供 WebKit 对照；不接收外部文件路径或代码。
 
 `lib/contract-core.mjs` 提供共同的数据语义；`lib/contracts.mjs` 是 Node 装配，`browser/inspector.mjs` 是 App 入口。`build-browser.mjs` 将 AST parser 和预编译 Schema validators 打包为 `App/Resources/SourceRuntime/SourceInspector.js`。Node worker 的硬终止/内存限制与 WKWebView 的原生 deadline 不是同一种保证，D01 资源项仍需设备验证。
+
+可选 `build-source --source-map` 输出一个不内嵌源码、无绝对路径的 `.source.js.map`；App 成品仍只有 `.source.js`。映射绑定输出摘要，成品编辑后旧映射会被拒绝。说明和命令见 [作者指南](../../docs/SOURCE_AUTHOR_GUIDE.md#定位运行错误与可选映射)。
 
 生成合成旧库与基线报告，在仓库根目录执行：
 

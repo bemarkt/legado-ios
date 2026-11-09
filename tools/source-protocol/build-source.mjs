@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { writeFile, mkdir, rename, unlink, link, lstat } from 'node:fs/promises';
+import { writeFile, mkdir, rename, unlink, link, lstat, realpath } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { buildSource } from './lib/build-source.mjs';
 import { sourceMapByteLimit } from './lib/source-location.mjs';
@@ -13,12 +13,14 @@ try {
   if (!output.endsWith('.source.js')) throw new Error('Output must end with .source.js');
   if (comparable(entry) === comparable(output)) throw new Error('Output must not replace the source entry');
   const { source, inspection, inputs, map } = await buildSource(entry, { sourceMap: flags.includes('--source-map') });
-  const destination = path.resolve(output), entryRoot = path.dirname(path.resolve(entry));
+  const destination = path.resolve(output), entryRoot = path.dirname(await realpath(path.resolve(entry)));
+  await mkdir(path.dirname(destination), { recursive: true });
+  const outputRoot = await realpath(path.dirname(destination));
   const outputs = [{ destination, text: source }];
   if (map) {
     map.file = path.basename(destination);
     map.sources = map.sources.map(source => {
-      const relative = path.relative(path.dirname(destination), path.resolve(entryRoot, source));
+      const relative = path.relative(outputRoot, path.resolve(entryRoot, source));
       if (path.isAbsolute(relative)) throw new Error('A development map must stay on the same filesystem volume as its sources');
       return relative.split(path.sep).join('/');
     });
@@ -28,13 +30,12 @@ try {
   }
   const dependencies = [entry, ...inputs.map(input => path.resolve(entryRoot, input))].map(comparable);
   for (const file of outputs) {
-    if (dependencies.includes(comparable(file.destination))) throw new Error('Output must not replace any source dependency');
+    if (dependencies.includes(comparable(path.join(outputRoot, path.basename(file.destination))))) throw new Error('Output must not replace any source dependency');
     if (!flags.includes('--replace')) {
       const exists = await lstat(file.destination).then(() => true, error => { if (error.code === 'ENOENT') return false; throw error; });
       if (exists) throw new Error('Output exists; pass --replace to replace it: ' + file.destination);
     }
   }
-  await mkdir(path.dirname(destination), { recursive: true });
   const pending = [];
   try {
     for (const file of outputs) {

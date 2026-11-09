@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, writeFile, readFile, rm, symlink } from 'node:fs/promises';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -64,4 +64,19 @@ test('CLI map output is optional, uses relative paths, and refuses existing file
   await assert.rejects(readFile(output),error=>error.code==='ENOENT');
   await execute(process.execPath,[cli,entry,output,'--source-map','--replace']);
   assert.equal(await readFile(output,'utf8'),source);
+});
+
+test('symlinked author directories produce canonical relative mappings and preserve dependencies', async t => {
+  const { root, entry } = await project(t);
+  const alias = path.join(root, 'alias');
+  await symlink(root, alias, process.platform === 'win32' ? 'junction' : 'dir');
+  const linkedEntry = path.join(alias, 'index.ts');
+  const built = await buildSource(linkedEntry, {sourceMap:true});
+  assert.deepEqual(built.map.sources, ['index.ts', 'helper.ts']);
+  const cli = fileURLToPath(new URL('../build-source.mjs',import.meta.url));
+  const output = path.join(alias,'dist','out.source.js');
+  await execute(process.execPath,[cli,linkedEntry,output,'--source-map']);
+  const map = JSON.parse(await readFile(output+'.map','utf8'));
+  assert.deepEqual(map.sources, ['../index.ts','../helper.ts']);
+  assert.doesNotMatch(JSON.stringify(map), /source-maps-|private\/var/);
 });

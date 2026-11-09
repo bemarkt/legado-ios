@@ -84,6 +84,25 @@ def verify(binary, workspace):
                 folder.mkdir()
                 database = folder / 'native.sqlite3'
                 shutil.copy2(seed, database)
+                if checkpoint == 'during':
+                    # Deterministic fault injection at the actual history write, without product test hooks.
+                    # Force uncommitted dirty pages to WAL, then hold the writer in a bounded SQL calculation.
+                    # The parent must observe WAL growth before killing; a completed race never counts.
+                    with sqlite3.connect(database) as connection:
+                        connection.executescript('''
+                            CREATE TABLE recovery_fault_marker(payload BLOB);
+                            CREATE TRIGGER recovery_pause AFTER UPDATE OF payload ON records
+                            WHEN NEW.namespace='installation-history'
+                            BEGIN
+                                INSERT INTO recovery_fault_marker VALUES(zeroblob(16777216));
+                                SELECT sum(value) FROM (
+                                    WITH RECURSIVE delay(value) AS (
+                                        VALUES(1) UNION ALL SELECT value+1 FROM delay WHERE value<100000000
+                                    ) SELECT value FROM delay
+                                );
+                            END;
+                        ''')
+                        connection.execute('PRAGMA wal_checkpoint(TRUNCATE)')
                 process, messages = start_update(binary, database)
                 grown = False
                 try:
@@ -123,7 +142,11 @@ def verify(binary, workspace):
                 report['cases'].append({'checkpoint': checkpoint, 'attempt': attempt, 'walGrowthObserved': grown,
                                         'recovered': 'new' if checkpoint == 'after' else 'old', 'integrity': 'ok'})
                 if checkpoint != 'after':
-                    # The killed write must leave a usable archive: explicitly retry through the same Swift API.
+                    # Remove only the fixture fault before explicitly retrying the same real Swift API.
+                    if checkpoint == 'during':
+                        with sqlite3.connect(database) as connection:
+                            assert connection.execute('SELECT COUNT(*) FROM recovery_fault_marker').fetchone()[0] == 0
+                            connection.executescript('DROP TRIGGER recovery_pause; DROP TABLE recovery_fault_marker;')
                     retry, retry_messages = start_update(binary, database)
                     try:
                         retry_ready = phase(retry, retry_messages, 'ready')

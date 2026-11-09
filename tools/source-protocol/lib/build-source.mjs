@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { realpath } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import MagicString, { Bundle } from 'magic-string';
 import remapping from '@jridgewell/remapping';
@@ -11,7 +12,7 @@ const operations = ['search', 'book', 'chapters', 'content'];
 
 // Author-side compiler only. No user plugin/config JS is loaded, and no source module is executed.
 export async function buildSource(entry, { sourceMap = false } = {}) {
-  const absolute = path.resolve(entry);
+  const absolute = await realpath(path.resolve(entry));
   const result = await build({
     absWorkingDir: path.dirname(absolute), entryPoints: [absolute], bundle: true, write: false,
     outfile: path.join(path.dirname(absolute), '__source_bundle__.js'), allowOverwrite: true,

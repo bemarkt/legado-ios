@@ -25,6 +25,14 @@ struct LegacyMigrationSnapshotTests {
         guard sqlite3_exec(connection, sql, nil, nil, nil) == SQLITE_OK else { throw SourceDomainError(.invalidData, "Fixture SQL failed") }
     }
 
+    @Test func inventoryUsesRelativeFileNamesForCanonicalAndAliasRoots() throws {
+        let root = try root(), directory = root.appendingPathComponent("data", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Data("file".utf8).write(to: directory.appendingPathComponent("legacy.sqlite3"))
+        #expect(try LegacyMigrationSnapshot.fileInventory(directory).keys.sorted() == ["legacy.sqlite3"])
+        #expect(try LegacyMigrationSnapshot.fileInventory(directory.resolvingSymlinksInPath()).keys.sorted() == ["legacy.sqlite3"])
+    }
+
     @Test func sqliteBackupIncludesWALAndAllTablesAndLeavesOriginalBytesUntouched() async throws {
         let root = try root(), (database, original) = try await fixture(root)
         let external = root.appendingPathComponent("chapters"), nested = external.appendingPathComponent("nested")

@@ -68,7 +68,7 @@ public enum LegacyMigrationSnapshot {
         for name in externalDirectories.keys.sorted() {
             let input = externalDirectories[name]!.standardizedFileURL.resolvingSymlinksInPath()
             guard manager.fileExists(atPath: input.path) else { missing.append(name); continue }
-            let before = try list(input)
+            let before = try fileInventory(input)
             for relative in before.keys.sorted() {
                 try Task.checkCancellation()
                 guard files.count < 250_000 else { throw SourceDomainError(.resourceLimit, "迁移文件数量超过限制。") }
@@ -79,7 +79,7 @@ public enum LegacyMigrationSnapshot {
                 files.append(record); bytes += record.bytes
                 try checkpoint(.externalFileCopied)
             }
-            guard try list(input) == before else { throw SourceDomainError(.stale, "复制期间外部文件已改变，请停止下载或编辑后重试。") }
+            guard try fileInventory(input) == before else { throw SourceDomainError(.stale, "复制期间外部文件已改变，请停止下载或编辑后重试。") }
         }
         if let defaults {
             guard defaults.count <= 16_777_216, bytes + Int64(defaults.count) <= maximumBytes else { throw SourceDomainError(.resourceLimit, "设置备份超过容量限制。") }
@@ -120,7 +120,7 @@ public enum LegacyMigrationSnapshot {
         !value.isEmpty && value.utf8.count <= 64 && value.utf8.allSatisfy { (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0) || $0 == 45 || $0 == 95 }
     }
     private static func contains(_ directory: URL, _ file: URL) -> Bool { file.path == directory.path || file.path.hasPrefix(directory.path + "/") }
-    private static func list(_ directory: URL) throws -> [String: String] {
+    static func fileInventory(_ directory: URL) throws -> [String: String] {
         let root = directory.standardizedFileURL.resolvingSymlinksInPath()
         let keys: Set<URLResourceKey> = [.isRegularFileKey, .isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey, .contentModificationDateKey]
         guard try root.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true else { throw SourceDomainError(.invalidInput, "外部数据必须是目录。") }
@@ -171,8 +171,8 @@ public enum LegacyMigrationSnapshot {
     }
     private static func verifyFiles(_ manifest: LegacyMigrationManifest, root: URL) throws {
         guard manifest.files.count <= 250_000, Set(manifest.files.map(\.relativePath)).count == manifest.files.count else { throw SourceDomainError(.invalidData, "迁移文件清单重复或过大。") }
-        let actual = try list(root)
-        guard Set(actual.keys) == Set(manifest.files.map(\.relativePath)), actual["legacy.sqlite3"] != nil else { throw SourceDomainError(.invalidData, "迁移副本有文件缺失或多余文件。") }
+        let actual = try fileInventory(root)
+        guard Set(actual.keys) == Set(manifest.files.map(\.relativePath)), actual["legacy.sqlite3"] != nil else { throw SourceDomainError(.invalidData, "迁移副本文件数量不符（实际 \(actual.count)，清单 \(manifest.files.count)，主库 \(actual["legacy.sqlite3"] != nil)）。") }
         for expected in manifest.files {
             let url = root.appendingPathComponent(expected.relativePath).standardizedFileURL.resolvingSymlinksInPath()
             guard !expected.relativePath.hasPrefix("/"), contains(root, url), !expected.relativePath.split(separator: "/").contains("..") else {

@@ -22,6 +22,10 @@ on:
       - 'Vendor/QuickJS/**'
       - 'tools/source-recovery/**'
       - 'tools/legado-compatibility/swift/**'
+      - 'protocols/legado-compatibility/**'
+      - 'scripts/verify-legado-regression.py'
+      - 'scripts/compare-legado-reference.py'
+      - 'scripts/tests/test_legado_*.py'
       - 'scripts/verify-source-process-recovery.py'
       - 'Package.swift'
       - 'Legado.xcodeproj/**'
@@ -36,6 +40,10 @@ on:
       - 'Vendor/QuickJS/**'
       - 'tools/source-recovery/**'
       - 'tools/legado-compatibility/swift/**'
+      - 'protocols/legado-compatibility/**'
+      - 'scripts/verify-legado-regression.py'
+      - 'scripts/compare-legado-reference.py'
+      - 'scripts/tests/test_legado_*.py'
       - 'scripts/verify-source-process-recovery.py'
       - 'Package.swift'
       - 'Legado.xcodeproj/**'
@@ -97,6 +105,13 @@ jobs:
           set -o pipefail
           swift test --filter LegadoAppModelsTests --no-parallel 2>&1 | tee swift-test-appmodels.log
 
+      - name: Verify reviewed offline Legado rules
+        run: |
+          python3 -m unittest discover -s scripts/tests -p 'test_legado_*.py'
+          mkdir -p build/legado-compatibility
+          "$(swift build --show-bin-path)/LegadoDifferentialProbe" protocols/legado-compatibility/corpus.json build/legado-compatibility/swift.json
+          python3 scripts/verify-legado-regression.py build/legado-compatibility/swift.json --output build/legado-compatibility/regression.json
+
       - name: Verify source update process interruption recovery
         run: |
           python3 scripts/verify-source-process-recovery.py "$(swift build --show-bin-path)/SourceRecoveryProbe" --output build/source-process-recovery.json
@@ -110,6 +125,7 @@ jobs:
           path: |
             swift-test-*.log
             build/source-process-recovery.json
+            build/legado-compatibility/
           if-no-files-found: ignore
           retention-days: 7
 

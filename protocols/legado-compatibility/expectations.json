@@ -1,0 +1,327 @@
+{
+  "schemaVersion": 1,
+  "profile": "legado-ios-offline-rules-1",
+  "referenceCommit": "a7d37f1707a70a459ad708f4fe79341d1e42d716",
+  "corpusSHA256": "3dd523f9e0771ffb158a0c18054a20b3bdf9a0a4fa6e7c3c72ba275980bfad59",
+  "reviewedAt": "2026-11-09",
+  "scope": "Offline legacy rule semantics only; does not establish provider/network/account/full-reading compatibility",
+  "evidence": {
+    "run": 42547092876,
+    "implementationCommit": "0a339204dc8e604bcc81b3b64fb1d630ea63b525",
+    "android": "evidence/android-0a33920.json",
+    "swift": "evidence/swift-0a33920.json",
+    "result": "Both reports captured all 28 cases; Android instrumentation failed its original numeric sanity assertion. The failure is retained."
+  },
+  "cases": [
+    {
+      "id": "css-text",
+      "outcome": "success",
+      "values": [
+        "山海 & 星河"
+      ],
+      "variables": {},
+      "diagnostics": [],
+      "basis": "Reviewed equal ordered values and variables in both captured reports"
+    },
+    {
+      "id": "css-list-attributes",
+      "outcome": "success",
+      "values": [
+        "/book/a",
+        "/book/b"
+      ],
+      "variables": {},
+      "diagnostics": [],
+      "basis": "Reviewed equal ordered values and variables in both captured reports"
+    },
+    {
+      "id": "default-class",
+      "outcome": "success",
+      "values": [
+        "山海 & 星河"
+      ],
+      "variables": {},
+      "diagnostics": [],
+      "basis": "Reviewed equal ordered values and variables in both captured reports"
+    },
+    {
+      "id": "html-multiline-text",
+      "outcome": "success",
+      "values": [
+        "第一段 第二段"
+      ],
+      "variables": {},
+      "diagnostics": [],
+      "basis": "Reviewed equal ordered values and variables in both captured reports"
+    },
+    {
+      "id": "xpath-text",
+      "outcome": "success",
+      "values": [
+        "山海 & 星河"
+      ],
+      "variables": {},
+      "diagnostics": [],
+      "basis": "Reviewed equal ordered values and variables in both captured reports"
+    },
+    {
+      "id": "xpath-attributes",
+      "outcome": "success",
+      "values": [
+        "/book/a",
+        "/book/b"
+      ],
+      "variables": {},
+      "diagnostics": [],
+      "basis": "Reviewed equal ordered values and variables in both captured reports"
+    },
+    {
+      "id": "json-string",
+      "outcome": "success",
+      "values": [
+        "第12章 山海"
+      ],
+      "variables": {},
+      "diagnostics": [],
+      "basis": "Reviewed equal ordered values and variables in both captured reports"
+    },
+    {
+      "id": "json-list",
+      "outcome": "success",
+      "values": [
+        "山海",
+        "星河"
+      ],
+      "variables": {},
+      "diagnostics": [],
+      "basis": "Reviewed equal ordered values and variables in both captured reports"
+    },
+    {
+      "id": "json-index",
+      "outcome": "success",
+      "values": [
+        "星河"
+      ],
+      "variables": {},
+      "diagnostics": [],
+      "basis": "Reviewed equal ordered values and variables in both captured reports"
+    },
+    {
+      "id": "json-empty",
+      "outcome": "success",
+      "values": [
+        ""
+      ],
+      "variables": {},
+      "diagnostics": [],
+      "basis": "Reviewed equal ordered values and variables in both captured reports"
+    },
+    {
+      "id": "json-missing",
+      "outcome": "success",
+      "values": [
+        ""
+      ],
+      "variables": {},
+      "diagnostics": [],
+      "basis": "Reviewed equal ordered values and variables in both captured reports"
+    },
+    {
+      "id": "fallback",
+      "outcome": "success",
+      "values": [
+        "第12章 山海"
+      ],
+      "variables": {},
+      "diagnostics": [],
+      "basis": "Reviewed equal ordered values and variables in both captured reports"
+    },
+    {
+      "id": "concatenate",
+      "outcome": "success",
+      "values": [
+        "山海",
+        "星河"
+      ],
+      "variables": {},
+      "diagnostics": [],
+      "basis": "Reviewed equal ordered values and variables in both captured reports"
+    },
+    {
+      "id": "zip-uneven",
+      "outcome": "success",
+      "values": [
+        "甲",
+        "一",
+        "乙",
+        "二"
+      ],
+      "variables": {},
+      "diagnostics": [],
+      "basis": "Reviewed equal ordered values and variables in both captured reports"
+    },
+    {
+      "id": "regex-replace",
+      "outcome": "success",
+      "values": [
+        "山海"
+      ],
+      "variables": {},
+      "diagnostics": [],
+      "basis": "Reviewed equal ordered values and variables in both captured reports"
+    },
+    {
+      "id": "regex-captures",
+      "outcome": "success",
+      "values": [
+        "第12章 海山"
+      ],
+      "variables": {},
+      "diagnostics": [],
+      "basis": "Reviewed equal ordered values and variables in both captured reports"
+    },
+    {
+      "id": "variable-read",
+      "outcome": "success",
+      "values": [
+        "synthetic-token"
+      ],
+      "variables": {
+        "token": "synthetic-token"
+      },
+      "diagnostics": [],
+      "basis": "Reviewed equal ordered values and variables in both captured reports"
+    },
+    {
+      "id": "variable-put",
+      "outcome": "success",
+      "values": [
+        "第12章 山海"
+      ],
+      "variables": {
+        "saved": "第12章 山海"
+      },
+      "diagnostics": [],
+      "basis": "Reviewed equal ordered values and variables in both captured reports"
+    },
+    {
+      "id": "js-arithmetic",
+      "outcome": "success",
+      "values": [
+        "3"
+      ],
+      "variables": {},
+      "diagnostics": [],
+      "basis": "Observed Swift scalar representation 3; pinned Android returns 3.0, explicitly retained divergence"
+    },
+    {
+      "id": "js-result",
+      "outcome": "success",
+      "values": [
+        "ABC"
+      ],
+      "variables": {},
+      "diagnostics": [],
+      "basis": "Reviewed equal ordered values and variables in both captured reports"
+    },
+    {
+      "id": "js-list",
+      "outcome": "success",
+      "values": [
+        "甲",
+        "乙"
+      ],
+      "variables": {},
+      "diagnostics": [],
+      "basis": "Reviewed equal ordered values and variables in both captured reports"
+    },
+    {
+      "id": "js-base-url",
+      "outcome": "success",
+      "values": [
+        "https://fixture.invalid/books/"
+      ],
+      "variables": {},
+      "diagnostics": [],
+      "basis": "Reviewed equal ordered values and variables in both captured reports"
+    },
+    {
+      "id": "js-put-get",
+      "outcome": "success",
+      "values": [
+        "changed"
+      ],
+      "variables": {
+        "token": "changed"
+      },
+      "diagnostics": [],
+      "basis": "Reviewed equal ordered values and variables in both captured reports"
+    },
+    {
+      "id": "js-md5",
+      "outcome": "success",
+      "values": [
+        "900150983cd24fb0d6963f7d28e17f72"
+      ],
+      "variables": {},
+      "diagnostics": [],
+      "basis": "Reviewed equal ordered values and variables in both captured reports"
+    },
+    {
+      "id": "js-base64",
+      "outcome": "success",
+      "values": [
+        "5bGx5rW3"
+      ],
+      "variables": {},
+      "diagnostics": [],
+      "basis": "Reviewed equal ordered values and variables in both captured reports"
+    },
+    {
+      "id": "js-nested-rule",
+      "outcome": "success",
+      "values": [
+        "第12章 山海"
+      ],
+      "variables": {},
+      "diagnostics": [],
+      "basis": "Reviewed equal ordered values and variables in both captured reports"
+    },
+    {
+      "id": "js-throw",
+      "outcome": "error",
+      "values": [],
+      "variables": {},
+      "diagnostics": [
+        {
+          "code": "rule.malformed",
+          "severity": "error"
+        }
+      ],
+      "basis": "Both engines throw; native public diagnostic category is tested, messages and stacks intentionally not equated"
+    },
+    {
+      "id": "js-syntax",
+      "outcome": "error",
+      "values": [],
+      "variables": {},
+      "diagnostics": [
+        {
+          "code": "rule.malformed",
+          "severity": "error"
+        }
+      ],
+      "basis": "Both engines throw; native public diagnostic category is tested, messages and stacks intentionally not equated"
+    },
+    {
+      "id": "js-execution-anchor",
+      "outcome": "success",
+      "values": [
+        "executed:3"
+      ],
+      "variables": {},
+      "diagnostics": [],
+      "basis": "Explicit ECMAScript String conversion; independent execution sentinel"
+    }
+  ]
+}

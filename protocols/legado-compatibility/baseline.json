@@ -110,9 +110,9 @@
   ],
   "verification": {
     "referenceBytes": "verified",
-    "androidExecution": "not-run",
+    "androidExecution": "28-cases-captured-in-run-42547092876; numeric-sanity-assertion-failed",
     "iosAdapter": "not-implemented",
-    "differential": "not-run",
+    "differential": "raw-observations-retained; whole-profile-equivalence-not-claimed",
     "checkout": "verified locally at pinned commit"
   },
   "observations": [

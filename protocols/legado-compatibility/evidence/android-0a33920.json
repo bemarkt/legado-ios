@@ -1,0 +1,285 @@
+{
+  "schemaVersion": 1,
+  "engine": "android-legado-reference",
+  "referenceCommit": "a7d37f1707a70a459ad708f4fe79341d1e42d716",
+  "corpusSHA256": "1453d5243d128dec1137b1bf7e21798cee2745030b98d1cf98136a91edc2f740",
+  "environment": {
+    "sdk": 35,
+    "model": "sdk_gphone64_x86_64",
+    "fingerprint": "google\/sdk_gphone64_x86_64\/emu64xa:15\/AE3A.240806.043\/12960925:userdebug\/dev-keys"
+  },
+  "results": [
+    {
+      "id": "css-text",
+      "outcome": "success",
+      "values": [
+        "山海 & 星河"
+      ],
+      "variables": {},
+      "errors": []
+    },
+    {
+      "id": "css-list-attributes",
+      "outcome": "success",
+      "values": [
+        "\/book\/a",
+        "\/book\/b"
+      ],
+      "variables": {},
+      "errors": []
+    },
+    {
+      "id": "default-class",
+      "outcome": "success",
+      "values": [
+        "山海 & 星河"
+      ],
+      "variables": {},
+      "errors": []
+    },
+    {
+      "id": "html-multiline-text",
+      "outcome": "success",
+      "values": [
+        "第一段 第二段"
+      ],
+      "variables": {},
+      "errors": []
+    },
+    {
+      "id": "xpath-text",
+      "outcome": "success",
+      "values": [
+        "山海 & 星河"
+      ],
+      "variables": {},
+      "errors": []
+    },
+    {
+      "id": "xpath-attributes",
+      "outcome": "success",
+      "values": [
+        "\/book\/a",
+        "\/book\/b"
+      ],
+      "variables": {},
+      "errors": []
+    },
+    {
+      "id": "json-string",
+      "outcome": "success",
+      "values": [
+        "第12章 山海"
+      ],
+      "variables": {},
+      "errors": []
+    },
+    {
+      "id": "json-list",
+      "outcome": "success",
+      "values": [
+        "山海",
+        "星河"
+      ],
+      "variables": {},
+      "errors": []
+    },
+    {
+      "id": "json-index",
+      "outcome": "success",
+      "values": [
+        "星河"
+      ],
+      "variables": {},
+      "errors": []
+    },
+    {
+      "id": "json-empty",
+      "outcome": "success",
+      "values": [
+        ""
+      ],
+      "variables": {},
+      "errors": []
+    },
+    {
+      "id": "json-missing",
+      "outcome": "success",
+      "values": [
+        ""
+      ],
+      "variables": {},
+      "errors": []
+    },
+    {
+      "id": "fallback",
+      "outcome": "success",
+      "values": [
+        "第12章 山海"
+      ],
+      "variables": {},
+      "errors": []
+    },
+    {
+      "id": "concatenate",
+      "outcome": "success",
+      "values": [
+        "山海",
+        "星河"
+      ],
+      "variables": {},
+      "errors": []
+    },
+    {
+      "id": "zip-uneven",
+      "outcome": "success",
+      "values": [
+        "甲",
+        "一",
+        "乙",
+        "二"
+      ],
+      "variables": {},
+      "errors": []
+    },
+    {
+      "id": "regex-replace",
+      "outcome": "success",
+      "values": [
+        "山海"
+      ],
+      "variables": {},
+      "errors": []
+    },
+    {
+      "id": "regex-captures",
+      "outcome": "success",
+      "values": [
+        "第12章 海山"
+      ],
+      "variables": {},
+      "errors": []
+    },
+    {
+      "id": "variable-read",
+      "outcome": "success",
+      "values": [
+        "synthetic-token"
+      ],
+      "variables": {
+        "token": "synthetic-token"
+      },
+      "errors": []
+    },
+    {
+      "id": "variable-put",
+      "outcome": "success",
+      "values": [
+        "第12章 山海"
+      ],
+      "variables": {
+        "saved": "第12章 山海"
+      },
+      "errors": []
+    },
+    {
+      "id": "js-arithmetic",
+      "outcome": "success",
+      "values": [
+        "3.0"
+      ],
+      "variables": {},
+      "errors": []
+    },
+    {
+      "id": "js-result",
+      "outcome": "success",
+      "values": [
+        "ABC"
+      ],
+      "variables": {},
+      "errors": []
+    },
+    {
+      "id": "js-list",
+      "outcome": "success",
+      "values": [
+        "甲",
+        "乙"
+      ],
+      "variables": {},
+      "errors": []
+    },
+    {
+      "id": "js-base-url",
+      "outcome": "success",
+      "values": [
+        "https:\/\/fixture.invalid\/books\/"
+      ],
+      "variables": {},
+      "errors": []
+    },
+    {
+      "id": "js-put-get",
+      "outcome": "success",
+      "values": [
+        "changed"
+      ],
+      "variables": {
+        "token": "changed"
+      },
+      "errors": []
+    },
+    {
+      "id": "js-md5",
+      "outcome": "success",
+      "values": [
+        "900150983cd24fb0d6963f7d28e17f72"
+      ],
+      "variables": {},
+      "errors": []
+    },
+    {
+      "id": "js-base64",
+      "outcome": "success",
+      "values": [
+        "5bGx5rW3"
+      ],
+      "variables": {},
+      "errors": []
+    },
+    {
+      "id": "js-nested-rule",
+      "outcome": "success",
+      "values": [
+        "第12章 山海"
+      ],
+      "variables": {},
+      "errors": []
+    },
+    {
+      "id": "js-throw",
+      "outcome": "error",
+      "values": [],
+      "variables": {},
+      "errors": [
+        {
+          "code": "com.script.ScriptException",
+          "message": "Error: synthetic-failure\nSource context:\n> 1: throw new Error(\"synthetic-failure\") in <script-19> at line number 1"
+        }
+      ]
+    },
+    {
+      "id": "js-syntax",
+      "outcome": "error",
+      "values": [],
+      "variables": {},
+      "errors": [
+        {
+          "code": "com.script.ScriptException",
+          "message": "missing variable name\nSource context:\n> 1: var = ;\n          ^ in <script-21> at line number 1 at column number 6"
+        }
+      ]
+    }
+  ]
+}

@@ -216,9 +216,6 @@
       "baseURL": "https://fixture.invalid/books/",
       "variables": {},
       "inspectVariables": [],
-      "sanityValues": [
-        "3"
-      ],
       "expectedOutcome": "success"
     },
     {
@@ -323,6 +320,20 @@
       "variables": {},
       "inspectVariables": [],
       "expectedOutcome": "error"
+    },
+    {
+      "id": "js-execution-anchor",
+      "family": "javascript",
+      "rule": "@js:\"executed:\" + String(1 + 2)",
+      "input": "unused",
+      "mode": "string",
+      "baseURL": "https://fixture.invalid/books/",
+      "variables": {},
+      "inspectVariables": [],
+      "expectedOutcome": "success",
+      "sanityValues": [
+        "executed:3"
+      ]
     }
   ]
 }

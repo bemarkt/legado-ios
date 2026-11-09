@@ -34,7 +34,7 @@ class EvidenceTests(unittest.TestCase):
 
     def test_complete_evidence_does_not_claim_provider_compatibility(self):
         result = self.compare()
-        self.assertEqual(result['counts'], {'equal-values': 26, 'error-outcome-only': 2})
+        self.assertEqual(result['counts'], {'equal-values': 27, 'error-outcome-only': 2})
         self.assertEqual(result['providerCompatibility'], 'not-evaluated')
 
     def test_value_order_and_variables_are_not_normalized_away(self):
@@ -81,7 +81,7 @@ class EvidenceTests(unittest.TestCase):
             self.compare()
 
     def test_sanity_anchor_catches_empty_execution(self):
-        row = next(row for row in self.swift['results'] if row['id'] == 'js-arithmetic')
+        row = next(row for row in self.swift['results'] if row['id'] == 'js-execution-anchor')
         row['values'] = []
         with self.assertRaises(ValueError):
             self.compare()

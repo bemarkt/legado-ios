@@ -1,5 +1,7 @@
 # 开发与验证
 
+2026-11-09 执行状态：当前 goal 按用户要求暂停，已有验证已收尾；停止新增功能和架构接入。先阅读 [阶段暂停检查点](reports/PROJECT_PAUSE_CHECKPOINT_2026-11-09.md)。下方命令作为环境记录保留，待独立产品的领域模型和模块边界确认后再安排实施与构建。
+
 ## 环境
 
 - 日常开发主机为 Windows 11。本地运行 Git、Node、Python 和静态检查；Swift 测试、Xcode 模拟器/设备编译与 IPA 打包通过 GitHub Actions 的 macOS runner 执行。

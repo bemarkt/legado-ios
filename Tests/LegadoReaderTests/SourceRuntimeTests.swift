@@ -1188,6 +1188,15 @@ extension SourceRuntimeTests {
             if descendants(window).compactMap({ $0 as? UINavigationBar }).contains(where: { $0.topItem?.title == "响应详情" }) { break }
             try await Task.sleep(for: .milliseconds(30))
         }
+        // Navigation titles appear before UIKit finishes presenting. Wait for the
+        // transition itself before capturing or dismissing the sheet.
+        for _ in 0..<100 {
+            if let presented = host.presentedViewController, !presented.isBeingPresented, presented.transitionCoordinator == nil { break }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertNotNil(host.presentedViewController)
+        XCTAssertFalse(host.presentedViewController?.isBeingPresented ?? true)
+        XCTAssertNil(host.presentedViewController?.transitionCoordinator)
         let titles = descendants(window).compactMap { ($0 as? UINavigationBar)?.topItem?.title }
         XCTAssertTrue(titles.contains("响应详情"))
         XCTAssertFalse(titles.contains("书源设置"))
@@ -1196,7 +1205,10 @@ extension SourceRuntimeTests {
         let image = UIGraphicsImageRenderer(size: window.bounds.size).image { _ in window.drawHierarchy(in: window.bounds, afterScreenUpdates: true) }
         let attachment = XCTAttachment(image: image); attachment.name = "failed-response-single-presentation"; attachment.lifetime = .keepAlways; add(attachment)
         presentation.destination = nil
-        try await Task.sleep(for: .milliseconds(400))
+        for _ in 0..<100 {
+            if host.presentedViewController == nil { break }
+            try await Task.sleep(for: .milliseconds(50))
+        }
         XCTAssertNil(host.presentedViewController)
     }
 

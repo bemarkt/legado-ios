@@ -83,7 +83,7 @@ RSS 界面回归还验证正文的手动刷新确实重新请求网络。核心�
 | [Build Unsigned IPA](../.github/workflows/build-ipa.yml) | 仅手动 `workflow_dispatch` | iOS 设备构建、未签名 IPA、可选 dSYM 与构建日志 |
 | [Legado Compatibility Reference](../.github/workflows/legado-compatibility-reference.yml) | 仅手动 `workflow_dispatch`，按需使用 | 指定 Android 版本与 Swift 的离线规则观察；采集成功不代表兼容通过 |
 
-各工作流的路径过滤和 PR 事件以 YAML 为准。JavaScript Engine CI 当前过滤包含 `App/`、核心代码和核心测试等路径；只修改 `Tests/LegadoAppModelsTests/` 或 `Tests/LegadoReaderTests/` 不会单独触发该工作流，必要时手动执行。UIKit 和 UI 测试仍需另外运行。
+各工作流的路径过滤和 PR 事件以 YAML 为准。JavaScript Engine CI 当前过滤包含 `App/`、核心代码、核心测试和 `Tests/LegadoAppModelsTests/`；只修改 `Tests/LegadoReaderTests/` 不会单独触发该工作流，必要时手动执行。UIKit 和 UI 测试仍需另外运行。
 
 手动构建时，在 Actions 选择 **Build Unsigned IPA → Run workflow**：
 

@@ -7,7 +7,7 @@ extension SourceIssue {
         else if let failure = error as? SourceDomainError { self.init(code: failure.code.rawValue) }
         else if let failure = error as? SourceHostHTTPFailure { self.init(code: failure.code.rawValue) }
         else if error is CancellationError { self.init(code: "CANCELLED") }
-        else { self.init(code: "UNKNOWN") }
+        else { self.init(compatibilityError: error) }
     }
 }
 

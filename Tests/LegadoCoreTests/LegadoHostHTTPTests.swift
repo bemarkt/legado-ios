@@ -15,7 +15,7 @@ struct LegadoHostHTTPTests {
         toc.nextTocUrl = "@css:.next@href"; source.ruleToc = toc
         var content = ContentRule(); content.content = "@css:#content@text"; content.nextContentUrl = "@css:.next@href"; source.ruleContent = content
         return try .init(publisherID: "fixture.html", name: source.bookSourceName, version: "1",
-                         source: String(decoding: SourceCoding.encode(source), as: UTF8.self), origins: [origin])
+                         source: String(decoding: SourceCoding.encode(source), as: UTF8.self), origins: [origin], format: .legado)
     }
     private func wait(_ condition: @escaping @Sendable () async -> Bool) async throws {
         for _ in 0..<300 { if await condition() { return }; try await Task.sleep(for: .milliseconds(10)) }

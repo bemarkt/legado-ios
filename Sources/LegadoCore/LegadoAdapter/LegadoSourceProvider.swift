@@ -3,10 +3,14 @@ import Foundation
 /// Legacy rules end at this boundary. The reader receives only the native SourceWire contract.
 /// The host creates a fresh environment for each operation, pinned to this descriptor's scope.
 public struct LegadoSourceProvider: SourceProvider {
-    public typealias EnvironmentFactory = @Sendable (JavaScriptExecutionControl) async throws -> JavaScriptHostEnvironment
+    public typealias EnvironmentFactory = @Sendable (JavaScriptExecutionControl, SourceWorkScheduler.Priority) async throws -> JavaScriptHostEnvironment
     public let descriptor: SourceProviderDescriptor
     private let source: BookSource
     private let environment: EnvironmentFactory
+    private var priorityOverride: SourceWorkScheduler.Priority?
+    public func prioritized(_ priority: SourceWorkScheduler.Priority) -> Self {
+        var copy = self; copy.priorityOverride = priority; return copy
+    }
     public init(source: BookSource, descriptor: SourceProviderDescriptor, environment: @escaping EnvironmentFactory) throws {
         guard source.bookSourceType == 0, let url = URL(string: source.bookSourceUrl),
               ["https", "http"].contains(url.scheme ?? ""), url.host != nil else {
@@ -16,30 +20,40 @@ public struct LegadoSourceProvider: SourceProvider {
     }
 
     public func search(_ input: SourceWire.SearchInput) async throws -> SourceWire.SearchPage {
-        try await run { operation in var operation = operation; return try await operation.search(input) }
+        try await run(.search, priority: .search) { operation in var operation = operation; return try await operation.search(input) }
     }
     public func book(_ input: SourceWire.BookInput) async throws -> SourceWire.BookDetails {
-        try await run { operation in var operation = operation; return try await operation.book(input) }
+        try await run(.book) { operation in var operation = operation; return try await operation.book(input) }
     }
     public func chapters(_ input: SourceWire.ChaptersInput) async throws -> SourceWire.ChapterPage {
-        try await run { operation in var operation = operation; return try await operation.chapters(input) }
+        try await run(.chapters) { operation in var operation = operation; return try await operation.chapters(input) }
     }
     public func content(_ input: SourceWire.ContentInput) async throws -> SourceWire.ChapterContent {
-        try await run { operation in var operation = operation; return try await operation.content(input) }
+        try await run(.content) { operation in var operation = operation; return try await operation.content(input) }
     }
 
-    private func run<Value: Sendable>(_ body: @Sendable (Operation) async throws -> Value) async throws -> Value {
+    private func run<Value: Sendable>(_ operation: SourceDiagnosticOperation, priority: SourceWorkScheduler.Priority = .reading, _ body: @Sendable (Operation) async throws -> Value) async throws -> Value {
         let control = JavaScriptExecutionControl(gate: descriptor.commitGate)
-        return try await withTaskCancellationHandler {
-            try Task.checkCancellation(); try control.check()
-            defer { control.cancel() }
-            let host = try await environment(control)
-            guard host.control === control else { throw SourceDomainError(.invalidInput, "Host returned another operation control") }
-            try control.check()
-            let result = try await body(Operation(source: source, descriptor: descriptor, host: host))
-            try Task.checkCancellation(); try control.check()
+        let started = ContinuousClock.now, operationID = UUID()
+        do {
+            let result = try await withTaskCancellationHandler {
+                try Task.checkCancellation(); try control.check()
+                defer { control.cancel() }
+                let host = try await environment(control, priorityOverride ?? priority)
+                guard host.control === control else { throw SourceDomainError(.invalidInput, "Host returned another operation control") }
+                try control.check()
+                let result = try await body(Operation(source: source, descriptor: descriptor, host: host))
+                try Task.checkCancellation(); try control.check()
+                return result
+            } onCancel: { control.cancel() }
+            await SourceDiagnostics.shared.record(id: operationID, operation: operation, identity: descriptor.identity,
+                issue: nil, elapsedMilliseconds: Int(started.duration(to: .now) / .milliseconds(1)))
             return result
-        } onCancel: { control.cancel() }
+        } catch {
+            await SourceDiagnostics.shared.record(id: operationID, operation: operation, identity: descriptor.identity,
+                issue: SourceIssue(compatibilityError: error), elapsedMilliseconds: Int(started.duration(to: .now) / .milliseconds(1)))
+            throw error
+        }
     }
 
     /// Only rule-local variables are retained. source/login/Cookie host state is never copied here.
@@ -313,3 +327,23 @@ public struct LegadoSourceProvider: SourceProvider {
 }
 
 private extension String { var nonempty: String? { isEmpty ? nil : self } }
+
+public extension SourceIssue {
+    init(compatibilityError error: any Error) {
+        if let failure = error as? SourceDomainError { self.init(code: failure.code.rawValue) }
+        else if let failure = error as? SourceHostHTTPFailure { self.init(code: failure.code.rawValue) }
+        else if let failure = error as? RuleEngineError {
+            switch failure {
+            case .unsupportedRule: self.init(code: "UNSUPPORTED")
+            case .invalidInput: self.init(code: "INVALID_INPUT")
+            case .resourceLimit: self.init(code: "RESOURCE_LIMIT")
+            case .malformedRule: self.init(code: "PARSE")
+            }
+        } else if case HTTPClientError.statusResponse(let response) = error {
+            self.init(code: [401,403].contains(response.statusCode) ? "AUTH_REQUIRED" : response.statusCode == 429 ? "RATE_LIMITED" : "HTTP")
+        } else if let error = error as? URLError {
+            self.init(code: error.code == .timedOut ? "TIMEOUT" : error.code == .cancelled ? "CANCELLED" : "NETWORK")
+        } else if error is CancellationError { self.init(code: "CANCELLED") }
+        else { self.init(code: "UNKNOWN") }
+    }
+}

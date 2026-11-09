@@ -4,7 +4,8 @@ import Foundation
 /// Neither variant touches HTTPCookieStorage.shared or the old persistent runtime cache.
 public actor LegadoCookieJar {
     public let scope: SourceScope
-    private let origins: Set<String>
+    public let origins: Set<String>
+    public let credentialRevision: String?
     private let credentials: SourceCredentialSession?
     private var guest: [String: SourceCredentialCookie] = [:]
     public init(scope: SourceScope, origins: Set<String>, credentials: SourceCredentialSession?) throws {
@@ -17,6 +18,7 @@ public actor LegadoCookieJar {
             }
         } else if scope.accountID != "guest" { throw SourceDomainError(.invalidInput, "Named account needs credentials") }
         self.scope = scope; self.origins = origins; self.credentials = credentials
+        credentialRevision = credentials?.revision
     }
     private func check(_ gate: SourceCommitGate) throws {
         try gate.check()

@@ -84,7 +84,7 @@ struct LegadoSourceProviderTests {
         let state = LegadoStateFixture(), source = source ?? self.source()
         let descriptor = SourceProviderDescriptor(identity: try .init(scope: scope,
             sourceDigest: SourceCoding.digest(try SourceCoding.encode(source)), configuration: .object([:])), name: source.bookSourceName, commitGate: gate)
-        return try .init(source: source, descriptor: descriptor) { control in
+        return try .init(source: source, descriptor: descriptor) { control, _ in
             let loader = LegadoAsyncNetworkLoader(control: control) { request, follow in try await fixture.fetch(request, follow: follow) }
             return .init(sourceState: state, cookies: state, control: control, network: loader,
                          userAgent: "LegadoFixture", identifier: { scope.installationID.uuidString + scope.accountID })

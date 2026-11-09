@@ -104,7 +104,7 @@ public struct SourceHostHTTPClient: Sendable {
 
     /// Legacy host requests share the same policy, scheduler, redirect loop and byte limits.
     /// Explicit Cookie headers are restricted to the initiating origin; native fetch still rejects them.
-    public func fetchCompatibility(_ request: URLRequest, followRedirects: Bool, policy: SourceHostHTTPPolicy,
+    public func fetchCompatibility(_ request: URLRequest, followRedirects: Bool, policy: SourceHostHTTPPolicy, priority: SourceWorkScheduler.Priority = .reading,
                                    deadline: ContinuousClock.Instant, budget: SourceHTTPRequestBudget,
                                    credentials: any SourceHTTPAuthorization) async throws -> HTTPResponse {
         guard let url = request.url, request.httpBodyStream == nil else { throw SourceHostHTTPFailure(.invalidInput, "Invalid compatibility request") }
@@ -118,7 +118,7 @@ public struct SourceHostHTTPClient: Sendable {
         }
         let result = try await execute(.init(url: url.absoluteString, method: request.httpMethod ?? "GET", headers: headers,
                                              body: request.httpBody?.base64EncodedString()),
-            policy: policy, priority: .reading, deadline: deadline, budget: budget, credentials: credentials,
+            policy: policy, priority: priority, deadline: deadline, budget: budget, credentials: credentials,
             compatibility: true, cookie: cookie, returnRedirect: !followRedirects)
         guard let finalURL = URL(string: result.url), let data = Data(base64Encoded: result.body) else {
             throw SourceHostHTTPFailure(.network, "Invalid host response")

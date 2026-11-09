@@ -1,6 +1,8 @@
 import Foundation
 import SQLite3
 
+public enum SourceInstallationFormat: String, Codable, Sendable { case nativeModule = "source-js", legado = "legado-json" }
+
 public struct SourceInstallation: Codable, Sendable, Equatable, Identifiable {
     public let id: UUID
     public let publisherID: String
@@ -12,13 +14,19 @@ public struct SourceInstallation: Codable, Sendable, Equatable, Identifiable {
     public let createdAt: Date
     public let originURL: String?
     public let locallyModified: Bool?
-    public init(id: UUID = UUID(), publisherID: String, name: String, version: String, source: String, origins: [String], createdAt: Date = Date(), originURL: String? = nil, locallyModified: Bool = false) throws {
+    private let sourceFormat: SourceInstallationFormat?
+    public var format: SourceInstallationFormat { sourceFormat ?? .nativeModule }
+    private enum CodingKeys: String, CodingKey {
+        case id, publisherID, name, version, source, digest, origins, createdAt, originURL, locallyModified
+        case sourceFormat = "format"
+    }
+    public init(id: UUID = UUID(), publisherID: String, name: String, version: String, source: String, origins: [String], createdAt: Date = Date(), originURL: String? = nil, locallyModified: Bool = false, format: SourceInstallationFormat = .nativeModule) throws {
         guard source.utf8.count <= 2_097_152, !publisherID.isEmpty, !name.isEmpty, !origins.isEmpty else {
             throw SourceDomainError(.invalidInput, "Invalid source installation")
         }
         self.id = id; self.publisherID = publisherID; self.name = name; self.version = version
         self.source = source; digest = SourceCoding.digest(Data(source.utf8)); self.origins = origins; self.createdAt = createdAt
-        self.originURL = originURL; self.locallyModified = locallyModified
+        self.originURL = originURL; self.locallyModified = locallyModified; sourceFormat = format
     }
 }
 
@@ -252,12 +260,13 @@ public actor SourceArchive {
     }
     public func saveInstallation(_ value: SourceInstallation, replacing expectedDigest: String? = nil,
                                  resetConfigurationFor scope: SourceScope? = nil,
-                                 reviewedConfigurations: [String: SourceJSON]? = nil, resetAllAccountConfigurations: Bool = false) throws {
+                                 reviewedConfigurations: [String: SourceJSON]? = nil, resetAllAccountConfigurations: Bool = false, expectedOrigins: [String]? = nil) throws {
         guard value.digest == SourceCoding.digest(Data(value.source.utf8)), value.source.utf8.count <= 2_097_152 else {
             throw SourceDomainError(.invalidData, "Source snapshot digest mismatch")
         }
         try transaction {
             let current = try installation(value.id)
+            if let expectedOrigins, current?.origins.sorted() != expectedOrigins.sorted() { throw SourceDomainError(.storageConflict, "Source access changed; review the installation again") }
             guard current?.digest == expectedDigest else { throw SourceDomainError(.storageConflict, "Installation changed; reload before saving") }
             if let reviewedConfigurations {
                 guard try accountConfigurationValues(value.id) == reviewedConfigurations else {
@@ -271,8 +280,9 @@ public actor SourceArchive {
                 }
             }
             if let current {
+                guard current.format == value.format else { throw SourceDomainError(.invalidInput, "Changing source format requires a separate installation") }
                 guard current.publisherID == value.publisherID else { throw SourceDomainError(.invalidInput, "A different publisher ID needs a separate installation") }
-                if current.digest != value.digest {
+                if current.digest != value.digest || current.origins.sorted() != value.origins.sorted() {
                     var history = try installationHistory(value.id)
                     history.insert(current, at: 0)
                     try put("installation-history", scope: "", key: value.id.uuidString, value: Array(history.prefix(8)))
@@ -283,6 +293,21 @@ public actor SourceArchive {
                 try saveConfiguration(.object([:]), scope: scope)
             }
             try put("installation", scope: "", key: value.id.uuidString, value: value)
+        }
+    }
+    /// A file containing many sources is installed atomically; a failure cannot leave a partial import.
+    public func saveNewInstallations(_ values: [SourceInstallation]) throws {
+        guard !values.isEmpty, values.count <= 100, Set(values.map(\.id)).count == values.count,
+              values.reduce(0, { $0 + $1.source.utf8.count }) <= 2_097_152 else {
+            throw SourceDomainError(.resourceLimit, "Source import exceeds count or byte limits")
+        }
+        try transaction {
+            for value in values {
+                guard try installation(value.id) == nil, value.digest == SourceCoding.digest(Data(value.source.utf8)) else {
+                    throw SourceDomainError(.storageConflict, "New installation already exists or has invalid bytes")
+                }
+                try put("installation", scope: "", key: value.id.uuidString, value: value)
+            }
         }
     }
     public func accountSettings(installationID: UUID) throws -> SourceAccountSettings {
@@ -761,6 +786,12 @@ public actor SourceArchive {
         guard matches else { throw SourceDomainError(.storageConflict, "Source state revision changed") }
     }
     private func validateStateIdentity(_ identity: SourceExecutionIdentity, scope: SourceScope) throws {
+        if let permissionDigest = identity.permissionDigest {
+            guard let current = try installation(scope.installationID),
+                  permissionDigest == SourceCoding.digest(try SourceCoding.encode(Array(Set(current.origins)).sorted())) else {
+                throw SourceDomainError(.stale, "Approved source websites changed")
+            }
+        }
         guard identity.scope == scope, try installation(scope.installationID)?.digest == identity.sourceDigest,
               try SourceCoding.digest((configuration(scope: scope) ?? .object([:])).validatedData(maximumBytes: 65_536)) == identity.configurationDigest,
               try accountSettings(installationID: scope.installationID).selectedID == scope.accountID else {

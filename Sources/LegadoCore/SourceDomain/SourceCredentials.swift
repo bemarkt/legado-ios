@@ -61,7 +61,7 @@ public struct SourceCredentialCookie: Codable, Sendable, Equatable {
         self.secure = secure; self.httpOnly = httpOnly; self.expiresAt = expiresAt
     }
     static func validOrigin(_ origin: String) -> Bool {
-        guard let url = URL(string: origin), SourceHostHTTPPolicy.origin(url) == origin,
+        guard let url = URL(string: origin), url.host?.contains("*") == false, SourceHostHTTPPolicy.origin(url) == origin,
               url.scheme == "https" || (url.scheme == "http" && ["127.0.0.1", "localhost", "[::1]"].contains(url.host ?? "")),
               url.user == nil, url.password == nil, url.query == nil, url.fragment == nil, url.path.isEmpty else { return false }
         return true

@@ -4,10 +4,10 @@ import Foundation
 public enum LegadoProviderHost {
     public static func makeProvider(installation: SourceInstallation, scope: SourceScope, configuration: SourceJSON? = nil,
                                     archive: SourceArchive, credentials: SourceCredentialSession? = nil,
-                                    activityGate: SourceCommitGate? = nil, client: SourceHostHTTPClient = .init(),
+                                    activityGate: SourceCommitGate? = nil, cookieJar: LegadoCookieJar? = nil, client: SourceHostHTTPClient = .init(),
                                     allowLoopbackHTTP: Bool = false, userAgent: String = LegadoURLBuilder.defaultUserAgent,
                                     record: @escaping @Sendable (String) -> Void = { _ in }) throws -> LegadoSourceProvider {
-        guard scope.installationID == installation.id,
+        guard installation.format == .legado, scope.installationID == installation.id,
               installation.digest == SourceCoding.digest(Data(installation.source.utf8)) else {
             throw SourceDomainError(.invalidInput, "Invalid compatibility installation snapshot")
         }
@@ -19,14 +19,17 @@ public enum LegadoProviderHost {
             }
         } else if scope.accountID != "guest" { throw SourceDomainError(.invalidInput, "Named account needs a credential session") }
         let identity = try SourceExecutionIdentity(scope: scope, sourceDigest: installation.digest,
-                                                   configuration: configuration ?? .object([:]), credentialRevision: credentials?.revision)
+                                                   configuration: configuration ?? .object([:]), credentialRevision: credentials?.revision, approvedOrigins: installation.origins)
         let gate = credentials?.commitGate ?? activityGate ?? SourceCommitGate()
         let descriptor = SourceProviderDescriptor(identity: identity, name: source.bookSourceName,
                                                   supportsSearch: source.searchUrl?.isEmpty == false, commitGate: gate)
         let policy = SourceHostHTTPPolicy(origins: origins, allowLoopbackHTTP: allowLoopbackHTTP, maximumAttempts: 1)
         _ = try policy.validate(source.bookSourceUrl)
-        let jar = try LegadoCookieJar(scope: scope, origins: origins, credentials: credentials)
-        return try LegadoSourceProvider(source: source, descriptor: descriptor) { control in
+        let jar = try cookieJar ?? LegadoCookieJar(scope: scope, origins: origins, credentials: credentials)
+        guard jar.scope == scope, jar.origins == origins, jar.credentialRevision == credentials?.revision else {
+            throw SourceDomainError(.invalidInput, "Compatibility cookie jar belongs to another snapshot")
+        }
+        return try LegadoSourceProvider(source: source, descriptor: descriptor) { control, priority in
             // Revalidate the database snapshot at operation start. Source writes repeat this in their transaction.
             _ = try await archive.state(scope: scope, key: "legado.snapshot-check", expectedIdentity: identity)
             let state = try LegadoScopedSourceState(sourceID: source.id, identity: identity, archive: archive,
@@ -36,7 +39,7 @@ public enum LegadoProviderHost {
             let network = LegadoAsyncNetworkLoader(control: control) { request, follow in
                 try control.check()
                 let timeout = request.timeoutInterval.isFinite ? min(max(request.timeoutInterval, 0.001), policy.timeout) : policy.timeout
-                return try await client.fetchCompatibility(request, followRedirects: follow, policy: policy,
+                return try await client.fetchCompatibility(request, followRedirects: follow, policy: policy, priority: priority,
                     deadline: min(control.deadline, ContinuousClock.now.advanced(by: .seconds(timeout))), budget: budget, credentials: cookies)
             }
             let identifier = SourceCoding.digest(try SourceCoding.encode(scope))

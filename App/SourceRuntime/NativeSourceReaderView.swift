@@ -151,7 +151,7 @@ struct NativeSourceReaderView: View {
     @State private var loadTask: Task<Void, Never>?
     @State private var prefetch: Task<Void, Never>?
     @State private var generation = UUID()
-    @State private var provider: WebKitSourceProvider?
+    @State private var provider: LibrarySourceProvider?
     @AppStorage("native-source-font-size") private var fontSize = 20.0
     private var index: Int? { catalog.chapters.firstIndex { $0.ref.id == currentID } }
     private var title: String { catalog.chapters.first(where: { $0.ref.id == currentID })?.title ?? item.book.details.title }
@@ -235,7 +235,7 @@ struct NativeSourceReaderView: View {
         loadTask = Task {
             defer { if generation == token { loading = false; loadTask = nil } }
             do {
-                let provider: WebKitSourceProvider
+                let provider: LibrarySourceProvider
                 if let existing = self.provider { provider = existing }
                 else { provider = try await model.provider(item.installation, scope: item.book.key.scope); self.provider = provider }
                 let (archive, service) = try model.services()

@@ -195,3 +195,39 @@ final class SourceInspector {
         return value
     }
 }
+
+/// The import editor reviews metadata without executing either source format.
+enum NativeSourceCandidate: Sendable {
+    struct Metadata: Sendable {
+        let id: String
+        let name: String
+        let version: String
+        let origins: [String]
+    }
+    case native(SourceSnapshot)
+    case legado(LegadoSourceDocument, origins: [String])
+    var format: SourceInstallationFormat { if case .legado = self { return .legado }; return .nativeModule }
+    var formatName: String { format == .legado ? "Legado JSON" : "单文件 JS" }
+    var metadata: Metadata {
+        switch self {
+        case .native(let snapshot):
+            let m = snapshot.inspection.metadata
+            return .init(id: m.id, name: m.name, version: m.version, origins: m.origins)
+        case .legado(let document, let origins):
+            return .init(id: document.publisherID, name: document.name, version: document.version, origins: origins)
+        }
+    }
+    var source: String { switch self { case .native(let value): value.source; case .legado(let value, _): value.source } }
+    var sha256: String { switch self { case .native(let value): value.sha256; case .legado(let value, _): value.digest } }
+    func installation(id: UUID = UUID(), createdAt: Date = Date(), originURL: String? = nil, locallyModified: Bool = false) throws -> SourceInstallation {
+        switch self {
+        case .native(let snapshot):
+            guard snapshot.inspection.unsupportedRequirements.isEmpty else { throw SourceFailure(code: "UNSUPPORTED", message: "此书源要求尚未支持的能力") }
+            let m = metadata
+            return try .init(id: id, publisherID: m.id, name: m.name, version: m.version, source: source, origins: m.origins,
+                             createdAt: createdAt, originURL: originURL, locallyModified: locallyModified)
+        case .legado(let document, let origins):
+            return try document.installation(id: id, origins: origins, createdAt: createdAt, originURL: originURL, locallyModified: locallyModified)
+        }
+    }
+}

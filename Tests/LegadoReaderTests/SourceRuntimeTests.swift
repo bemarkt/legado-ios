@@ -500,6 +500,107 @@ final class SourceRuntimeTests: XCTestCase {
         XCTAssertEqual(offline.document, content.document)
     }
 
+    func testLegadoJSONImportUsesIndependentProviderAndReopensOfflineLibrary() async throws {
+        let databaseURL = FileManager.default.temporaryDirectory.appendingPathComponent("legacy-app-\(UUID().uuidString)/archive.sqlite")
+        let model = NativeSourceLibrary(databaseURL: databaseURL, allowLoopbackHTTP: true)
+        var source = BookSource(bookSourceUrl: origin, bookSourceName: "Legado HTML fixture")
+        source.searchUrl = "/html/search?q={{key}}&page={{page}}"
+        source.ruleSearch = .init(bookList: "@css:.book", name: "@css:.title@text", author: "@css:.author@text", bookUrl: "@css:.title@href")
+        var detail = BookInfoRule(); detail.name = "@css:h1@text"; detail.author = "@css:.author@text"
+        detail.tocUrl = "@js:book.bookUrl + '/chapters?page=1'"; source.ruleBookInfo = detail
+        var toc = TocRule(); toc.chapterList = "@css:.chapter"; toc.chapterName = "@css:a@text"; toc.chapterUrl = "@css:a@href"
+        toc.nextTocUrl = "@css:.next@href"; source.ruleToc = toc
+        var content = ContentRule(); content.content = "@css:article@text"; content.title = "@css:h1@text"; source.ruleContent = content
+        source.additionalFields["futureField"] = .object(["keep": .string("unknown-field")])
+        let text = String(decoding: try SourceCoding.encode(source), as: UTF8.self)
+        let candidates = try await model.inspectCandidates(text)
+        XCTAssertEqual(candidates.count, 1); XCTAssertEqual(candidates[0].format, .legado)
+        try await model.install(candidates)
+        let installation = try XCTUnwrap(model.installations.first)
+        XCTAssertEqual(installation.format, .legado); XCTAssertEqual(installation.source, text)
+        let provider = try await model.provider(installation)
+        let search = try await provider.search(.init(query: "demo"))
+        let service = try model.services().1
+        let book = try await service.addBook(provider: provider, ref: XCTUnwrap(search.items.first?.ref))
+        let catalog = try await service.refreshCatalog(provider: provider, book: book.details.ref)
+        XCTAssertEqual(catalog.chapters.count, 2)
+        let downloaded = try await service.download(provider: provider.prioritized(.background), catalog: catalog)
+        XCTAssertEqual(downloaded, 2)
+        let chapter = try await service.chapter(provider: provider, book: book.details.ref, chapter: catalog.chapters[0].ref)
+        XCTAssertTrue(chapter.document.plainText.contains("First paragraph."))
+        XCTAssertFalse(chapter.document.plainText.contains("fixture script"))
+        let anchor = SourceReadingAnchor(chapter: chapter.key, document: chapter.document, offsetUTF16: 5)
+        try await model.services().0.saveAnchor(anchor)
+        let reopened = NativeSourceLibrary(databaseURL: databaseURL, allowLoopbackHTTP: true)
+        await reopened.reload()
+        XCTAssertEqual(reopened.shelf.count, 1)
+        let resumed = try await reopened.provider(installation)
+        let offline = try await reopened.services().1.chapter(provider: resumed, book: book.details.ref, chapter: catalog.chapters[0].ref, policy: .offline)
+        XCTAssertEqual(offline.document, chapter.document)
+        let restoredAnchor = try await reopened.services().0.anchor(book: book.key)
+        XCTAssertEqual(restoredAnchor, anchor)
+        let diagnostic = await SourceDiagnostics.shared.records()
+        XCTAssertTrue(diagnostic.contains { $0.sourceDigest == installation.digest && $0.operation == .content && $0.code == "OK" })
+        // Native modules continue to use their WebKit provider in the same library.
+        let native = try await reopened.inspect(SourceAssets.script("OfflineExample.source"))
+        try await reopened.install(native)
+        XCTAssertEqual(Set(reopened.installations.map(\.format)), [.nativeModule, .legado])
+    }
+
+    func testLegadoGuestSessionSurvivesNewProviderAndPermissionEditsRevokeIt() async throws {
+        let model = NativeSourceLibrary(databaseURL: FileManager.default.temporaryDirectory.appendingPathComponent("legacy-guest-\(UUID().uuidString)/archive.sqlite"), allowLoopbackHTTP: true)
+        var source = BookSource(bookSourceUrl: origin, bookSourceName: "Guest session")
+        source.searchUrl = "/state/login"
+        source.ruleSearch = .init(bookList: #"@js:[{name:'Account',url:'/state/account'}]"#, name: "$.name", bookUrl: "$.url")
+        var info = BookInfoRule(); info.name = "$.account"; source.ruleBookInfo = info
+        let text = String(decoding: try SourceCoding.encode(source), as: UTF8.self)
+        let imported = try await model.inspectCandidates(text)
+        try await model.install(imported)
+        let installation = try XCTUnwrap(model.installations.first)
+        let first = try await model.provider(installation)
+        let search = try await first.search(.init(query: "q"))
+        let second = try await model.provider(installation)
+        let details = try await second.book(.init(ref: XCTUnwrap(search.items.first?.ref)))
+        XCTAssertEqual(details.title, "fixture-a")
+        let candidates = try await model.inspectCandidates(text, additionalOrigins: "https://unused.example", expectedFormat: .legado)
+        try await model.replace(installation, with: candidates[0], resetConfiguration: false, originURL: nil, locallyModified: false)
+        let updated = try XCTUnwrap(model.installations.first)
+        XCTAssertEqual(updated.digest, installation.digest)
+        let after = try await model.provider(updated)
+        XCTAssertNotEqual(after.descriptor.identity, first.descriptor.identity)
+        do { _ = try await second.book(.init(ref: details.ref)); XCTFail("Permissions changed but old provider survived") }
+        catch let error as SourceDomainError { XCTAssertEqual(error.code, .stale) }
+        let history = try await model.services().0.installationHistory(installation.id)
+        XCTAssertEqual(history.first?.origins, installation.origins)
+    }
+
+    func testLegadoSourceEditingPreservesFormatAndUnknownJSONAndRendersSettings() async throws {
+        let model = NativeSourceLibrary(databaseURL: FileManager.default.temporaryDirectory.appendingPathComponent("legacy-editor-\(UUID().uuidString)/archive.sqlite"), allowLoopbackHTTP: true)
+        let text = #"{"bookSourceUrl":"https://fixture.example","bookSourceName":"兼容 JSON 示例","futureField":{"keep":true},"ruleBookInfo":{"futureRule":42}}"#
+        let imported = try await model.inspectCandidates(text)
+        try await model.install(imported)
+        let installation = try XCTUnwrap(model.installations.first)
+        let edited = text.replacingOccurrences(of: "兼容 JSON 示例", with: "已编辑的兼容书源")
+        let editedCandidates = try await model.inspectCandidates(edited, expectedFormat: .legado)
+        let candidate = try XCTUnwrap(editedCandidates.first)
+        try await model.replace(installation, with: candidate, resetConfiguration: false, originURL: nil, locallyModified: true)
+        let updated = try XCTUnwrap(model.installations.first)
+        XCTAssertEqual(updated.format, .legado); XCTAssertEqual(updated.source, edited)
+        XCTAssertTrue(updated.source.contains("futureRule"))
+        do {
+            _ = try await model.inspectCandidates(SourceAssets.script("OfflineExample.source"), expectedFormat: .legado)
+            XCTFail("Format change silently accepted")
+        } catch let error as SourceDomainError { XCTAssertEqual(error.code, .invalidInput) }
+        let size = CGSize(width: 393, height: 852)
+        let controller = UIHostingController(rootView: NavigationStack { NativeSourceSettingsView(model: model, initialInstallation: updated) })
+        let window = UIWindow(frame: CGRect(origin: .zero, size: size)); window.rootViewController = controller; window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        controller.view.frame = window.bounds
+        try await Task.sleep(for: .milliseconds(300)); controller.view.layoutIfNeeded()
+        let image = UIGraphicsImageRenderer(size: size).image { _ in controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true) }
+        let attachment = XCTAttachment(image: image); attachment.name = "legado-json-source-settings"; attachment.lifetime = .keepAlways; add(attachment)
+    }
+
     func testOperationCompletionRejectsLaterStorageWrites() async throws {
         let archive = try SourceArchive(url: FileManager.default.temporaryDirectory.appendingPathComponent("source-late-\(UUID().uuidString)/native.sqlite3"))
         let scope = try SourceScope(installationID: UUID())

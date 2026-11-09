@@ -311,3 +311,25 @@ struct WebKitSourceProvider: SourceProvider {
                                       configuration: configuration, state: state, priority: priority, credentials: credentials, activityGate: descriptor.commitGate)
     }
 }
+
+/// Application-owned provider selection and cover credentials; engine types stay outside reader state.
+struct LibrarySourceProvider: SourceProvider {
+    private let base: any SourceProvider
+    private let withPriority: @Sendable (SourceWorkScheduler.Priority) -> any SourceProvider
+    let coverOrigins: Set<String>
+    let coverCredentials: SourceCredentialSession?
+    var descriptor: SourceProviderDescriptor { base.descriptor }
+    init(_ provider: WebKitSourceProvider) {
+        base = provider; withPriority = { provider.prioritized($0) }
+        coverOrigins = provider.coverOrigins; coverCredentials = provider.coverCredentials
+    }
+    init(_ provider: LegadoSourceProvider, origins: Set<String>, credentials: SourceCredentialSession?) {
+        base = provider; withPriority = { provider.prioritized($0) }
+        coverOrigins = origins; coverCredentials = credentials
+    }
+    func prioritized(_ priority: SourceWorkScheduler.Priority) -> any SourceProvider { withPriority(priority) }
+    func search(_ input: SourceWire.SearchInput) async throws -> SourceWire.SearchPage { try await base.search(input) }
+    func book(_ input: SourceWire.BookInput) async throws -> SourceWire.BookDetails { try await base.book(input) }
+    func chapters(_ input: SourceWire.ChaptersInput) async throws -> SourceWire.ChapterPage { try await base.chapters(input) }
+    func content(_ input: SourceWire.ContentInput) async throws -> SourceWire.ChapterContent { try await base.content(input) }
+}

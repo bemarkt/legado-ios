@@ -43,6 +43,7 @@ final class NativeSourceLibrary: ObservableObject {
     let credentials: SourceCredentialVault
     private var reloadGeneration = UUID()
     private var guestGates: [UUID: SourceCommitGate] = [:]
+    private var legacyCookies: [SourceExecutionIdentity: LegadoCookieJar] = [:]
     private var credentialEditGates: [UUID: SourceCommitGate] = [:]
     private var selectingAccounts = Set<UUID>()
     private var replacingInstallations = Set<UUID>()
@@ -123,11 +124,51 @@ final class NativeSourceLibrary: ObservableObject {
         try await services().0.saveInstallation(installation)
         await reload()
     }
+    func inspectCandidates(_ text: String, additionalOrigins: String = "", expectedFormat: SourceInstallationFormat? = nil) async throws -> [NativeSourceCandidate] {
+        let first = text.first { !$0.isWhitespace }
+        let format: SourceInstallationFormat = first == "{" || first == "[" ? .legado : .nativeModule
+        if let expectedFormat, expectedFormat != format { throw SourceDomainError(.invalidInput, "格式已改变，请另存为独立书源。") }
+        if format == .nativeModule { return [.native(try await inspect(text))] }
+        return try LegadoSourceDocument.inspect(text).map { .legado($0, origins: try $0.approvedOrigins(additional: additionalOrigins)) }
+    }
+    func install(_ candidate: NativeSourceCandidate, originURL: String? = nil) async throws {
+        try await install([candidate], originURL: originURL)
+    }
+    func install(_ candidates: [NativeSourceCandidate], originURL: String? = nil) async throws {
+        let values = try candidates.map { try $0.installation(originURL: candidates.count == 1 ? originURL : nil) }
+        try await services().0.saveNewInstallations(values)
+        await reload()
+    }
+    func replace(_ installation: SourceInstallation, with candidate: NativeSourceCandidate, resetConfiguration: Bool,
+                 originURL: String?, locallyModified: Bool) async throws {
+        guard candidate.format == installation.format else { throw SourceDomainError(.invalidInput, "格式不同，请另存为独立书源。") }
+        if case .native(let snapshot) = candidate {
+            return try await replace(installation, with: snapshot, resetConfiguration: resetConfiguration, originURL: originURL, locallyModified: locallyModified)
+        }
+        let (archive, _) = try services()
+        let reviewed = try await archive.accountConfigurations(installationID: installation.id)
+        let updated = try candidate.installation(id: installation.id, createdAt: installation.createdAt, originURL: originURL, locallyModified: locallyModified)
+        guard replacingInstallations.insert(installation.id).inserted else { throw SourceDomainError(.storageConflict, "书源正在更新，请完成后重新审阅。") }
+        defer { replacingInstallations.remove(installation.id) }
+        credentialEditGates.removeValue(forKey: installation.id)?.invalidate()
+        try await archive.saveInstallation(updated, replacing: installation.digest, reviewedConfigurations: reviewed,
+                                           resetAllAccountConfigurations: resetConfiguration, expectedOrigins: installation.origins)
+        if installation.origins.sorted() != updated.origins.sorted() {
+            guestGates.removeValue(forKey: installation.id)?.invalidate()
+            let accounts = try await archive.accountSettings(installationID: installation.id).accounts
+            for account in accounts where account.id != "guest" {
+                await credentials.suspend(scope: try SourceScope(installationID: installation.id, accountID: account.id))
+            }
+        }
+        legacyCookies = legacyCookies.filter { $0.key.scope.installationID != installation.id }
+        cancelSearch(clearResults: true)
+        await reload()
+    }
     func selectedScope(_ installation: SourceInstallation) async throws -> SourceScope {
         let selected = try await services().0.accountSettings(installationID: installation.id).selectedID
         return try .init(installationID: installation.id, accountID: selected)
     }
-    func provider(_ installation: SourceInstallation, scope expectedScope: SourceScope? = nil) async throws -> WebKitSourceProvider {
+    func provider(_ installation: SourceInstallation, scope expectedScope: SourceScope? = nil) async throws -> LibrarySourceProvider {
         try requireStableAccount(installation.id)
         let (archive, _) = try services()
         let scope = try await selectedScope(installation)
@@ -138,13 +179,28 @@ final class NativeSourceLibrary: ObservableObject {
             guestGates[installation.id] = gate; activityGate = gate
         } else { activityGate = nil }
         let captured = try await archive.executionSnapshot(scope: scope)
-        let snapshot = try await inspect(captured.installation.source)
-        let session = scope.accountID == "guest" ? nil : try await credentials.session(scope: scope, allowedOrigins: Set(snapshot.inspection.metadata.origins))
+        let session = scope.accountID == "guest" ? nil : try await credentials.session(scope: scope, allowedOrigins: Set(captured.installation.origins))
         guard try await selectedScope(installation) == scope else { throw SourceDomainError(.stale, "账号已切换，请重试。") }
         try requireStableAccount(installation.id)
         try activityGate?.check()
-        return try WebKitSourceProvider(snapshot: snapshot, installation: captured.installation, accountID: scope.accountID,
-                                       configuration: captured.configuration, archive: archive, allowLoopbackHTTP: allowLoopbackHTTP, credentials: session, activityGate: activityGate)
+        if captured.installation.format == .legado {
+            let identity = try SourceExecutionIdentity(scope: scope, sourceDigest: captured.installation.digest,
+                configuration: captured.configuration ?? .object([:]), credentialRevision: session?.revision, approvedOrigins: captured.installation.origins)
+            let jar: LegadoCookieJar
+            if let existing = legacyCookies[identity] { jar = existing }
+            else {
+                jar = try LegadoCookieJar(scope: scope, origins: Set(captured.installation.origins), credentials: session)
+                legacyCookies = legacyCookies.filter { $0.key.scope != scope }
+                legacyCookies[identity] = jar
+            }
+            let provider = try LegadoProviderHost.makeProvider(installation: captured.installation, scope: scope,
+                configuration: captured.configuration, archive: archive, credentials: session, activityGate: activityGate, cookieJar: jar,
+                client: SourceHTTP.client, allowLoopbackHTTP: allowLoopbackHTTP)
+            return LibrarySourceProvider(provider, origins: Set(captured.installation.origins), credentials: session)
+        }
+        let snapshot = try await inspect(captured.installation.source)
+        return try LibrarySourceProvider(WebKitSourceProvider(snapshot: snapshot, installation: captured.installation, accountID: scope.accountID,
+                                       configuration: captured.configuration, archive: archive, allowLoopbackHTTP: allowLoopbackHTTP, credentials: session, activityGate: activityGate))
     }
     func saveConfiguration(_ configuration: SourceJSON, installation: SourceInstallation, scope: SourceScope) async throws {
         guard try await selectedScope(installation) == scope else { throw SourceDomainError(.stale, "账号已切换，请重新打开选项。") }
@@ -161,6 +217,7 @@ final class NativeSourceLibrary: ObservableObject {
         cancelSearch(clearResults: true); reloadGeneration = UUID()
         credentialEditGates.removeValue(forKey: installation.id)?.invalidate()
         guestGates.removeValue(forKey: installation.id)?.invalidate()
+        legacyCookies = legacyCookies.filter { $0.key.scope != previous }
         await credentials.suspend(scope: previous)
         try await services().0.selectAccount(accountID, installationID: installation.id)
         await reload()

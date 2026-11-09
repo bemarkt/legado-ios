@@ -12,16 +12,16 @@ struct NativeSourceLibraryView: View {
     var body: some View {
         List {
             Section {
-                Text("自有 JS 书源的阅读预览。可保存书源、下载章节并离线继续阅读。")
+                Text("单文件 JS 和 Legado JSON 书源的阅读预览。可下载章节并离线继续阅读。")
                     .font(.footnote).foregroundStyle(.secondary)
-                Button { importing = true } label: { Label("添加 JS 书源", systemImage: "plus.circle") }
+                Button { importing = true } label: { Label("添加书源", systemImage: "plus.circle") }
                 NavigationLink { NativeSourceDiagnosticsView(model: model) } label: { Label("书源诊断", systemImage: "list.bullet.rectangle") }.frame(minHeight: 44)
                 NavigationLink { NativeSourceStorageView(model: model) } label: {
                     Label("缓存与下载", systemImage: "internaldrive")
                 }.frame(minHeight: 44)
             }
             Section("已安装书源") {
-                if model.installations.isEmpty { Text("添加一个 .source.js 文件，或使用离线示例开始。 ").foregroundStyle(.secondary) }
+                if model.installations.isEmpty { Text("添加 .source.js 或 Legado JSON，也可以使用离线示例开始。 ").foregroundStyle(.secondary) }
                 ForEach(model.installations) { installation in
                     NavigationLink {
                         NativeSourceSettingsView(model: model, initialInstallation: installation)
@@ -117,7 +117,9 @@ private struct NativeSourceImportView: View {
     @ObservedObject var model: NativeSourceLibrary
     @Environment(\.dismiss) private var dismiss
     @State private var text = ""
-    @State private var snapshot: SourceSnapshot?
+    @State private var candidates: [NativeSourceCandidate] = []
+    @State private var selected = Set<Int>()
+    @State private var additionalOrigins = ""
     @State private var selecting = false
     @State private var busy = false
     @State private var error: String?
@@ -145,39 +147,56 @@ private struct NativeSourceImportView: View {
                             catch { self.error = error.localizedDescription }
                         }
                     }.disabled(sourceURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    Button("打开 .source.js 文件") { selecting = true }
+                    Button("打开 JS / JSON 文件") { selecting = true }
                     Button("使用离线示例") {
                         do { text = try SourceAssets.script("OfflineExample.source") } catch { self.error = error.localizedDescription }
                     }
                     TextEditor(text: $text).font(.caption.monospaced()).frame(minHeight: 180)
                         .autocorrectionDisabled().textInputAutocapitalization(.never).accessibilityLabel("书源源码")
                         .focused($editing)
+                    if text.first(where: { !$0.isWhitespace }) == "{" || text.first(where: { !$0.isWhitespace }) == "[" {
+                        TextField("其他访问网站（每行一个完整 origin）", text: $additionalOrigins, axis: .vertical)
+                            .keyboardType(.URL).autocorrectionDisabled().textInputAutocapitalization(.never).focused($editing)
+                        Text("Legado 的动态脚本无法静态确定所有请求网站。需要其他网站时，在此填写并审阅；未允许的网站请求会被拒绝。")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
                     Button("检查书源") {
                         editing = false; busy = true
                         let candidate = text
                         inspectionTask = Task {
                             defer { busy = false }
                             do {
-                                let inspected = try await model.inspect(candidate)
+                                let inspected = try await model.inspectCandidates(candidate, additionalOrigins: additionalOrigins)
                                 try Task.checkCancellation()
-                                if text == candidate { snapshot = inspected; error = nil }
+                                if text == candidate { candidates = inspected; selected = Set(inspected.indices); error = nil }
                             } catch is CancellationError { }
                             catch { self.error = error.localizedDescription }
                         }
                     }.disabled(text.isEmpty)
                 } footer: { Text("检查时不会运行源代码。每次添加保存为独立安装，不会覆盖同名书源。") }
-                if let snapshot {
-                    Section("书源信息") {
-                        LabeledContent("名称", value: snapshot.inspection.metadata.name)
-                        LabeledContent("版本", value: snapshot.inspection.metadata.version)
-                        ForEach(snapshot.inspection.metadata.origins, id: \.self) { Text($0).font(.footnote) }
-                        Button("保存并允许访问声明的网站") {
+                if !candidates.isEmpty {
+                    Section("待添加书源") {
+                        ForEach(candidates.indices, id: \.self) { index in
+                            let candidate = candidates[index]
+                            VStack(alignment: .leading, spacing: 8) {
+                                Toggle(candidate.metadata.name, isOn: Binding(get: { selected.contains(index) }, set: {
+                                    if $0 { selected.insert(index) } else { selected.remove(index) }
+                                })).frame(minHeight: 44)
+                                Text(candidate.formatName + " · " + candidate.metadata.version).font(.caption).foregroundStyle(.secondary)
+                                ForEach(candidate.metadata.origins, id: \.self) { Text($0).font(.footnote).textSelection(.enabled) }
+                            }
+                        }
+                        Button("保存所选书源并允许以上网站访问") {
                             busy = true
                             Task {
                                 defer { busy = false }
-                                do { try await model.install(snapshot, originURL: text == downloadedText ? downloadedURL : nil); dismiss() } catch { self.error = error.localizedDescription }
+                                do {
+                                    try await model.install(candidates.enumerated().filter { selected.contains($0.offset) }.map(\.element),
+                                                            originURL: text == downloadedText ? downloadedURL : nil)
+                                    dismiss()
+                                } catch { self.error = error.localizedDescription }
                             }
-                        }
+                        }.frame(minHeight: 44).disabled(selected.isEmpty)
                     }
                 }
                 if let error { Section { Text(error).foregroundStyle(.red).textSelection(.enabled) } }
@@ -200,8 +219,9 @@ private struct NativeSourceImportView: View {
                 Button("继续编辑", role: .cancel) { }
             }
             .onDisappear { inspectionTask?.cancel() }
-            .onChange(of: text) { snapshot = nil; error = nil }
-            .fileImporter(isPresented: $selecting, allowedContentTypes: [.javaScript, .plainText, .data]) { result in
+            .onChange(of: text) { candidates = []; selected = []; error = nil }
+            .onChange(of: additionalOrigins) { candidates = []; selected = []; error = nil }
+            .fileImporter(isPresented: $selecting, allowedContentTypes: [.javaScript, .json, .plainText, .data]) { result in
                 do {
                     let url = try result.get(), scoped = url.startAccessingSecurityScopedResource()
                     defer { if scoped { url.stopAccessingSecurityScopedResource() } }
@@ -236,6 +256,7 @@ struct NativeSourceSettingsView: View {
             Section("书源") {
                 LabeledContent("名称", value: installation.name)
                 LabeledContent("版本", value: installation.version)
+                LabeledContent("格式", value: installation.format == .legado ? "Legado JSON" : "单文件 JS")
                 ForEach(installation.origins, id: \.self) { Text($0).font(.footnote) }
             }
             Section("账号") {
@@ -286,6 +307,10 @@ struct NativeSourceSettingsView: View {
                 let source = installation
                 let scope = try await model.selectedScope(source)
                 let history = try await model.services().0.installationHistory(source.id)
+                if source.format == .legado {
+                    self.history = history; configurationScope = scope
+                    return
+                }
                 let snapshot = try await model.inspect(source.source)
                 let stored = try await model.services().0.configuration(scope: scope)
                 let effective = try snapshot.configuration(overrides: stored)
@@ -316,7 +341,7 @@ struct NativeSourceSettingsView: View {
 }
 
 private struct NativeSourceFile: FileDocument {
-    static var readableContentTypes: [UTType] { [.javaScript, .plainText] }
+    static var readableContentTypes: [UTType] { [.javaScript, .json, .plainText] }
     var text: String
     init(text: String) { self.text = text }
     init(configuration: ReadConfiguration) throws {
@@ -333,7 +358,8 @@ private struct NativeSourceEditorView: View {
     let installation: SourceInstallation
     @Environment(\.dismiss) private var dismiss
     @State private var text: String
-    @State private var reviewed: SourceSnapshot?
+    @State private var reviewed: NativeSourceCandidate?
+    @State private var additionalOrigins: String
     @State private var resetConfiguration = false
     @State private var acceptsStateCompatibility = false
     @State private var exporting = false
@@ -346,6 +372,7 @@ private struct NativeSourceEditorView: View {
     @FocusState private var editing: Bool
     init(model: NativeSourceLibrary, installation: SourceInstallation, initialText: String) {
         self.model = model; self.installation = installation; _text = State(initialValue: initialText)
+        _additionalOrigins = State(initialValue: installation.format == .legado ? installation.origins.joined(separator: "\n") : "")
     }
     var body: some View {
         NavigationStack {
@@ -354,7 +381,7 @@ private struct NativeSourceEditorView: View {
                     TextEditor(text: $text).font(.caption.monospaced()).frame(minHeight: 240)
                         .autocorrectionDisabled().textInputAutocapitalization(.never).focused($editing)
                         .accessibilityLabel("书源源码")
-                    Button("导出 .source.js") { editing = false; exporting = true }
+                    Button(installation.format == .legado ? "导出 JSON" : "导出 .source.js") { editing = false; exporting = true }
                     if let address = installation.originURL {
                         Button("从原始地址获取候选更新") {
                             if text != installation.source { replacingDraft = true }
@@ -362,11 +389,19 @@ private struct NativeSourceEditorView: View {
                         }
                         Text(address).font(.footnote).textSelection(.enabled)
                     }
+                    if installation.format == .legado {
+                        TextField("允许访问的其他网站（每行一个完整 origin）", text: $additionalOrigins, axis: .vertical)
+                            .keyboardType(.URL).autocorrectionDisabled().textInputAutocapitalization(.never).focused($editing)
+                    }
                     Button("检查并审阅更改") {
                         editing = false; busy = true
                         Task {
                             defer { busy = false }
-                            do { reviewed = try await model.inspect(text); error = nil }
+                            do {
+                                let candidates = try await model.inspectCandidates(text, additionalOrigins: additionalOrigins, expectedFormat: installation.format)
+                                guard candidates.count == 1 else { throw SourceDomainError(.invalidInput, "编辑单个安装时请使用一个 JSON 书源对象。") }
+                                reviewed = candidates[0]; error = nil
+                            }
                             catch { self.error = error.localizedDescription }
                         }
                     }.disabled(text.isEmpty)
@@ -375,24 +410,24 @@ private struct NativeSourceEditorView: View {
                 }
                 if let reviewed {
                     Section("候选版本") {
-                        LabeledContent("名称", value: reviewed.inspection.metadata.name)
-                        LabeledContent("版本", value: installation.version + " → " + reviewed.inspection.metadata.version)
+                        LabeledContent("名称", value: reviewed.metadata.name)
+                        LabeledContent("版本", value: installation.version + " → " + reviewed.metadata.version)
                         Text("摘要：" + reviewed.sha256).font(.caption.monospaced()).textSelection(.enabled)
-                        ForEach(reviewed.inspection.metadata.origins, id: \.self) { origin in
+                        ForEach(reviewed.metadata.origins, id: \.self) { origin in
                             Label(origin, systemImage: installation.origins.contains(origin) ? "globe" : "plus.circle")
                                 .font(.footnote)
                         }
-                        ForEach(installation.origins.filter { !reviewed.inspection.metadata.origins.contains($0) }, id: \.self) { origin in
+                        ForEach(installation.origins.filter { !reviewed.metadata.origins.contains($0) }, id: \.self) { origin in
                             Label("移除：" + origin, systemImage: "minus.circle").font(.footnote)
                         }
                         DisclosureGroup("对照当前安装的源码") {
                             TextEditor(text: .constant(installation.source)).font(.caption.monospaced()).frame(minHeight: 220)
                                 .accessibilityLabel("当前安装的源码，仅供对照")
                         }
-                        if reviewed.inspection.metadata.id != installation.publisherID {
+                        if reviewed.metadata.id != installation.publisherID {
                             Text("标识不同，请另存为新书源，避免改变已有书籍的身份。")
                         } else {
-                            Toggle("将所有账号的书源选项重置为默认值", isOn: $resetConfiguration)
+                            if installation.format == .nativeModule { Toggle("将所有账号的书源选项重置为默认值", isOn: $resetConfiguration) }
                             Toggle("已确认此源码兼容已有书源状态", isOn: $acceptsStateCompatibility)
                             Text("回滚只恢复源码，不恢复书源状态。无法确认状态兼容时，请另存为新书源。")
                                 .font(.footnote).foregroundStyle(.secondary)
@@ -410,7 +445,7 @@ private struct NativeSourceEditorView: View {
                                         dismiss()
                                     } catch { self.error = error.localizedDescription }
                                 }
-                            }.disabled(!acceptsStateCompatibility || reviewed.sha256 == installation.digest)
+                            }.disabled(!acceptsStateCompatibility || (reviewed.sha256 == installation.digest && reviewed.metadata.origins.sorted() == installation.origins.sorted()))
                         }
                         Button("另存为独立书源") {
                             busy = true
@@ -444,8 +479,9 @@ private struct NativeSourceEditorView: View {
                 Button("保留草稿", role: .cancel) { }
             } message: { Text("当前安装的版本会保留；尚未保存或导出的草稿会被替换。") }
             .onChange(of: text) { reviewed = nil; acceptsStateCompatibility = false; error = nil }
-            .fileExporter(isPresented: $exporting, document: NativeSourceFile(text: text), contentType: .javaScript,
-                          defaultFilename: installation.publisherID + ".source.js") { result in
+            .onChange(of: additionalOrigins) { reviewed = nil; acceptsStateCompatibility = false; error = nil }
+            .fileExporter(isPresented: $exporting, document: NativeSourceFile(text: text), contentType: installation.format == .legado ? .json : .javaScript,
+                          defaultFilename: installation.publisherID + (installation.format == .legado ? ".json" : ".source.js")) { result in
                 if case .failure(let failure) = result { error = failure.localizedDescription }
             }
         }

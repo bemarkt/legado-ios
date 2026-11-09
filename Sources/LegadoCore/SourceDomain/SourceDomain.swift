@@ -121,13 +121,15 @@ public struct SourceExecutionIdentity: Codable, Hashable, Sendable {
     public let sourceDigest: String
     public let configurationDigest: String
     public let credentialRevision: String?
-    public init(scope: SourceScope, sourceDigest: String, configuration: SourceJSON, credentialRevision: String? = nil) throws {
+    public let permissionDigest: String?
+    public init(scope: SourceScope, sourceDigest: String, configuration: SourceJSON, credentialRevision: String? = nil, approvedOrigins: [String]? = nil) throws {
         guard sourceDigest.count == 64, sourceDigest.allSatisfy({ $0.isHexDigit }) else {
             throw SourceDomainError(.invalidInput, "Invalid source digest")
         }
         self.scope = scope
         self.sourceDigest = sourceDigest
         self.credentialRevision = credentialRevision
+        permissionDigest = try approvedOrigins.map { SourceCoding.digest(try SourceCoding.encode(Array(Set($0)).sorted())) }
         configurationDigest = SourceCoding.digest(try configuration.validatedData(maximumBytes: 65_536))
     }
 }

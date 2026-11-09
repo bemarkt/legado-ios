@@ -66,6 +66,14 @@ public enum SourceCoding {
     public static func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
         try JSONDecoder().decode(type, from: data)
     }
+    static func fileDigest(_ url: URL) throws -> String {
+        let file = try FileHandle(forReadingFrom: url); defer { try? file.close() }
+        var digest = SHA256()
+        while let chunk = try file.read(upToCount: 1_048_576), !chunk.isEmpty {
+            try Task.checkCancellation(); digest.update(data: chunk)
+        }
+        return digest.finalize().map { String(format: "%02x", $0) }.joined()
+    }
     public static func digest(_ data: Data) -> String {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }

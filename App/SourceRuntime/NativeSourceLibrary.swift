@@ -31,6 +31,7 @@ final class NativeSourceLibrary: ObservableObject {
     }
     @Published private(set) var coverRevision = UUID()
     @Published private(set) var activeAccounts: [UUID: SourceAccount] = [:]
+    @Published private(set) var disabledSearchSources = Set<UUID>()
     @Published private(set) var installations: [SourceInstallation] = []
     @Published private(set) var shelf: [ShelfBook] = []
     @Published private(set) var results: [SearchHit] = []
@@ -96,16 +97,24 @@ final class NativeSourceLibrary: ObservableObject {
             let installed = try await archive.installations()
             var shelf: [ShelfBook] = []
             var accounts: [UUID: SourceAccount] = [:]
+            var disabled = Set<UUID>(), migratedOrder: [SourceBookKey: Int] = [:]
             for installation in installed {
+                if try await !archive.isSearchEnabled(installation.id) { disabled.insert(installation.id) }
                 let selected = try await archive.accountSettings(installationID: installation.id).selected
                 accounts[installation.id] = selected
                 let scope = try SourceScope(installationID: installation.id, accountID: selected.id)
-                for book in try await archive.books(scope: scope) { shelf.append(.init(installation: installation, book: book)) }
+                for book in try await archive.books(scope: scope) {
+                    shelf.append(.init(installation: installation, book: book))
+                    migratedOrder[book.key] = try await archive.importedBookMetadata(book.key)?.order
+                }
             }
             guard reloadGeneration == generation else { return }
-            activeAccounts = accounts
+            activeAccounts = accounts; disabledSearchSources = disabled
             installations = installed.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-            self.shelf = shelf.sorted { $0.book.addedAt > $1.book.addedAt }
+            self.shelf = shelf.sorted {
+                if let a = migratedOrder[$0.book.key], let b = migratedOrder[$1.book.key], a != b { return a < b }
+                return $0.book.addedAt > $1.book.addedAt
+            }
         } catch { message = error.localizedDescription }
     }
     func inspect(_ text: String) async throws -> SourceSnapshot {
@@ -307,7 +316,7 @@ final class NativeSourceLibrary: ObservableObject {
         let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return }
         activeQuery = query
-        searchSources = Dictionary(uniqueKeysWithValues: installations.map { ($0.id, SearchSource(installation: $0)) })
+        searchSources = Dictionary(uniqueKeysWithValues: installations.filter { !disabledSearchSources.contains($0.id) }.map { ($0.id, SearchSource(installation: $0)) })
         loadMore()
     }
     func loadMore() {

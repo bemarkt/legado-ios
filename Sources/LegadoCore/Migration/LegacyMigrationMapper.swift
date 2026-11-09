@@ -74,6 +74,22 @@ public enum LegacyMigrationMapper {
         }
         return report
     }
+    @discardableResult
+    public static func adopt(at destination: URL, snapshotAt snapshot: URL, into archive: SourceArchive,
+                             checkpoint: @Sendable (String) throws -> Void = { _ in }) async throws -> SourceArchive.MigrationReceipt {
+        let report = try verify(at: destination, snapshotAt: snapshot)
+        let plan = SourceArchive.LibraryImportPlan(snapshotID: report.snapshotID, reportDigest: SourceCoding.digest(try SourceCoding.encode(report)),
+            archiveDigest: report.archiveSHA256,
+            sources: report.sources.map { .init(id: $0.id, enabled: $0.enabled, group: $0.group) },
+            books: report.books.map { .init(key: $0.key, order: $0.order, group: $0.group) },
+            annotations: report.annotations.compactMap { note in
+                guard let anchor = note.anchor else { return nil }
+                return .init(id: report.snapshotID.uuidString + ":" + String(note.rowID), anchor: anchor,
+                    chapterTitle: note.bookmark.chapterName, selectedText: note.bookmark.bookText, note: note.bookmark.content,
+                    createdAt: Date(timeIntervalSince1970: Double(note.bookmark.time) / 1000))
+            })
+        return try await archive.adoptLibraryDraft(at: archiveURL(at: destination, report: report), plan: plan, checkpoint: checkpoint)
+    }
     public static func archiveURL(at destination: URL, report: LegacyMigrationReport) -> URL {
         destination.appendingPathComponent(report.attempt).appendingPathComponent("native.sqlite3")
     }

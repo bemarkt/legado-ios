@@ -115,6 +115,41 @@ struct LegacyMigrationMapperTests {
         #expect(duplicates.records.contains { $0.reason == .foreignCache })
         #expect(duplicates.books.first?.progressMapped == false)
     }
+    @Test(arguments: ["beforeCopy", "afterCopy", "beforeCommit"])
+    func adoptionIsAtomicPreservesExistingLibraryAndRetriesExactlyOnce(_ phase: String) async throws {
+        let fixture = try await fixture(); try capture(fixture)
+        let report = try await LegacyMigrationMapper.prepare(snapshotAt: fixture.snapshot, destination: fixture.destination)
+        let archive = try SourceArchive(url: fixture.root.appendingPathComponent("active.sqlite3"))
+        let existing = try SourceInstallation(publisherID: "native.existing", name: "Keep me", version: "1", source: "export const metadata = {};", origins: ["https://native.invalid"])
+        try await archive.saveInstallation(existing)
+        await #expect(throws: Interrupted.self) {
+            try await LegacyMigrationMapper.adopt(at: fixture.destination, snapshotAt: fixture.snapshot, into: archive) { if $0 == phase { throw Interrupted() } }
+        }
+        #expect(try await archive.installations() == [existing])
+        #expect(try await archive.migrationReceipt(report.snapshotID) == nil)
+        #expect(try await archive.chapterStorageUsage().offlineCount == 0)
+        let receipt = try await LegacyMigrationMapper.adopt(at: fixture.destination, snapshotAt: fixture.snapshot, into: archive)
+        let again = try await LegacyMigrationMapper.adopt(at: fixture.destination, snapshotAt: fixture.snapshot, into: archive)
+        #expect(receipt == again); #expect(try await archive.installations().count == 2)
+        #expect(try await archive.installation(existing.id) == existing)
+        #expect(try await archive.chapterStorageUsage().offlineCount == 2)
+        #expect(try await archive.isSearchEnabled(report.sources[0].id) == false)
+        let notes = try await archive.importedAnnotations(book: report.books[0].key)
+        #expect(notes.count == 1); #expect(notes[0].note == "保留的笔记")
+        #expect(try await archive.importedBookMetadata(report.books[0].key)?.order == 3)
+        #expect(try LegacyMigrationMapper.verify(at: fixture.destination, snapshotAt: fixture.snapshot) == report)
+    }
+    @Test func insufficientOfflineCapacityRejectsWholeAdoption() async throws {
+        let fixture = try await fixture(); try capture(fixture)
+        _ = try await LegacyMigrationMapper.prepare(snapshotAt: fixture.snapshot, destination: fixture.destination)
+        let archive = try SourceArchive(url: fixture.root.appendingPathComponent("small.sqlite3"), initialChapterStorageLimits: .init(readingCacheBytes: 1, offlineBytes: 1))
+        await #expect(throws: SourceDomainError.self) {
+            try await LegacyMigrationMapper.adopt(at: fixture.destination, snapshotAt: fixture.snapshot, into: archive)
+        }
+        #expect(try await archive.installations().isEmpty)
+        #expect(try await archive.chapterStorageUsage().offlineCount == 0)
+    }
+
     @Test func corruptDraftAndAlteredSnapshotAreRejectedBeforePreview() async throws {
         let fixture = try await fixture(); try capture(fixture)
         let report = try await LegacyMigrationMapper.prepare(snapshotAt: fixture.snapshot, destination: fixture.destination)

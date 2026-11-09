@@ -21,6 +21,8 @@ on:
       - 'Tests/LegadoCoreTests/**'
       - 'Vendor/QuickJS/**'
       - 'tools/source-recovery/**'
+      - 'tools/legacy-migration-recovery/**'
+      - 'scripts/verify-legacy-migration-recovery.py'
       - 'tools/legado-compatibility/swift/**'
       - 'protocols/legado-compatibility/**'
       - 'scripts/verify-legado-regression.py'
@@ -39,6 +41,8 @@ on:
       - 'Tests/LegadoCoreTests/**'
       - 'Vendor/QuickJS/**'
       - 'tools/source-recovery/**'
+      - 'tools/legacy-migration-recovery/**'
+      - 'scripts/verify-legacy-migration-recovery.py'
       - 'tools/legado-compatibility/swift/**'
       - 'protocols/legado-compatibility/**'
       - 'scripts/verify-legado-regression.py'
@@ -116,6 +120,10 @@ jobs:
         run: |
           python3 scripts/verify-source-process-recovery.py "$(swift build --show-bin-path)/SourceRecoveryProbe" --output build/source-process-recovery.json
 
+      - name: Verify legacy migration process recovery
+        run: |
+          python3 scripts/verify-legacy-migration-recovery.py "$(swift build --show-bin-path)/LegacyMigrationRecoveryProbe" --output build/legacy-migration-recovery.json
+
       # 崩溃时把 tee 出来的日志带出来，否则 signal 11 只留一行
       - name: Upload test logs
         if: always()
@@ -125,6 +133,7 @@ jobs:
           path: |
             swift-test-*.log
             build/source-process-recovery.json
+            build/legacy-migration-recovery.json
             build/legado-compatibility/
           if-no-files-found: ignore
           retention-days: 7

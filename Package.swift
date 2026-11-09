@@ -12,6 +12,7 @@ let package = Package(
     products: [
         .library(name: "LegadoCore", targets: ["LegadoCore"]),
         .executable(name: "SourceRecoveryProbe", targets: ["SourceRecoveryProbe"]),
+        .executable(name: "LegacyMigrationRecoveryProbe", targets: ["LegacyMigrationRecoveryProbe"]),
         .executable(name: "LegadoDifferentialProbe", targets: ["LegadoDifferentialProbe"])
     ],
     dependencies: [
@@ -23,6 +24,7 @@ let package = Package(
     targets: [
         .executableTarget(name: "LegadoDifferentialProbe", dependencies: ["LegadoCore"], path: "tools/legado-compatibility/swift"),
         .executableTarget(name: "SourceRecoveryProbe", dependencies: ["LegadoCore"], path: "tools/source-recovery"),
+        .executableTarget(name: "LegacyMigrationRecoveryProbe", dependencies: ["LegadoCore"], path: "tools/legacy-migration-recovery"),
         .target(
             name: "LegadoCore",
             dependencies: [

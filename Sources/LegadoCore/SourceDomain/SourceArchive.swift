@@ -149,7 +149,7 @@ public actor SourceArchive {
         self.coverStorageCount = max(1, min(coverStorageCount, SourceCoverStorageUsage.maximumCount))
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         var raw: OpaquePointer?
-        guard sqlite3_open_v2(url.path, &raw, SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK, let raw else {
+        guard sqlite3_open_v2(url.path, &raw, SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX | SQLITE_OPEN_URI, nil) == SQLITE_OK, let raw else {
             if let raw { sqlite3_close(raw) }
             throw SourceDomainError(.unavailable, "Cannot open native source database")
         }
@@ -439,6 +439,108 @@ public actor SourceArchive {
             try Self.execute(handle, "DELETE FROM records WHERE namespace IN ('cover-image','cover-access')")
             try put("cover-control", scope: "", key: "generation", value: UUID().uuidString)
             return count
+        }
+    }
+
+    public struct ImportedSourceMetadata: Codable, Sendable, Equatable {
+        public let id: UUID
+        public let enabled: Bool
+        public let group: String?
+    }
+    public struct ImportedBookMetadata: Codable, Sendable, Equatable {
+        public let key: SourceBookKey
+        public let order: Int
+        public let group: Int64
+    }
+    public struct ImportedAnnotation: Codable, Sendable, Equatable, Identifiable {
+        public let id: String
+        public let anchor: SourceReadingAnchor
+        public let chapterTitle: String
+        public let selectedText: String
+        public let note: String
+        public let createdAt: Date
+    }
+    struct LibraryImportPlan: Sendable {
+        let snapshotID: UUID
+        let reportDigest: String
+        let archiveDigest: String
+        let sources: [ImportedSourceMetadata]
+        let books: [ImportedBookMetadata]
+        let annotations: [ImportedAnnotation]
+    }
+    public struct MigrationReceipt: Codable, Sendable, Equatable {
+        public let snapshotID: UUID
+        public let reportDigest: String
+        public let importedAt: Date
+        public let installationIDs: [UUID]
+    }
+    public func migrationReceipt(_ snapshotID: UUID) throws -> MigrationReceipt? {
+        try record("migration-receipt", scope: "", key: snapshotID.uuidString)
+    }
+    public func importedAnnotations(book: SourceBookKey) throws -> [ImportedAnnotation] {
+        let values: [ImportedAnnotation] = try records("import-bookmark", scope: scopeKey(book.scope), as: ImportedAnnotation.self)
+        return values.filter { $0.anchor.chapter.book == book }.sorted { $0.createdAt > $1.createdAt }
+    }
+    public func importedBookMetadata(_ key: SourceBookKey) throws -> ImportedBookMetadata? {
+        try record("import-book", scope: scopeKey(key.scope), key: key.bookID)
+    }
+    public func isSearchEnabled(_ installationID: UUID) throws -> Bool {
+        let source: ImportedSourceMetadata? = try record("import-source", scope: "", key: installationID.uuidString)
+        return source?.enabled ?? true
+    }
+    /// One transaction copies a sealed draft into this existing library, preserving all unrelated records.
+    /// The receipt is committed with the data, so a crash cannot publish an incomplete adoption.
+    @discardableResult
+    func adoptLibraryDraft(at source: URL, plan: LibraryImportPlan,
+                           checkpoint: @Sendable (String) throws -> Void = { _ in }) throws -> MigrationReceipt {
+        guard try SourceCoding.fileDigest(source) == plan.archiveDigest else { throw SourceDomainError(.invalidData, "导入草稿已改变。") }
+        let digest = plan.reportDigest
+        if let previous = try migrationReceipt(plan.snapshotID) {
+            guard previous.reportDigest == digest else { throw SourceDomainError(.storageConflict, "此恢复副本已使用不同映射导入。") }
+            return previous
+        }
+        let attach = try prepare("ATTACH DATABASE ? AS migration_input", strings: [source.absoluteString + "?mode=ro&immutable=1"])
+        do { try done(attach) } catch { sqlite3_finalize(attach); throw error }
+        sqlite3_finalize(attach)
+        defer { try? Self.execute(handle, "DETACH DATABASE migration_input") }
+        return try transaction {
+            func scalar(_ sql: String) throws -> Int64 {
+                let query = try prepare(sql, strings: []); defer { sqlite3_finalize(query) }
+                guard sqlite3_step(query) == SQLITE_ROW else { throw databaseError() }
+                return sqlite3_column_int64(query, 0)
+            }
+            if let previous = try migrationReceipt(plan.snapshotID) {
+                guard previous.reportDigest == digest else { throw SourceDomainError(.storageConflict, "迁移身份冲突。") }
+                return previous
+            }
+            guard try scalar("SELECT count(*) FROM migration_input.records WHERE namespace NOT IN ('installation','accounts','book','catalog','chapter','anchor')") == 0,
+                  try scalar("SELECT count(*) FROM migration_input.records WHERE namespace='installation'") == Int64(plan.sources.count),
+                  try scalar("SELECT count(*) FROM migration_input.records WHERE namespace='book'") == Int64(plan.books.count) else {
+                throw SourceDomainError(.invalidData, "迁移草稿包含不匹配的内容。")
+            }
+            guard try scalar("SELECT count(*) FROM migration_input.records AS s JOIN main.records AS d ON d.namespace=s.namespace AND d.scope=s.scope AND d.key=s.key") == 0,
+                  try scalar("SELECT count(*) FROM migration_input.source_state AS s JOIN main.source_state AS d ON d.scope=s.scope AND d.key=s.key") == 0 else {
+                throw SourceDomainError(.storageConflict, "部分迁移身份已存在，未覆盖已有内容。")
+            }
+            let chapterBytes = try scalar("SELECT coalesce(sum(length(payload)),0) FROM migration_input.records WHERE namespace='chapter'")
+            let usage = try chapterStorageUsage()
+            guard chapterBytes <= Int64(usage.limits.offlineBytes - usage.offlineBytes) else {
+                throw SourceDomainError(.resourceLimit, "现有离线空间不足，请调整容量后重新导入。")
+            }
+            try checkpoint("beforeCopy")
+            try Self.execute(handle, "INSERT INTO main.records(namespace,scope,key,payload) SELECT namespace,scope,key,payload FROM migration_input.records")
+            try Self.execute(handle, "INSERT INTO main.source_state(scope,key,payload,revision) SELECT scope,key,payload,revision FROM migration_input.source_state")
+            try checkpoint("afterCopy")
+            for source in plan.sources { try put("import-source", scope: "", key: source.id.uuidString, value: source) }
+            for book in plan.books { try put("import-book", scope: scopeKey(book.key.scope), key: book.key.bookID, value: book) }
+            for note in plan.annotations {
+                try put("import-bookmark", scope: scopeKey(note.anchor.chapter.book.scope), key: note.id, value: note)
+            }
+            let receipt = MigrationReceipt(snapshotID: plan.snapshotID, reportDigest: digest, importedAt: Date(), installationIDs: plan.sources.map(\.id))
+            try put("migration-receipt", scope: "", key: plan.snapshotID.uuidString, value: receipt)
+            try checkpoint("beforeCommit")
+            guard try SourceCoding.fileDigest(source) == plan.archiveDigest else { throw SourceDomainError(.stale, "复制期间导入草稿已改变。") }
+            return receipt
         }
     }
 

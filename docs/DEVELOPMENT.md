@@ -7,6 +7,7 @@
 - App 最低 iOS 26.0（`glassEffect` 一类 Liquid Glass API 属于 iOS 26 SDK，不设回落分支）；核心包也可在 macOS 14+ 测试。
 - Swift Package Manager 依赖由 `Package.resolved` 锁定，初次解析需要网络。
 - 运行脚本需 Python 3 和 `rg`（ripgrep）。
+- Android JDK/SDK/模拟器仅用于可选的旧源参考对照，不是自有协议、Swift/iOS 常规开发或 IPA 构建的依赖。
 
 可选的 macOS 调试环境可在仓库根目录打开 `Legado.xcodeproj`，选择 `Legado` Scheme。日常编译使用下方 GitHub Actions；真机运行需要自行配置签名，证书或描述文件不提交到仓库。
 
@@ -77,9 +78,12 @@ RSS 界面回归还验证正文的手动刷新确实重新请求网络。核心�
 | 工作流 | 触发方式 | 验证或产物 |
 | --- | --- | --- |
 | [JavaScript Engine CI](../.github/workflows/javascript-engine-ci.yml) | 匹配路径的 push、非草稿 PR 或手动触发 | 两个独立 job：SwiftPM 核心与页面模型测试，以及 Xcode 模拟器 App 构建 |
+| [Source Protocol Candidate](../.github/workflows/source-protocol-ci.yml) | 匹配路径的 push/PR 或手动触发 | Node 合同、生成产物、固定样本与合成旧库检查 |
+| [Source Runtime WebKit](../.github/workflows/source-runtime-ci.yml) | 仅手动 `workflow_dispatch` | 实际 iOS WebKit 与阅读器集成；布局子集不可替代完整运行时测试 |
 | [Build Unsigned IPA](../.github/workflows/build-ipa.yml) | 仅手动 `workflow_dispatch` | iOS 设备构建、未签名 IPA、可选 dSYM 与构建日志 |
+| [Legado Compatibility Reference](../.github/workflows/legado-compatibility-reference.yml) | 仅手动 `workflow_dispatch`，按需使用 | 指定 Android 版本与 Swift 的离线规则观察；采集成功不代表兼容通过 |
 
-自动工作流的路径过滤和 PR 事件以 YAML 为准。当前过滤包含 `App/`、核心代码和核心测试等路径；只修改 `Tests/LegadoAppModelsTests/` 或 `Tests/LegadoReaderTests/` 不会单独触发该工作流，必要时手动执行。UIKit 和 UI 测试仍需另外运行。
+各工作流的路径过滤和 PR 事件以 YAML 为准。JavaScript Engine CI 当前过滤包含 `App/`、核心代码和核心测试等路径；只修改 `Tests/LegadoAppModelsTests/` 或 `Tests/LegadoReaderTests/` 不会单独触发该工作流，必要时手动执行。UIKit 和 UI 测试仍需另外运行。
 
 手动构建时，在 Actions 选择 **Build Unsigned IPA → Run workflow**：
 
@@ -87,7 +91,7 @@ RSS 界面回归还验证正文的手动刷新确实重新请求网络。核心�
 2. 选择 `Release` 或 `Debug`，runner 使用 `macos-26`。
 3. 完成后下载 `Legado-Unsigned-IPA-<version>-<short_sha>` artifact。IPA 文件名包含版本、构建号和源码短 SHA，安装前自行签名。
 
-使用 GitHub CLI 时始终显式传入目标仓库，例如 `--repo bemarkt/legado-ios`，避免 fork 的默认仓库解析指向 upstream。对已推送的同一提交，运行协议 CI、JavaScript Engine CI 与 IPA 工作流，并记录 run ID/源码 SHA；IPA 的 `ref` 输入使用完整 SHA。
+使用 GitHub CLI 时始终显式传入目标仓库，例如 `--repo bemarkt/legado-ios`，避免 fork 的默认仓库解析指向 upstream。按变更范围选择验证，在集成节点记录各运行的 run ID/实际源码 SHA；需要设备验证或交付时再构建通过对应检查的提交，IPA 的 `ref` 输入使用完整 SHA。后续仅测试或文档提交不能被写成已有 IPA 的产品构建来源。
 
 工作流定义来自触发分支，`ref` 决定 checkout 的源码；调整 CI 后应使用包含新定义的分支发起新运行。重新运行旧 run 不会采用后来修改的工作流定义。
 
@@ -108,6 +112,12 @@ python scripts/verify-source-ipa.py path/to/Legado-unsigned.ipa 完整提交SHA 
 最低部署版本为 iOS 26.0。项目已放弃 iOS 15–25 的兼容分支：`glassEffect` 这类 API 直接在编译期解析，部署目标低于 26 会报「找不到符号」，`#available` 挡不住。因此仓库里既有的 `#available(iOS 16.0/*)`、`#available(iOS 17.0/*)` 守卫现在是恒真分支，Swift 会给出 unnecessary-availability 警告——这属于已知待清理项，清理时连同其后的旧系统回落分支一起删，作为独立提交而非混在界面改动里。`App/Compatibility.swift` 仍保留导航、分享、照片选择与弹窗的兼容实现，供 `-uiLegacyCompatibility` 调试分支使用，对应回归位于 `Tests/LegadoReaderUITests/`。这些测试不能替代 iOS 26 真机或模拟器实测。
 
 搜索调度与缓存回归见 `Tests/LegadoCoreTests/SearchPerformanceTests.swift`，包括复杂书源限流和普通书源的及时执行；这些测试验证行为，不提供真实网络速度排名。
+
+### 旧 Legado 书源的证据
+
+固定样本与 iOS 完整阅读链路是限定范围兼容功能的验收依据。参考来源、支持状态和证据级别见 [独立兼容基准](../protocols/legado-compatibility/README.md)，G4 条件见 [实施流程](SOURCE_PROTOCOL_IMPLEMENTATION_PLAN.md#83-功能验收与-android-参考对照)。
+
+Android 参考工作流用于具体语义歧义、回归或版本核对，不是 WebKit/IPA 作业的前置依赖。已取得且经审查的参考结果应持久保存；SDK/Gradle 失败按环境问题记录。持久预期数据与无 Android 的自动回归接线仍属后续实现；不要把现有 discovery 工作流成功当作严格等价验证通过。
 
 ## 演示与公开截图
 
@@ -188,6 +198,19 @@ P1 的原生验收由 `.github/workflows/source-runtime-ci.yml` 执行：选择 
 `Source Protocol Candidate` 和 `JavaScript Engine CI` 继续用于提交后的合同、Swift 核心与 App 编译回归。`Source Runtime WebKit` 改为仅 `workflow_dispatch`：桥接、生命周期或完整操作链收敛到可验收节点时手动运行。`Build Unsigned IPA` 原本就是手动构建，通常在该节点确认后统一生成。中间实现提交不重复启动慢的 WebKit/IPA 作业。
 
 P2 的领域核心、独立原生源数据库与适配器可以在 G1 设备测量开放期间按实验范围开发；这不关闭 G1，也不替换现有 Legado/TXT/EPUB 数据或默认阅读路径。最终验收仍需对应原生测试、WebKit 执行和设备记录。
+
+### 按变更范围选择验证
+
+| 变更 | 需要的验证 |
+| --- | --- |
+| 仅工作文档/记录 | 链接与章节锚点、格式、状态/证据一致性、git diff --check；不为文档启动 SDK 构建 |
+| 协议合同、parser、builder 或内嵌 JS | Node check 与生成产物核对；影响 App 执行语义时补实际 WebKit |
+| Swift 领域、旧规则、网络或持久化 | 对应核心/模型回归与 App 编译；跨桥、账号或完整链路变化在集成节点补 WebKit |
+| 仅界面布局 | 对应 UI/截图与必要设备交互；reader-layout 仅用于完整运行时已通过后的布局核对 |
+| 需要设备补证或交付 | 为已通过相关检查的明确提交构建 IPA，核验包体并执行对应设备剧本 |
+| 具体旧源语义争议 | 先检查固定样本与参考源码，确需新增证据时手动运行 Android 对照 |
+
+通过后只有新改动、失败或未决风险才扩大/重复验证。实现状态、自动化证据与设备验收分别登记；当前优先级只在 [实施流程](SOURCE_PROTOCOL_IMPLEMENTATION_PLAN.md) 维护，阶段报告按提交保留结果和限制。
 
 ### 原生书源阅读预览
 

@@ -51,5 +51,5 @@ Node 的输出比较证明这些样本的行为；实际 DOM/网络仍由既有 
 
 1. WebKit 位置与 Node/构建产物结果已核实；诊断详情在普通/辅助字号、键盘和历史版本缺失时仍需设备复核。本次证据已下载到 build/github-actions/c3af1d0/webkit；自动截图不包含新增诊断详情页，不能据此宣称其视觉验收通过。
 2. 补真实下载失败/更新冲突交互及设备恢复，确认作者在两台设备间单文件分享和编辑更新。
-3. 继续 P4 独立适配，固定参考与差分矩阵见 [Legado 兼容基准](../../protocols/legado-compatibility/README.md)。版本已选择不等于 Android 对照已跑。
+3. P4 独立适配可继续推进，以固定预期与 iOS 完整链路验收限定支持范围，Android 对照按需补充；见 [Legado 兼容基准](../../protocols/legado-compatibility/README.md)。选定参考不等于已实测，缺 Android 环境不单独阻塞功能实施。当前优先级统一见 [实施流程](../SOURCE_PROTOCOL_IMPLEMENTATION_PLAN.md)。
 4. P5 副本迁移、G1/P6 真机资源与发布门槛继续保持开放。

@@ -1,6 +1,6 @@
-# 自有书源协议 v1：P0 候选合同
+# 自有书源协议 v1：候选合同
 
-日期：2026-11-08。状态：用于原型验证；尚未成为 App 的已发布 API。
+初版：2026-11-08；状态核对：2026-11-09。用于实验实现与一致性验证，尚未冻结为 App 的已发布 API；当前工作与验收范围见 [实施流程](../../docs/SOURCE_PROTOCOL_IMPLEMENTATION_PLAN.md)。
 
 本目录将[协议草案](../../docs/SOURCE_PROTOCOL_V1_DRAFT.md)细化为可运行的检查与共享语料。数据结构以 `schema.json` 为准；以下文字约束补充 JSON Schema 无法表达的语义。两者冲突时是规范缺陷，必须修改并增加样本，不能任意选择一端。
 
@@ -102,4 +102,4 @@ HTML：使用 DOM 解析片段，不执行其中代码。初版候选保留 p/di
 
 候选基础：Promise、URL/URLSearchParams、DOMParser 与基础 CSS 选择器、TextEncoder/TextDecoder、AbortSignal、Uint8Array、JSON、有限计时器。编码列表、计时器的结束清理和受控页面的 secure context 要在 iOS 26 验证；WebCrypto、XPath、真实浏览器导航、媒体、认证、explore 目前没有已开放扩展。
 
-静态允许 JS 语法并不授权动态代码、worker、脚本标签、全局网络或跨源 UI。运行时必须验证这些入口的策略。P1 已实现实验性的受控执行页和无账号原生 HTTP；不承诺完整沙箱隔离。实验版已接入安装实例隔离的 SQLite storage、有限配置、HTML 文档转换、文件/粘贴/HTTPS 安装、源码编辑导出与历史恢复和原生阅读预览。实验室单次执行没有安装作用域，storage 仍返回 UNSUPPORTED。原生账号、Cookie/令牌与单网站临时网页登录已接入实验入口，集成与设备状态见 [P2 报告](../../docs/reports/SOURCE_PROTOCOL_P2_REPORT.md)；作者可编程认证扩展、完整更新故障验收和旧库迁移尚未实现。当前放行的编码和资源边界见 [P1 报告](../../docs/reports/SOURCE_PROTOCOL_P1_REPORT.md)，D01–D10 尚未最终关闭。
+静态允许 JS 语法并不授权动态代码、worker、脚本标签、全局网络或跨源 UI。运行时必须验证这些入口的策略。P1 已实现实验性的受控执行页和无账号原生 HTTP；不承诺完整沙箱隔离。实验版已接入安装实例隔离的 SQLite storage、有限配置、HTML 文档转换、文件/粘贴/HTTPS 安装、源码编辑导出与历史恢复和原生阅读预览。实验室单次执行没有安装作用域，storage 仍返回 UNSUPPORTED。原生账号、Cookie/令牌与单网站临时网页登录已接入实验入口，集成与设备状态见 [P2 报告](../../docs/reports/SOURCE_PROTOCOL_P2_REPORT.md)；作者可编程认证扩展和旧库迁移仍待实现。P3 已通过构建源 WebKit、源码定位与真实进程中断恢复，见 [P3 报告](../../docs/reports/SOURCE_PROTOCOL_P3_REPORT.md)；设备更新交互和完整作者分享仍待验收。当前放行的编码和资源边界见 [P1 报告](../../docs/reports/SOURCE_PROTOCOL_P1_REPORT.md)，D01–D10 尚未最终关闭。

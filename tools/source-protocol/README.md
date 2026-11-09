@@ -33,4 +33,4 @@ python scripts/source-protocol-baseline.py
 
 可用 `--fixture-output` 指定一个不存在的 SQLite 文件路径，工具拒绝覆盖；`--report` 输出本次环境和源文件摘要。它执行仓库内的静态 SQL 块并构造合成数据，不运行 Swift，也不读取用户数据库。
 
-合同语义见 [protocols/source-v1](../../protocols/source-v1/README.md)，进度见 [P1 报告](../../docs/reports/SOURCE_PROTOCOL_P1_REPORT.md)。
+合同语义见 [protocols/source-v1](../../protocols/source-v1/README.md)，当前任务与验收见 [实施流程](../../docs/SOURCE_PROTOCOL_IMPLEMENTATION_PLAN.md)，构建/定位与实际 WebKit 证据见 [P3 报告](../../docs/reports/SOURCE_PROTOCOL_P3_REPORT.md)。

@@ -1,17 +1,17 @@
 # 书源协议决策登记
 
-日期：2026-11-08。负责边界按工作包记，暂不虚构团队成员或截止日期。
+初版：2026-11-08；更新：2026-11-09。负责边界按工作包记，暂不虚构团队成员或截止日期。当前任务顺序统一见 [实施流程](../SOURCE_PROTOCOL_IMPLEMENTATION_PLAN.md)，本表维护决定和所需证据，不重复维护执行队列。
 
 | 编号 | 当前候选/决定 | 已有证据 | 尚缺证据与关闭阶段 |
 | --- | --- | --- | --- |
-| D01 | Acorn 8.19.0 + ECMAScript 2022 AST，静态 JSON 字面量；Node worker 设 deadline/内存上限 | 共享正反例、Node parser 测试、锁文件 | App 采用共享离线 bundle；25 项同语料实际 WebKit 测试已通过（包含于 P1 套件），资源限制与真机证据仍待补；P1 未关闭 |
+| D01 | Acorn 8.19.0 + ECMAScript 2022 AST，静态 JSON 字面量；Node worker 设 deadline/内存上限 | Node 测试、锁文件与 App 共享离线 bundle；25 项共同语料由 P1 WebKit 套件覆盖，见 [P1 报告](SOURCE_PROTOCOL_P1_REPORT.md) | 资源限制与真机证据仍待补；P1 未关闭 |
 | D02 | 受控执行页与标准 ESM；原生桥与网站会话独立 | 候选 profile、入口语法和样本；一次性 ESM 执行页、18 项实际 WebKit 测试；用户报告真机离线和本地联网样本正常 | iOS 26 真机 origin/CSP/ESM/API/桥接实测；P1 未关闭 |
 | D03 | 业务取消、网络取消、宿主写入截止、JS 停算、资源回收分别验收 | 四个故障源；Node fixture 取消与原生 WebKit 无穷等待/取消/后续操作恢复测试 | 真机死循环影响、会话淘汰和总资源恢复；P1 未关闭 |
-| D04 | 原生 HTTP Fetch-like，单次消费、显式编码、origin 检查、不默认重试 | 合同文字、签名、固定 HTTP 响应；URLSession 桥和模拟器测试；403/429/重试间隔/传输超时已补回归 | 真实账号、更多编码与真机重定向/大小/取消一致性；P1/P2 未关闭 |
-| D05 | 安装/账号/源快照独立，ref ID 不依赖 URL，宿主包装游标 | Schema、独立 Swift 领域、SQLite scope/CAS、分页快照、缓存失配和旧结果拒绝测试 | 设备完整阅读验收、账号 UI 和旧源升级映射；P2 未关闭 |
+| D04 | 原生 HTTP Fetch-like，单次消费、显式编码、origin 检查、不默认重试 | 合同、固定响应、URLSession 桥及 403/429/超时回归；真实 URLSession 与模拟器账号/认证见 [P2 报告](SOURCE_PROTOCOL_P2_REPORT.md) | 更多编码及真机重定向/大小/取消一致性仍待补；P1/P2 未关闭 |
+| D05 | 安装/账号/源快照独立，ref ID 不依赖 URL，宿主包装游标 | Schema、Swift 领域、SQLite scope/CAS、分页快照与旧结果拒绝；账号 UI、Keychain/网页登录与隔离见 [P2 报告](SOURCE_PROTOCOL_P2_REPORT.md) | 完整设备阅读验收和旧源升级映射仍待补；P2 未关闭 |
 | D06 | text 规则已给共享样本；HTML 转 block/mark，EPUB 独立 | text/HTML 共享样本已在 Swift 执行，有限 block/mark 与 UTF-16 引文锚点已实现 | 更多复杂 HTML、排版定位与设备回归；P2 未关闭 |
-| D07 | 可读单文件，原子活动快照、本地修改保留、回滚不等于状态回滚 | 候选合同、文件/HTTPS 安装、源码编辑导出、SQLite 活动记录/8 个历史版本与 CAS 测试 | 实际 WebKit 更新链、进程中断故障与作者体验验收；P3 未关闭 |
-| D08 | Android Legado 独立兼容 profile；基准须锁定后才能宣称 | 旧实现测试入口盘点 | 尚未选择/运行 Android 对照版本，当前无 adb；P4 未关闭 |
+| D07 | 可读单文件，原子活动快照、本地修改保留、回滚不等于状态回滚 | 文件/HTTPS 安装、源码/历史/CAS；P3 构建源 WebKit、运行位置/可选映射、真实进程 before/during/after 恢复通过，见 [P3 报告](SOURCE_PROTOCOL_P3_REPORT.md) | 设备更新冲突/失败交互、诊断详情与跨设备单文件分享仍缺证据；G3 未关闭 |
+| D08 | 独立 Legado profile；功能验收与指定 Android 版本对照分别记录，Android SDK/模拟器按需使用 | 已固定 LegadoTeam/legado 3.26101819 / a7d37f1707a70a459ad708f4fe79341d1e42d716、初始 28 项语料与两端探针，见 [兼容基准](../../protocols/legado-compatibility/README.md) | 独立 provider、经审查的持久预期、iOS 完整链路与兼容矩阵待验收；两端已采集 28 项结果，但执行检查失败、差分验收仍待完成；缺环境不单独阻止 G4 功能验收 |
 | D09 | 21 张业务表+外部状态逐项保留；先副本演练再切换 | 合成 v1–v7 SQL/seed、数据清单 | Swift 解码、真实/大/损坏库、新库迁移与恢复；P5 未关闭 |
 | D10 | profile 数值是原型输入保护线，发布预算从目标设备探索数据产生 | 固定候选上限、报告模板 | 首批结果/总内存/能耗/故障恢复测量；P1 初定，P6 复核 |
 
@@ -19,8 +19,14 @@
 
 候选改变时同时更新协议文字、Schema/profile、类型、例子与对应测试。只修改实现不更新合同，或只改通过线不记录依据，均不能关闭决策。运行时选择不得把 Node 成功当成 WebKit 证据。
 
-D01–D10 均未标记最终关闭。当前交付解决的是候选细化和可重复的输入/诊断，不是设备层最终验证。
+D01–D10 均未标记最终关闭。当前已有 P2/P3 实验实现与自动化证据，未决项按表中范围补证；未最终关闭不代表整项功能尚未实现，也不能把设备缺证据记为已知行为失败。
 
 P1 当前交付及 CI 证据单独记录于 [P1 报告](SOURCE_PROTOCOL_P1_REPORT.md)。资源上限不因原型可运行而自动成为发布承诺。
 
-P2 及提前实现的 P3 范围、最新证据与剩余工作见 [P2 报告](SOURCE_PROTOCOL_P2_REPORT.md)。
+P2 阅读/账号/封面集成见 [P2 报告](SOURCE_PROTOCOL_P2_REPORT.md)，P3 调试与更新恢复见 [P3 报告](SOURCE_PROTOCOL_P3_REPORT.md)。
+
+## 2026-11-09：D08 验证策略调整
+
+原因：当前产品面向 iOS，自有协议不以 Android 行为定义；为少量离线规则维护整套 Android 构建已经产生环境修复成本。保留参考实现与已有探针，采用可追溯预期、Swift 回归和 iOS 完整链路作为限定范围功能验收，具体歧义再作 Android 对照。
+
+影响：调整 P0 环境依赖、P4/G4、测试矩阵与工作顺序；不降低真实阅读、账号、取消和恢复的证据要求，不把未运行的差分记为通过。持久预期与无 Android 的自动回归接线仍是实现任务。重新评估条件为出现两端具体回归、参考版本语义变动，或产品需要承诺指定 Android 行为一致。

@@ -93,4 +93,4 @@ npm run locate -- ../../build/built-offline.source.js 31 22 ../../build/built-of
 2. 实际 WebKit 操作、storage、配置和阅读：GitHub 的手动 Source Runtime WebKit 与 App 实验入口。
 3. 真机资源、同步死循环恢复、键盘、VoiceOver 和 iPad：见 [设备验证步骤](SOURCE_RUNTIME_DEVICE_VALIDATION.md)。
 
-目前没有源码单步调试器、完整运行时行号映射、作者自定义认证流程和发布级资源预算。错误带字段/行列时先定位对应声明，修复后重新静态检查，再在固定样本或 App 中重跑相关操作。当前范围和待办见 [P2 报告](reports/SOURCE_PROTOCOL_P2_REPORT.md)。
+已支持运行错误行列、按源码摘要查看当前/历史片段，以及作者侧可选构建映射；没有源码单步调试器，不保证所有 WebKit 异常都能给出位置。作者自定义认证流程和发布级资源预算仍未开放。修复后重新静态检查，再在固定样本或 App 中重跑相关操作；定位与构建证据见 [P3 报告](reports/SOURCE_PROTOCOL_P3_REPORT.md)，当前待办统一见 [实施流程](SOURCE_PROTOCOL_IMPLEMENTATION_PLAN.md)。

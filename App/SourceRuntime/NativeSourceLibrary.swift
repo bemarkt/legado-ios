@@ -112,8 +112,9 @@ final class NativeSourceLibrary: ObservableObject {
             activeAccounts = accounts; disabledSearchSources = disabled
             installations = installed.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
             self.shelf = shelf.sorted {
+                if $0.book.addedAt != $1.book.addedAt { return $0.book.addedAt > $1.book.addedAt }
                 if let a = migratedOrder[$0.book.key], let b = migratedOrder[$1.book.key], a != b { return a < b }
-                return $0.book.addedAt > $1.book.addedAt
+                return $0.id < $1.id
             }
         } catch { message = error.localizedDescription }
     }

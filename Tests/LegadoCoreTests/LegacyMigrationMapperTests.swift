@@ -150,6 +150,33 @@ struct LegacyMigrationMapperTests {
         #expect(try await archive.chapterStorageUsage().offlineCount == 0)
     }
 
+    @Test func emptyHistoricalAndLargeLibrariesMapWithoutDroppingRows() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("migration-sizes-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let old = root.appendingPathComponent("v1.sqlite3")
+        try sql("CREATE TABLE books(book_url TEXT PRIMARY KEY,payload BLOB); PRAGMA user_version=1;", at: old)
+        let oldSnapshot = root.appendingPathComponent("v1-snapshot")
+        _ = try LegacyMigrationSnapshot.capture(databaseURL: old, destination: oldSnapshot)
+        let historical = try await LegacyMigrationMapper.prepare(snapshotAt: oldSnapshot, destination: root.appendingPathComponent("v1-map"))
+        #expect(historical.books.isEmpty); #expect(historical.tables["books"]?.total == 0)
+        let emptyURL = root.appendingPathComponent("empty.sqlite3"), empty = try LegadoDatabase(url: emptyURL)
+        let emptySnapshot = root.appendingPathComponent("empty-snapshot")
+        _ = try LegacyMigrationSnapshot.capture(databaseURL: emptyURL, destination: emptySnapshot)
+        let emptyResult = try await LegacyMigrationMapper.prepare(snapshotAt: emptySnapshot, destination: root.appendingPathComponent("empty-map"))
+        #expect(emptyResult.tables.count == 21); #expect(emptyResult.tables.values.allSatisfy { $0.total == 0 })
+        #expect(try await empty.loadBooks().isEmpty)
+        let largeURL = root.appendingPathComponent("large.sqlite3"), large = try LegadoDatabase(url: largeURL)
+        let source = BookSource(bookSourceUrl: "https://large.invalid", bookSourceName: "Large fixture")
+        try await large.replaceBookSources([source])
+        try await large.replaceBooks((0..<2000).map { Book(bookUrl: "https://large.invalid/book/\($0)?edition=a", name: "Book \($0)", origin: source.id) })
+        let largeSnapshot = root.appendingPathComponent("large-snapshot")
+        _ = try LegacyMigrationSnapshot.capture(databaseURL: largeURL, destination: largeSnapshot)
+        let mapped = try await LegacyMigrationMapper.prepare(snapshotAt: largeSnapshot, destination: root.appendingPathComponent("large-map"))
+        #expect(mapped.books.count == 2000); #expect(Set(mapped.books.map(\.key)).count == 2000)
+        #expect(mapped.tables["books"]?.mapped == 2000); #expect(mapped.tables["books"]?.retained == 0)
+        #expect(try await large.loadBooks().count == 2000)
+    }
+
     @Test func corruptDraftAndAlteredSnapshotAreRejectedBeforePreview() async throws {
         let fixture = try await fixture(); try capture(fixture)
         let report = try await LegacyMigrationMapper.prepare(snapshotAt: fixture.snapshot, destination: fixture.destination)

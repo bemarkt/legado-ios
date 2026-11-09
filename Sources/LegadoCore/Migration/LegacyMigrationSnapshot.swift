@@ -51,10 +51,18 @@ public enum LegacyMigrationSnapshot {
         let requestData = try SourceCoding.encode(request), requestDigest = SourceCoding.digest(requestData)
         let marker = target.appendingPathComponent("request.json"), ready = target.appendingPathComponent("manifest.json")
         if manager.fileExists(atPath: target.path) {
-            guard manager.fileExists(atPath: marker.path), try SourceCoding.decode(Request.self, from: Data(contentsOf: marker)) == request else {
-                throw SourceDomainError(.storageConflict, "目标目录不属于此迁移任务，请选择新的副本目录。")
+            if manager.fileExists(atPath: marker.path) {
+                guard try SourceCoding.decode(Request.self, from: Data(contentsOf: marker)) == request else {
+                    throw SourceDomainError(.storageConflict, "目标目录不属于此迁移任务，请选择新的副本目录。")
+                }
+                if manager.fileExists(atPath: ready.path) { return try verify(at: target, expectedRequestDigest: requestDigest) }
+            } else {
+                // Creating the directory may have succeeded just before ENOSPC/SIGKILL prevented the marker write.
+                guard try manager.contentsOfDirectory(atPath: target.path).isEmpty else {
+                    throw SourceDomainError(.storageConflict, "目标目录包含无法确认的内容，请保留它并使用新的迁移目录。")
+                }
+                try requestData.write(to: marker, options: .atomic)
             }
-            if manager.fileExists(atPath: ready.path) { return try verify(at: target, expectedRequestDigest: requestDigest) }
         } else {
             try manager.createDirectory(at: target, withIntermediateDirectories: true)
             try requestData.write(to: marker, options: .atomic)
@@ -112,6 +120,10 @@ public enum LegacyMigrationSnapshot {
             missingExternalDirectories: missing, createdAt: Date(), missingExternalFiles: externalFiles.isEmpty ? nil : missingFiles)
         try verifyFiles(manifest, root: directory)
         try checkpoint(.beforePublish); try Task.checkCancellation()
+        guard missing.allSatisfy({ !manager.fileExists(atPath: externalDirectories[$0]!.path) }),
+              missingFiles.allSatisfy({ !manager.fileExists(atPath: externalFiles[$0]!.path) }) else {
+            throw SourceDomainError(.stale, "复制期间出现新的外部文件，请重新准备副本。")
+        }
         for (directory, before) in directoryChecks where try fileInventory(directory) != before {
             throw SourceDomainError(.stale, "发布前外部数据已改变，请停止写入后重试。")
         }

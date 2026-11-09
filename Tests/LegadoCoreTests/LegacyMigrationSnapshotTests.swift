@@ -42,7 +42,12 @@ struct LegacyMigrationSnapshotTests {
         #expect(!wal.isEmpty)
         let destination = root.appendingPathComponent("snapshot"), defaults = Data("private-defaults".utf8)
         let manifest = try LegacyMigrationSnapshot.capture(databaseURL: original,
-            externalDirectories: ["chapters": external, "missing": root.appendingPathComponent("absent")], defaults: defaults, destination: destination)
+            externalDirectories: ["chapters": external, "missing": root.appendingPathComponent("absent")], defaults: defaults, destination: destination) { point in
+                if point == .databaseCopied {
+                    // All names in this fixture are synthetic; expose platform-created SQLite sidecars on failure.
+                    print("Synthetic snapshot files after backup:", try FileManager.default.subpathsOfDirectory(atPath: destination.path))
+                }
+            }
         #expect(manifest.schemaVersion == 7); #expect(manifest.tables.count == 21)
         #expect(manifest.tables["books"] == 1); #expect(manifest.tables["book_sources"] == 1)
         #expect(manifest.missingExternalDirectories == ["missing"])

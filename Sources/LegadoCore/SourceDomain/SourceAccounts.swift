@@ -12,7 +12,7 @@ public struct SourceAccount: Codable, Sendable, Equatable, Identifiable {
         }
         self.init(id: UUID().uuidString, name: name, createdAt: Date())
     }
-    private init(id: String, name: String, createdAt: Date) { self.id = id; self.name = name; self.createdAt = createdAt }
+    init(id: String, name: String, createdAt: Date) { self.id = id; self.name = name; self.createdAt = createdAt }
 }
 
 /// Names and the selected local slot only. Passwords, tokens and cookies never enter SQLite.

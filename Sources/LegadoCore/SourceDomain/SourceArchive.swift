@@ -442,6 +442,25 @@ public actor SourceArchive {
         }
     }
 
+    /// Internal staging API. Migration uses a dedicated archive and never overwrites an existing account.
+    func prepareMigrationAccount(id: UUID, installationID: UUID, createdAt: Date) throws -> SourceScope {
+        try transaction {
+            var settings = try accountSettings(installationID: installationID)
+            guard settings.accounts == [.guest] else { throw SourceDomainError(.storageConflict, "迁移账号已存在。") }
+            let account = SourceAccount(id: id.uuidString, name: "旧版本导入", createdAt: createdAt)
+            settings.accounts.append(account); settings.selectedID = account.id
+            try put("accounts", scope: "", key: installationID.uuidString, value: settings)
+            return try SourceScope(installationID: installationID, accountID: account.id)
+        }
+    }
+    /// Seals an isolated migration draft before hashing. The next writable preview must use a new copy.
+    func sealMigrationDraft() throws {
+        guard sqlite3_wal_checkpoint_v2(handle, nil, SQLITE_CHECKPOINT_TRUNCATE, nil, nil) == SQLITE_OK else {
+            throw SourceDomainError(.unavailable, "无法完成迁移副本检查点。")
+        }
+        try Self.execute(handle, "PRAGMA journal_mode=DELETE; PRAGMA query_only=ON")
+    }
+
     public func books(scope: SourceScope) throws -> [SourceSavedBook] { try records("book", scope: scopeKey(scope), as: SourceSavedBook.self) }
     public func saveBook(_ value: SourceSavedBook, gate: SourceCommitGate? = nil) throws {
         guard value.key.bookID == value.details.ref.id else { throw SourceDomainError(.invalidInput, "Book identity mismatch") }

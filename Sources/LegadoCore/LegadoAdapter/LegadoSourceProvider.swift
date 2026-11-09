@@ -19,6 +19,55 @@ public struct LegadoSourceProvider: SourceProvider {
         self.source = source; self.descriptor = descriptor; self.environment = environment
     }
 
+    /// Builds durable references from already stored legacy entities without executing rules or networking.
+    /// Callers preserve unrepresentable records for review instead of substituting another book/chapter.
+    public static func migrationReferences(book: Book, chapters: [BookChapter], scope: SourceScope) throws
+        -> (book: SourceWire.SourceRef, chapters: [SourceWire.Chapter]) {
+        func variables(_ text: String?) throws -> [String: String] {
+            guard let text, !text.isEmpty else { return [:] }
+            guard text.utf8.count <= 16_384 else { throw SourceDomainError(.resourceLimit, "旧引用变量超过上限。") }
+            return try SourceCoding.decode([String: String].self, from: Data(text.utf8))
+        }
+        func request(_ value: String, base: String) throws -> String {
+            let result = LegadoURLBuilder.resolve(value, against: URL(string: base)!)
+            guard !value.isEmpty, result.utf8.count <= 8192, let url = URL(string: Operation.address(result)),
+                  ["https", "http"].contains(url.scheme ?? ""), url.host != nil, url.user == nil, url.password == nil else {
+                throw SourceDomainError(.invalidData, "旧引用没有可确定的 HTTP 地址。")
+            }
+            return result
+        }
+        guard let base = URL(string: Operation.address(book.bookUrl)), ["https", "http"].contains(base.scheme ?? ""),
+              base.host != nil, !book.name.isEmpty else { throw SourceDomainError(.invalidData, "旧书籍引用无效。") }
+        let bookRequest = try request(book.bookUrl, base: base.absoluteString)
+        let toc = try request(book.tocUrl.isEmpty ? bookRequest : book.tocUrl, base: base.absoluteString)
+        let bookRef = Reference(scope: scope, kind: "book", request: bookRequest, bookRequest: bookRequest,
+                                toc: toc, title: book.name, author: book.author, variables: try variables(book.variable))
+        let ordered = chapters.sorted { $0.index < $1.index }
+        guard ordered.allSatisfy({ $0.bookUrl == book.bookUrl && $0.index >= 0 }),
+              Set(ordered.map(\.index)).count == ordered.count else {
+            throw SourceDomainError(.invalidData, "旧目录索引重复或所属书籍不一致。")
+        }
+        var references: [Reference] = [], volumes: [SourceWire.Volume?] = [], volume: SourceWire.Volume?
+        for chapter in ordered {
+            if chapter.isVolume {
+                volume = .init(id: "legado.volume." + SourceCoding.digest(Data((bookRequest + chapter.title).utf8)), title: chapter.title)
+                continue
+            }
+            let chapterBase = URL(string: chapter.baseUrl).flatMap { $0.host == nil ? nil : $0 }?.absoluteString ?? Operation.address(toc)
+            let address = try request(chapter.url, base: chapterBase)
+            references.append(Reference(scope: scope, kind: "chapter", request: address, bookRequest: bookRequest,
+                title: chapter.title, variables: try variables(chapter.variable), index: chapter.index))
+            volumes.append(volume)
+        }
+        guard references.count <= 100_000, Set(references.map(\.id)).count == references.count else {
+            throw SourceDomainError(.invalidData, "旧目录包含重复章节地址或超过上限。")
+        }
+        for index in references.indices where index + 1 < references.count { references[index].nextChapter = references[index + 1].request }
+        return (try bookRef.wire(), try references.enumerated().map { index, ref in
+            .init(ref: try ref.wire(), title: ref.title, volume: volumes[index])
+        })
+    }
+
     public func search(_ input: SourceWire.SearchInput) async throws -> SourceWire.SearchPage {
         try await run(.search, priority: .search) { operation in var operation = operation; return try await operation.search(input) }
     }

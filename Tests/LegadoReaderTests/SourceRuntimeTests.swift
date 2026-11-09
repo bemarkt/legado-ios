@@ -1001,20 +1001,27 @@ extension SourceRuntimeTests {
         try await browser.prepare(cookies: [])
         let view = try XCTUnwrap(browser.webView)
         let controller = UIViewController()
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 650))
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previous = scene.windows.first(where: \.isKeyWindow)
+        let window = UIWindow(windowScene: scene)
         window.rootViewController = controller; window.makeKeyAndVisible()
+        window.layoutIfNeeded(); controller.view.layoutIfNeeded()
         view.frame = controller.view.bounds; view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         controller.view.addSubview(view)
-        defer { window.isHidden = true }
+        defer { window.isHidden = true; previous?.makeKeyAndVisible() }
         try await waitForLogin(browser)
         let rendered = try await script("return document.getElementById('login-ready')?.textContent ?? 'blank';", in: view)
         XCTAssertEqual(rendered, "Website login", "The page is blank without its cross-origin script")
+        try await Task.sleep(for: .milliseconds(300))
+        view.layoutIfNeeded()
         let image: UIImage = try await withCheckedThrowingContinuation { continuation in
             view.takeSnapshot(with: nil) { image, error in
                 if let image { continuation.resume(returning: image) }
                 else { continuation.resume(throwing: error ?? SourceDomainError(.unavailable, "Login snapshot missing")) }
             }
         }
+        let pixels = try XCTUnwrap(image.cgImage?.dataProvider?.data) as Data
+        XCTAssertGreaterThan(Set(pixels).count, 8, "A blank snapshot is not evidence of a rendered login page")
         let attachment = XCTAttachment(image: image); attachment.name = "website-login-cross-origin-rendered"; attachment.lifetime = .keepAlways; add(attachment)
         _ = try await script("document.getElementById('login').click(); for(let i=0;i<100;i++){if(document.body.dataset.signedIn==='true')return 'signed-in';await new Promise(r=>setTimeout(r,20));}throw Error('Login timed out');", in: view)
         try await model.saveLoginCookies(browser.cookies(), origins: context.session.allowedOrigins, context: context)
@@ -1252,9 +1259,17 @@ extension SourceRuntimeTests {
         let requests = try XCTUnwrap(object(String(decoding: diagnosticData, as: UTF8.self))["requests"] as? [[String: Any]])
         let path = try XCTUnwrap(URLComponents(string: cover.url)).percentEncodedPath + "?" + (URLComponents(string: cover.url)?.percentEncodedQuery ?? "")
         XCTAssertEqual(requests.filter { ($0["path"] as? String) == path }.count, 1)
+        let authenticated = try await reopened.provider(installation, scope: scope)
         try await reopened.selectAccount("guest", installation: installation)
-        do { _ = try await reopened.cover(cover, installation: installation, scope: scope); XCTFail("Old account cover remained accessible") }
+        do { _ = try await reopened.cover(cover, installation: installation, scope: scope, expectedIdentity: authenticated.descriptor.identity); XCTFail("Old cover operation survived a website session change") }
         catch let error as SourceDomainError { XCTAssertEqual(error.code, .stale) }
+        do { _ = try await reopened.cover(cover, installation: installation, scope: scope); XCTFail("New website session reused an authenticated cover") }
+        catch let error as SourceDomainError { XCTAssertEqual(error.code, .invalidData) }
+        let (afterData, _) = try await URLSession.shared.data(from: URL(string: origin + "/diagnostics")!)
+        let after = try XCTUnwrap(object(String(decoding: afterData, as: UTF8.self))["requests"] as? [[String: Any]])
+        let matching = after.filter { ($0["path"] as? String) == path }
+        XCTAssertEqual(matching.count, 2)
+        XCTAssertEqual(matching.last?["hasCookie"] as? Bool, false)
     }
 
     func testSearchAuthenticationFailureStaysTypedAndDiagnosticExportDropsWebsiteMessage() async throws {

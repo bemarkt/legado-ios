@@ -43,7 +43,7 @@ private actor LegadoFlowFixture {
         if offline { throw URLError(.notConnectedToInternet) }
         if emptyResponse { return .init(data: Data("<html><body><script src='/verification.js'></script></body></html>".utf8), statusCode: 202, headers: ["Content-Type": "text/html"], finalURL: url) }
         if htmlExtraction && (url.path.hasPrefix("/toc/") || url.path.hasPrefix("/chapter/")) {
-            let html = url.path.hasPrefix("/toc/") ? "<ul><li class='chapter'><a href='/chapter/a'>First chapter</a></li></ul>" : "<article><p>Saved chapter text.</p></article>"
+            let html = url.path.hasPrefix("/toc/") ? "<h2>Volume one</h2><ul><li class='chapter'><a href='/chapter/a'>First chapter</a></li></ul>" : "<article><p>Saved chapter text.</p></article>"
             return .init(data: Data(html.utf8), statusCode: 200, headers: ["Content-Type": "text/html"], finalURL: url)
         }
         if url.path == "/slow" {
@@ -75,6 +75,25 @@ private actor LegadoFlowFixture {
 }
 
 struct LegadoSourceProviderTests {
+    @Test func htmlCatalogScriptCanReturnVolumesAndChapterObjectsWithBarePropertyRules() async throws {
+        let fixture = LegadoFlowFixture()
+        await fixture.useHTMLExtraction()
+        var source = self.source()
+        var toc = TocRule()
+        toc.chapterList = "@css:h2,.chapter@js:result.map(node => String(node).includes('<h2') ? {text:node.text(),volume:true} : {text:node.select('a').text(),href:node.select('a').attr('href')})"
+        toc.chapterName = "text"; toc.chapterUrl = "href"; toc.isVolume = "volume"; source.ruleToc = toc
+        var content = ContentRule(); content.content = "@css:article@text"; source.ruleContent = content
+        let provider = try self.provider(fixture, source: source)
+        let found = try await provider.search(.init(query: "fixture"))
+        let book = try await provider.book(.init(ref: found.items[0].ref))
+        let catalog = try await SourceCatalogLoader().load(provider: provider, book: book.ref)
+        #expect(catalog.chapters.count == 1)
+        #expect(catalog.chapters.first?.volume?.title == "Volume one")
+        #expect(catalog.chapters.first?.title == "First chapter")
+        let chapter = try #require(catalog.chapters.first)
+        let text = try await provider.content(.init(book: book.ref, chapter: chapter.ref))
+        #expect(try ChapterNormalizer.normalize(text).plainText == "Saved chapter text.")
+    }
     @Test func emptyWebsitePagesPreserveCatalogAndOfflineTextAndReportExtractionFacts() async throws {
         let fixture = LegadoFlowFixture()
         await fixture.useHTMLExtraction()

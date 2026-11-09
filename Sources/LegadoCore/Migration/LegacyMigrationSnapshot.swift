@@ -120,7 +120,8 @@ public enum LegacyMigrationSnapshot {
         !value.isEmpty && value.utf8.count <= 64 && value.utf8.allSatisfy { (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0) || $0 == 45 || $0 == 95 }
     }
     private static func contains(_ directory: URL, _ file: URL) -> Bool { file.path == directory.path || file.path.hasPrefix(directory.path + "/") }
-    private static func list(_ root: URL) throws -> [String: String] {
+    private static func list(_ directory: URL) throws -> [String: String] {
+        let root = directory.standardizedFileURL.resolvingSymlinksInPath()
         let keys: Set<URLResourceKey> = [.isRegularFileKey, .isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey, .contentModificationDateKey]
         guard try root.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true else { throw SourceDomainError(.invalidInput, "外部数据必须是目录。") }
         var enumerationError: Error?
@@ -134,7 +135,15 @@ public enum LegacyMigrationSnapshot {
             guard values.isSymbolicLink != true else { throw SourceDomainError(.invalidInput, "迁移外部目录包含符号链接，请明确选择实际数据目录。") }
             if values.isDirectory == true { continue }
             guard values.isRegularFile == true, result.count < 250_000 else { throw SourceDomainError(.resourceLimit, "迁移外部目录包含非普通文件或文件过多。") }
-            result[String(url.path.dropFirst(root.path.count + 1))] = "\(values.fileSize ?? -1):\(values.contentModificationDate?.timeIntervalSince1970 ?? -1)"
+            // Foundation may enumerate /var through /private/var on Apple platforms.
+            // Compare resolved path components before deriving a relative path.
+            let resolved = url.standardizedFileURL.resolvingSymlinksInPath()
+            let parent = root.pathComponents, child = resolved.pathComponents
+            guard child.count > parent.count, Array(child.prefix(parent.count)) == parent else {
+                throw SourceDomainError(.invalidData, "迁移文件路径超出源目录。")
+            }
+            let relative = child.dropFirst(parent.count).joined(separator: "/")
+            result[relative] = "\(values.fileSize ?? -1):\(values.contentModificationDate?.timeIntervalSince1970 ?? -1)"
         }
         if let enumerationError { throw enumerationError }
         return result

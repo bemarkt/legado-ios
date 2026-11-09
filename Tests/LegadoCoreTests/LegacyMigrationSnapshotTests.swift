@@ -116,6 +116,24 @@ struct LegacyMigrationSnapshotTests {
         #expect(try await database.loadBooks().count == 1)
     }
 
+    @Test func directoryAliasesAndUnicodeNamesKeepExactRelativePaths() async throws {
+        let root = try root(), (database, original) = try await fixture(root)
+        let external = root.appendingPathComponent("资料 目录")
+        let nested = external.appendingPathComponent("章节/第一章 📖.json")
+        try FileManager.default.createDirectory(at: nested.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let contents = Data("离线正文".utf8)
+        try contents.write(to: nested)
+        let alias = root.appendingPathComponent("alias")
+        try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: external)
+        let destination = root.appendingPathComponent("snapshot")
+        let manifest = try LegacyMigrationSnapshot.capture(databaseURL: original, externalDirectories: ["chapters": alias], destination: destination)
+        let relative = "external/chapters/章节/第一章 📖.json"
+        #expect(manifest.files.contains { $0.relativePath == relative })
+        #expect(try Data(contentsOf: destination.appendingPathComponent(manifest.attempt).appendingPathComponent(relative)) == contents)
+        #expect(try LegacyMigrationSnapshot.verify(at: destination) == manifest)
+        #expect(try await database.loadBooks().count == 1)
+    }
+
     @Test func emptyHistoricalAndLargeDatabasesHaveVerifiedCounts() async throws {
         let root = try root(), emptyURL = root.appendingPathComponent("empty.sqlite")
         let empty = try LegadoDatabase(url: emptyURL)
